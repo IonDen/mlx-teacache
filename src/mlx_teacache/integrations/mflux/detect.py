@@ -48,19 +48,25 @@ def identify_variant(flux: object) -> VariantId:
         _Flux1Type, _Flux2KleinType = _import_mflux_types()
 
     actual_type = type(flux).__name__
-    model_name = getattr(getattr(flux, "model_config", None), "model_name", None)
+    model_config = getattr(flux, "model_config", None)
+    model_name = getattr(model_config, "model_name", None)
+    # mflux 0.17 stores the HF repo path in `model_name` and the user-facing
+    # short names (e.g. "dev", "schnell") in `aliases`. The plain "dev" config
+    # shares its `model_name` with controlnet/upscaler variants, so `aliases`
+    # is the only correct discriminator.
+    aliases = getattr(model_config, "aliases", None) or []
 
     if isinstance(flux, _Flux1Type):
-        if model_name == "dev":
+        if "dev" in aliases:
             return "flux1-dev"
-        if model_name == "schnell":
+        if "schnell" in aliases:
             return "flux1-schnell"
         raise IncompatibleModelError(
             actual_type=actual_type, actual_model_name=model_name, supported=list(_SUPPORTED),
         )
 
     if isinstance(flux, _Flux2KleinType):
-        if model_name == "flux2-klein-4b":
+        if "flux2-klein-4b" in aliases:
             return "flux2-klein-4b"
         raise IncompatibleModelError(
             actual_type=actual_type, actual_model_name=model_name, supported=list(_SUPPORTED),

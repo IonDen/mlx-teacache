@@ -13,18 +13,22 @@ from mlx_teacache.integrations.mflux.detect import identify_variant
 
 
 class _FakeModelConfig:
-    def __init__(self, model_name: str) -> None:
-        self.model_name = model_name
+    def __init__(self, alias: str) -> None:
+        # Match mflux 0.17 shape: aliases holds short names; model_name holds
+        # an HF-style path. Embed the alias in model_name so error-message
+        # assertions can still find it.
+        self.model_name = f"fake/{alias}"
+        self.aliases = [alias]
 
 
 class _FakeFlux1:
-    def __init__(self, model_name: str) -> None:
-        self.model_config = _FakeModelConfig(model_name)
+    def __init__(self, alias: str) -> None:
+        self.model_config = _FakeModelConfig(alias)
 
 
 class _FakeFlux2Klein:
-    def __init__(self, model_name: str) -> None:
-        self.model_config = _FakeModelConfig(model_name)
+    def __init__(self, alias: str) -> None:
+        self.model_config = _FakeModelConfig(alias)
 
 
 @pytest.fixture(autouse=True)

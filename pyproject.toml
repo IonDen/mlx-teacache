@@ -1,0 +1,106 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mlx-teacache"
+dynamic = ["version"]
+description = "TeaCache step-skipping for FLUX diffusion on Apple Silicon, in pure MLX"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
+keywords = ["mlx", "flux", "diffusion", "apple-silicon", "teacache"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["mlx>=0.31", "numpy"]
+
+[project.optional-dependencies]
+mflux = ["mflux>=0.17,<0.18"]
+
+[project.urls]
+Homepage = "https://github.com/IonDen/mlx-teacache"
+Issues = "https://github.com/IonDen/mlx-teacache/issues"
+
+[dependency-groups]
+test-core = [
+    "pytest>=8",
+    "pytest-cov",
+    "hypothesis>=6",
+]
+test-mflux = [
+    { include-group = "test-core" },
+    "mflux>=0.17,<0.18",
+    "mlx-taef>=0.1.1",
+    "scikit-image",
+]
+lint = ["ruff>=0.5"]
+typecheck = ["mypy>=1.10"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/mlx_teacache/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "scripts/", "docs/", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md", "pyproject.toml"]
+exclude = [
+    ".hypothesis/",
+    "tests/reference/",          # nested per-variant subdirs and all .safetensors
+    "tests/reference_pngs/",     # nested PNGs from slow integration tests
+    "tests/converted/",
+    "notes/",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mlx_teacache"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "TID"]
+ignore = ["E501"]  # line-length handled by formatter
+
+[tool.mypy]
+strict = true
+files = ["src/mlx_teacache"]
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = ["mflux.*", "mlx.*", "mlx_taef.*", "skimage.*", "lpips.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+markers = [
+    "slow: integration tests that load real weights (nightly)",
+    "network: tests that download from HuggingFace",
+    "gpu: tests requiring Metal device",
+    "benchmark: performance regression tests",
+    "parity: tests requiring mflux + macOS-ARM64",
+    "mflux: tests requiring mflux installed (skipped on test-pure-core)",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["mlx_teacache"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:"]
+# fail_under is intentionally NOT set globally — the per-PR `coverage` CI job
+# (see ci.yml) enforces 100% by combining results across test-core + test-mflux.
+# Per-task TDD runs should NOT trigger a package-wide coverage gate.

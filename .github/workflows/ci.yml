@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install lint group
+        run: uv sync --no-install-project --group lint
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install typecheck group
+        run: uv sync --no-install-project --group typecheck
+      - run: uv run mypy src/mlx_teacache
+
+  test-pure-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install test-core (NO mflux extra)
+        run: uv sync --group test-core
+      - name: Run pure-core tests (no coverage gate — collected by `coverage` job)
+        run: uv run pytest -m "not parity and not slow and not benchmark and not network and not mflux" -v --cov=mlx_teacache --cov-branch --cov-report=xml:coverage-core.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-core
+          path: coverage-core.xml
+
+  test-mflux:
+    runs-on: macos-14
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        run: pip install uv
+      - name: Install test-mflux
+        run: uv sync --group test-mflux
+      - name: Run tests (no parity, no slow, no benchmark)
+        run: uv run pytest -m "not parity and not slow and not benchmark and not network" -v --cov=mlx_teacache --cov-branch --cov-report=xml:coverage-mflux-${{ matrix.python-version }}.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-mflux-${{ matrix.python-version }}
+          path: coverage-mflux-${{ matrix.python-version }}.xml
+
+  coverage:
+    needs: [test-pure-core, test-mflux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install coverage
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - name: Combine coverage XMLs and gate at 100%
+        # Each test-* job uploaded a coverage XML. Combine them and fail if
+        # the merged line+branch coverage is below 100%. This is the canonical
+        # quality gate; individual jobs only collect data.
+        run: |
+          python -c "
+          import xml.etree.ElementTree as ET, sys, glob
+          xmls = sorted(glob.glob('coverage-*.xml'))
+          if not xmls: sys.exit('no coverage XMLs found')
+          lines_covered = set(); lines_total = set()
+          for xml in xmls:
+              tree = ET.parse(xml); root = tree.getroot()
+              for cls in root.iter('class'):
+                  fname = cls.get('filename', '')
+                  for line in cls.iter('line'):
+                      key = (fname, int(line.get('number')))
+                      lines_total.add(key)
+                      if int(line.get('hits', '0')) > 0:
+                          lines_covered.add(key)
+          missed = lines_total - lines_covered
+          pct = 100 * len(lines_covered) / max(len(lines_total), 1)
+          print(f'Combined line coverage: {pct:.2f}% ({len(lines_covered)}/{len(lines_total)})')
+          if missed:
+              print('Missed lines:')
+              for fname, lineno in sorted(missed)[:30]:
+                  print(f'  {fname}:{lineno}')
+          sys.exit(0 if pct >= 100.0 else 1)
+          "
+
+  test-parity:
+    runs-on: macos-14
+    needs: test-mflux
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install test-mflux
+        run: uv sync --group test-mflux
+      - name: Run parity tests
+        run: uv run pytest -m parity -v

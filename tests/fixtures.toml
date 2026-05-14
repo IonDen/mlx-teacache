@@ -1,0 +1,50 @@
+# Tracks SHA-256 digests of committed reference fixtures.
+# Regenerate via tests/generate_references.py and update this file
+# in the same commit. tests/test_fixtures_integrity.py asserts these match.
+
+[fixtures]
+
+[fixtures."flux1-dev/a-red-apple-on-a-wooden-table__seed42__steps25.safetensors"]
+sha256 = "45471c340561358f35569427a56a78fbc9ef5449d5ce4d7ea761074b1ccfaea9"
+
+[fixtures."flux1-dev/mountain-landscape-at-sunset__seed42__steps25.safetensors"]
+sha256 = "2571d768bd4c26844a46d61b97ed6601bc47380e7f9ccaef0d08dd1b674ddad8"
+
+[fixtures."flux1-dev/portrait-of-a-woman__seed42__steps25.safetensors"]
+sha256 = "a852c27491b4040f009f814b003e5c87c3f4c6cda68a1c14b5127e5787b9ab84"
+
+[fixtures."flux1-dev/abstract-pattern-with-circles__seed42__steps25.safetensors"]
+sha256 = "9b04f7e25f34dc5ad028c4acdd017eef9f75666032c81729e4b2c76f57d72434"
+
+[fixtures."flux1-dev/text-saying-hello__seed42__steps25.safetensors"]
+sha256 = "e255876da0ad53235f4e57fc4ac64554a4f913e3bcb99d124be14875c7a79e07"
+
+[fixtures."flux1-schnell/a-red-apple-on-a-wooden-table__seed42__steps25.safetensors"]
+sha256 = "c8fdad921f5db7c8310ab00bb5fd84ddc606a55727c87d620119c7f8a35f6c0f"
+
+[fixtures."flux1-schnell/mountain-landscape-at-sunset__seed42__steps25.safetensors"]
+sha256 = "a7f0f51f3c90790fcf9e61a69c2187bfa4fe40815c93b63d2fc200e2d1b20296"
+
+[fixtures."flux1-schnell/portrait-of-a-woman__seed42__steps25.safetensors"]
+sha256 = "a6c574d91b0321edc505f2cc6c6f68c7dc3e846ead6d75ece86796d9f94224eb"
+
+[fixtures."flux1-schnell/abstract-pattern-with-circles__seed42__steps25.safetensors"]
+sha256 = "133072953b4224e92de5a07b31d9afcc556854c71e9ec5cfbeddd301e0528993"
+
+[fixtures."flux1-schnell/text-saying-hello__seed42__steps25.safetensors"]
+sha256 = "aa13f70ac7cd1b4a016dd4666d2c2279c5e1dfe30b81d96f09ca3778088933f6"
+
+[fixtures."flux2-klein-4b/a-red-apple-on-a-wooden-table__seed42__steps25.safetensors"]
+sha256 = "22e96a46e48a76aebc546be79ca27f9f27c02d5c46aa92538e174d41087a5c1a"
+
+[fixtures."flux2-klein-4b/mountain-landscape-at-sunset__seed42__steps25.safetensors"]
+sha256 = "9eb712773479ad445a246789f39c855babb69d235ed9e506a4202911e7d270d2"
+
+[fixtures."flux2-klein-4b/portrait-of-a-woman__seed42__steps25.safetensors"]
+sha256 = "6c4bf53605ec254cfebdaee4664c0a0d0e9b425deac2cc3d152a4cd3e260e34d"
+
+[fixtures."flux2-klein-4b/abstract-pattern-with-circles__seed42__steps25.safetensors"]
+sha256 = "43a9bcad04ebbeab7949c38b2b556ec936d643f43c312e9e1edb6136ea2017a9"
+
+[fixtures."flux2-klein-4b/text-saying-hello__seed42__steps25.safetensors"]
+sha256 = "a73b6dd83da7a9edd20cfe00113e889d64f01b5f05ee6bd5bd0f1f1bad82f168"

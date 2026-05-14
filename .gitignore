@@ -11,6 +11,5 @@ build/
 *.egg-info/
 .coverage
 htmlcov/
-tests/reference/*.safetensors
 tests/converted/*.safetensors
 src/mlx_teacache/_version.py

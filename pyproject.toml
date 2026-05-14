@@ -97,9 +97,11 @@ filterwarnings = [
     "error",
     # tokenizers 0.9.0 emits BPE.__init__ DeprecationWarning during CLIPTokenizer
     # construction; mflux catches it and re-raises as RuntimeError, breaking
-    # Flux1.from_name() under `filterwarnings = error`. The warning is from a
-    # third-party library and not actionable here.
+    # Flux1.from_name() under `filterwarnings = error`. The warning originates in
+    # the Rust tokenizers extension but surfaces in transformers.models.clip —
+    # both module patterns must be suppressed.
     "ignore::DeprecationWarning:tokenizers",
+    "ignore::DeprecationWarning:transformers",
 ]
 
 [tool.coverage.run]

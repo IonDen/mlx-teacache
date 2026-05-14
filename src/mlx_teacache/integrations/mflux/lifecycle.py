@@ -173,10 +173,13 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
 
 def _callback_present_by_identity(registry: Any, target: Any) -> bool:
     """Return True iff target is registered (by identity) on any of the standard
-    callback lists."""
+    callback lists. mflux 0.17's CallbackRegistry stores lists on `before_loop`
+    etc.; the suffixed names are methods. Check real names first, then the
+    suffixed names (for fake-registry test fixtures), then generic fallbacks."""
     if registry is None:
         return False
-    for attr in ("before_loop_callbacks", "in_loop_callbacks",
+    for attr in ("before_loop", "in_loop", "after_loop", "interrupt",
+                 "before_loop_callbacks", "in_loop_callbacks",
                  "after_loop_callbacks", "interrupt_callbacks",
                  "_callbacks", "callbacks"):
         lst = getattr(registry, attr, None)

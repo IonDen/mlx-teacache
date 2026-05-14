@@ -99,11 +99,14 @@ class TeaCacheHandle:
 
 def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
     """Walk every callback list on the registry and remove `target` by identity.
-    Returns True iff at least one removal succeeded. mflux's CallbackRegistry
-    stores callbacks in attributes like .before_loop_callbacks etc., or in a
-    single list — we try the common shapes."""
+    Returns True iff at least one removal succeeded. mflux 0.17 stores the
+    actual lists on `before_loop` / `in_loop` / `after_loop` / `interrupt`;
+    the suffixed names (`*_callbacks`) are methods returning those same lists.
+    We try the real list names first, then the suffixed names (for backward
+    compat with existing fake-registry test fixtures), then generic fallbacks."""
     removed_any = False
-    for attr in ("before_loop_callbacks", "in_loop_callbacks",
+    for attr in ("before_loop", "in_loop", "after_loop", "interrupt",
+                 "before_loop_callbacks", "in_loop_callbacks",
                  "after_loop_callbacks", "interrupt_callbacks",
                  "_callbacks", "callbacks"):
         lst = getattr(registry, attr, None)

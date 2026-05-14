@@ -46,7 +46,9 @@ def _flux1_extract_mod_input(block_0: Any, hidden_states_pre: mx.array, text_emb
     mflux JointTransformerBlock has .norm1: AdaLayerNormZero. Its __call__
     returns (norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp);
     norm_hidden_states is what we use as mod_in."""
-    return block_0.norm1(hidden_states_pre, emb=text_embeddings)[0]
+    # AdaLayerNormZero.__call__(hidden_states, text_embeddings) — positional,
+    # no `emb=` keyword (mflux 0.17).
+    return block_0.norm1(hidden_states_pre, text_embeddings)[0]
 
 
 def _flux1_run_body(

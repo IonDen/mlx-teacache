@@ -20,9 +20,13 @@ class TeaCacheState:
 
     def reset_for_new_generation(self, *, num_steps: int) -> None:
         """Clear all per-generation fields. Called by:
-        - FLUX.1 wrapper on every t == 0 transformer call (§5.2)
-        - FLUX.2 predict closure on the first call of a new generation (§5.5)
-        - api.restore_fn via discard path
+        - ``GenerationContextCallback.call_before_loop`` (in
+          ``integrations/mflux/lifecycle.py``) — the sole owner of per-generation
+          cache reset as of v0.2.0. Previously this was called from FLUX.1's
+          forward (`if t == 0:`) and FLUX.2's predict closure (`if not
+          context_consumed:`); both call sites were removed when lifecycle took
+          exclusive ownership so img2img generations (which start at `t > 0`)
+          reset correctly.
         """
         self.step_counter = 0
         self.previous_mod_input = None

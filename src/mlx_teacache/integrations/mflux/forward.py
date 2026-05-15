@@ -134,9 +134,8 @@ def flux1_forward_with_gate(
             raise InvalidStepWindowError(
                 skip_first=handle.skip_first_n_steps,
                 skip_last=handle.skip_last_n_steps,
-                num_steps=active_num_steps,
+                num_steps=active_num_steps,  # legacy alias; carries the active count
                 nominal_num_inference_steps=config.num_inference_steps,
-                active_num_steps=active_num_steps,
             )
         state.skip_window_validated = True
 
@@ -357,10 +356,11 @@ def flux2_forward_with_gate(
 ) -> Any:
     """Replacement for Flux2Transformer.__call__ with gating.
 
-    img2img is rejected pre-loop. CFG is handled in the predict closure (we
-    only reach this function for non-CFG steps). Skip-window validation is
-    handled in the predict closure too (this function is the 'first non-CFG
-    gated step' boundary — see §5.6)."""
+    img2img is supported as of v0.2.0; the active denoising window is set up
+    by lifecycle's call_before_loop and consumed via handle._gen_ctx. CFG is
+    handled in the predict closure (we only reach this function for non-CFG
+    steps). Skip-window validation is handled in the predict closure too
+    (this function is the 'first non-CFG gated step' boundary — see §5.6)."""
     state = handle._state.cache
     stats = handle._state.stats
 

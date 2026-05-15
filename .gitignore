@@ -12,4 +12,5 @@ build/
 .coverage
 htmlcov/
 tests/converted/*.safetensors
+tests/_artifacts/
 src/mlx_teacache/_version.py

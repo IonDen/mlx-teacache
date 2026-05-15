@@ -56,7 +56,7 @@ def _config(num_inference_steps: int, *, image_strength: float | None = None,
 # --- Fires / doesn't fire ---
 
 
-def test_fires_when_possible_skips_zero_at_schnell_default():
+def test_does_not_fire_at_schnell_default_eligible_is_two():
     """FLUX.1 schnell default: 4 steps, skip_first=1, skip_last=1
     → eligible=2 → possible_skips=1. Should NOT fire."""
     handle = _FakeHandle()

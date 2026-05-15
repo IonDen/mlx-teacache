@@ -32,6 +32,7 @@ from mlx_teacache.errors import (
     InvalidStepWindowError,
     MissingGenerationContextError,
     TeaCacheError,
+    TeaCacheNoBenefitWarning,
     TransformerShapeError,
 )
 from mlx_teacache.stats import (
@@ -51,6 +52,7 @@ __all__ = [
     "StatsFrozenError",
     "Provenance",
     "TeaCacheError",
+    "TeaCacheNoBenefitWarning",
     "IncompatibleModelError",
     "AlreadyPatchedError",
     "CalibrationError",

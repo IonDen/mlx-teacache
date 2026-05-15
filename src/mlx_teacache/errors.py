@@ -93,3 +93,15 @@ class InternalStateError(TeaCacheError):
     """Raised when an internal cache/state invariant is violated. Indicates
     a bug in mlx-teacache itself or a defensive guard tripping. Distinct
     from TransformerShapeError (which is about shape drift in real tensors)."""
+
+
+class TeaCacheNoBenefitWarning(UserWarning):
+    """Emitted once per TeaCacheHandle when the active step configuration
+    leaves no possible cache skips (i.e., `active_num_steps - skip_first -
+    skip_last <= 1`, so the polynomial gate cannot seed AND consume the
+    cache within this generation). Triggers on very short schedules and
+    aggressive skip windows.
+
+    Suppress via the standard `warnings` module:
+        warnings.filterwarnings("ignore", category=TeaCacheNoBenefitWarning)
+    """

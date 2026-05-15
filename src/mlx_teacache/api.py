@@ -121,7 +121,7 @@ def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
 def apply_teacache(
     flux: Any,
     *,
-    rel_l1_thresh: float = 0.25,
+    rel_l1_thresh: float = 0.20,
     coefficients: Sequence[float] | None = None,
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,

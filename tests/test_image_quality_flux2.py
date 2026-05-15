@@ -114,11 +114,11 @@ def flux2_klein() -> Any:
 
 
 def test_default_threshold_ssim_klein_pr_gate(flux2_klein: Any) -> None:
-    """PR-time gate: default rel_l1_thresh=0.25 wrapper must produce a
-    decoded image whose SSIM vs same-process vanilla is >= the gate."""
+    """PR-time gate: wrapper at the package-default rel_l1_thresh must
+    produce a decoded image whose SSIM vs same-process vanilla is >= the gate."""
     kw = _gen_kwargs_klein(PR_TIME_PROMPT)
     vanilla_latent = _capture(flux2_klein, **kw)
-    with apply_teacache(flux2_klein, rel_l1_thresh=0.25) as h:
+    with apply_teacache(flux2_klein) as h:  # uses package default rel_l1_thresh
         wrapper_latent = _capture(flux2_klein, **kw)
         skipped = h.stats.skipped_count
     # Note: at num_inference_steps=8 with default skip windows there may be
@@ -145,7 +145,7 @@ def test_default_threshold_ssim_klein_full(flux2_klein: Any, prompt: str) -> Non
     """Nightly image-quality gate: all 5 reference prompts."""
     kw = _gen_kwargs_klein(prompt)
     vanilla_latent = _capture(flux2_klein, **kw)
-    with apply_teacache(flux2_klein, rel_l1_thresh=0.25):
+    with apply_teacache(flux2_klein):  # uses package default rel_l1_thresh
         wrapper_latent = _capture(flux2_klein, **kw)
     vanilla_img = _decode_to_uint8(flux2_klein, vanilla_latent, height=kw["height"], width=kw["width"])
     wrapper_img = _decode_to_uint8(flux2_klein, wrapper_latent, height=kw["height"], width=kw["width"])

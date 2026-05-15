@@ -57,11 +57,16 @@ def gate_step(  # type: ignore[no-untyped-def]
 
     `state` is a mlx_teacache.cache.TeaCacheState (duck-typed here to keep the
     gate module pure / circular-import-free)."""
-    # Hard short-circuit: threshold <= 0 ⇒ always compute. Guards against
-    # negative polynomial outputs and arbitrary custom coefficients.
+    # Hard short-circuit: threshold <= 0 ⇒ always compute, never cache.
+    # At non-positive threshold no future step can ever be skipped, so the
+    # cache can never be consumed. Setting should_update_cache=False avoids
+    # building cached_residual = body_out - body_in, which would otherwise
+    # keep the body/tail intermediates alive past the tail and perturb
+    # Metal in-place buffer donation. Guards against negative polynomial
+    # outputs and arbitrary custom coefficients.
     if rel_l1_thresh <= 0.0:
         return GateDecision(
-            kind="computed", should_compute=True, should_update_cache=True,
+            kind="computed", should_compute=True, should_update_cache=False,
             rel_l1=None, predicted_distance=None,
             accumulated_distance=state.accumulated_distance,
         )

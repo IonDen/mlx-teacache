@@ -100,7 +100,16 @@ def flux1_forward_with_gate(
     with TeaCache gating inserted between body and tail.
 
     img2img has already been rejected by GenerationContextCallback before any
-    transformer call. We don't re-check config.image_path here."""
+    transformer call. We don't re-check config.image_path here.
+
+    `rel_l1_thresh <= 0` takes a fast-path branch that does NOT build the
+    gating tensors (`body_in_concat`, `mod_in`, `cached_residual`,
+    `previous_mod_input`). Building them keeps `body_out_concat` /
+    `body_in_concat` alive after the tail, blocks Metal in-place buffer
+    donation, and can perturb downstream kernel dispatch — producing bytes
+    that differ from vanilla mflux even though the math is identical. See
+    docs/superpowers/notes/2026-05-14-task-25-mlx-nondeterminism*.md.
+    """
     state = handle._state.cache
     stats = handle._state.stats
 
@@ -117,7 +126,8 @@ def flux1_forward_with_gate(
             )
         state.skip_window_validated = True
 
-    # 2. Prelude (mirrors mflux Transformer.__call__ lines 44-47).
+    # 2. Prelude (mirrors mflux Transformer.__call__ lines 44-47). Both paths
+    # below need these intermediates.
     body_in = inner.x_embedder(hidden_states)
     encoder_hidden_states = inner.context_embedder(prompt_embeds)
     text_embeddings = inner.compute_text_embeddings(
@@ -126,6 +136,27 @@ def flux1_forward_with_gate(
     image_rotary_embeddings = inner.compute_rotary_embeddings(
         prompt_embeds, inner.pos_embed, config, kwargs.get("kontext_image_ids"),
     )
+
+    # 2a. Threshold-zero fast path: every step is "computed", cache is never
+    # consumed. Skip mod_in extraction, body_in_concat, and the cached_residual
+    # subtraction to avoid keeping intermediates alive past the tail.
+    if handle.rel_l1_thresh <= 0.0:
+        body_out_concat = _flux1_run_body(
+            inner, body_in, encoder_hidden_states, text_embeddings,
+            image_rotary_embeddings, kwargs,
+        )
+        stats.record(StepDecision(
+            step_idx=t, timestep=float(t),
+            rel_l1=None, accumulated_distance=state.accumulated_distance,
+            decision="computed",
+        ))
+        out = body_out_concat[:, encoder_hidden_states.shape[1]:, ...]
+        out = inner.norm_out(out, text_embeddings)
+        out = inner.proj_out(out)
+        state.step_counter += 1
+        return out
+
+    # 2b. Slow path: TeaCache gating is live. Build the gating tensors.
     body_in_concat = mx.concatenate([encoder_hidden_states, body_in], axis=1)
 
     # 3. Extract mod_in for gating.

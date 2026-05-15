@@ -65,7 +65,11 @@ def test_threshold_zero_short_circuit_returns_computed_no_poly_eval():
                     step_idx=5, mod_in=mod_in)
     assert dec.kind == "computed"
     assert dec.should_compute is True
-    assert dec.should_update_cache is True
+    # At threshold<=0 the cache can never be consumed (no future step can
+    # skip), so the gate must NOT request a cache update — building the
+    # residual would keep body/tail intermediates alive past the tail and
+    # perturb Metal in-place buffer donation.
+    assert dec.should_update_cache is False
     assert dec.rel_l1 is None
     assert dec.predicted_distance is None
 

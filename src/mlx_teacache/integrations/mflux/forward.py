@@ -337,6 +337,34 @@ def flux2_forward_with_gate(
     temb_mod_params_img = inner.double_stream_modulation_img(temb)
     temb_mod_params_txt = inner.double_stream_modulation_txt(temb)
     temb_mod_params_single = inner.single_stream_modulation(temb)[0]
+
+    # 1a. Threshold-zero fast path (FLUX.2 mirror of the FLUX.1 fast path).
+    # No future step can ever skip at non-positive threshold, so the cache is
+    # never consumed. Skip building mod_in, body_in_concat, and the
+    # cached_residual subtraction to avoid keeping body intermediates alive
+    # past the tail and shrink the numerical surface area we test against.
+    # See docs/superpowers/notes/2026-05-14-task-25-fast-path-measurement.md.
+    if handle.rel_l1_thresh <= 0.0:
+        body_out_concat = _flux2_run_body(
+            inner, body_in, encoder_hidden_states,
+            temb_mod_params_img, temb_mod_params_txt, temb_mod_params_single,
+            concat_rotary_emb,
+        )
+        stats.record(StepDecision(
+            step_idx=state.step_counter,
+            timestep=float(timestep.flatten()[0]),
+            rel_l1=None,
+            accumulated_distance=state.accumulated_distance,
+            decision="computed",
+        ))
+        state.last_timestep = float(timestep.flatten()[0])
+        out = body_out_concat[:, encoder_hidden_states.shape[1]:, ...]
+        out = inner.norm_out(out, temb)
+        out = inner.proj_out(out)
+        state.step_counter += 1
+        return out
+
+    # 1b. Slow path: TeaCache gating live. Build the gating tensors.
     body_in_concat = mx.concatenate([encoder_hidden_states, body_in], axis=1)
 
     # 2. Extract mod_in (same value _flux2_compute_mod_in would return).

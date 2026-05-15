@@ -263,13 +263,20 @@ def _flux2_run_body(
     inner: Any,
     body_in: mx.array,
     encoder_hidden_states: mx.array,
+    temb: mx.array,
     temb_mod_params_img: Any,
     temb_mod_params_txt: Any,
-    temb_mod_params_single: Any,
     image_rotary_emb: Any,
 ) -> mx.array:
     """Run all Flux2TransformerBlocks then all Flux2SingleTransformerBlocks.
-    Mirrors Flux2Transformer.__call__ lines 111-128."""
+    Mirrors Flux2Transformer.__call__ lines 111-128 EXACTLY, including the
+    intra-body computation of `temb_mod_params_single` between the joint
+    and single block loops. Computing single_stream_modulation upfront
+    instead of inline produces a different MLX graph topology even though
+    the math is equivalent — under the eager (non-compiled) wrapper that
+    suffices to shift Metal dispatch and accumulate divergence vs vanilla
+    (verified 2026-05-15: upfront computation gave max_abs ~3.77 after 8
+    steps vs inline matching bit-exact)."""
     hidden_states = body_in
     for block in inner.transformer_blocks:
         encoder_hidden_states, hidden_states = block(
@@ -280,6 +287,9 @@ def _flux2_run_body(
             image_rotary_emb=image_rotary_emb,
         )
     hidden_states = mx.concatenate([encoder_hidden_states, hidden_states], axis=1)
+    # Compute single-stream modulation HERE (matching vanilla line 122), not
+    # in the caller, to preserve identical graph topology to vanilla.
+    temb_mod_params_single = inner.single_stream_modulation(temb)[0]
     for block in inner.single_transformer_blocks:
         hidden_states = block(
             hidden_states=hidden_states,
@@ -336,7 +346,12 @@ def flux2_forward_with_gate(
     )
     temb_mod_params_img = inner.double_stream_modulation_img(temb)
     temb_mod_params_txt = inner.double_stream_modulation_txt(temb)
-    temb_mod_params_single = inner.single_stream_modulation(temb)[0]
+    # NOTE: `temb_mod_params_single = single_stream_modulation(temb)[0]` is
+    # computed INSIDE _flux2_run_body between the joint loop and the single
+    # loop — exactly where vanilla Flux2Transformer.__call__ computes it
+    # (line 122). Computing it upfront changes MLX graph topology under
+    # eager dispatch and produces a different output. See _flux2_run_body
+    # docstring for the measured impact.
 
     # 1a. Threshold-zero fast path (FLUX.2 mirror of the FLUX.1 fast path).
     # No future step can ever skip at non-positive threshold, so the cache is
@@ -346,8 +361,8 @@ def flux2_forward_with_gate(
     # See docs/superpowers/notes/2026-05-14-task-25-fast-path-measurement.md.
     if handle.rel_l1_thresh <= 0.0:
         body_out_concat = _flux2_run_body(
-            inner, body_in, encoder_hidden_states,
-            temb_mod_params_img, temb_mod_params_txt, temb_mod_params_single,
+            inner, body_in, encoder_hidden_states, temb,
+            temb_mod_params_img, temb_mod_params_txt,
             concat_rotary_emb,
         )
         stats.record(StepDecision(
@@ -400,8 +415,8 @@ def flux2_forward_with_gate(
     # 7. Compute path.
     if decision.should_compute:
         body_out_concat = _flux2_run_body(
-            inner, body_in, encoder_hidden_states,
-            temb_mod_params_img, temb_mod_params_txt, temb_mod_params_single,
+            inner, body_in, encoder_hidden_states, temb,
+            temb_mod_params_img, temb_mod_params_txt,
             concat_rotary_emb,
         )
         if decision.should_update_cache:

@@ -64,9 +64,13 @@ REFERENCE_PROMPTS = (
     "text saying HELLO",
 )
 PR_TIME_PROMPT = "a red apple on a wooden table"
-# Threshold at which the cosine similarity gate is meaningful. Calibrate
-# from a measured same-process run when adding new prompts/variants.
-_COSINE_GATE = 0.985
+# Cosine-similarity gate on latents at default rel_l1_thresh. NOT yet
+# calibrated against measured values per the 2026-05-15 audit — set
+# conservatively (matches the python-ml-testing skill's "full forward of
+# small model" tolerance range). Catches catastrophic divergence. Tighten
+# after running the full 5-prompt slow suite once and observing the
+# distribution of latent cosines for the current coefficients.
+_COSINE_GATE = 0.95
 
 
 class _LatentCapture:

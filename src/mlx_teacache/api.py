@@ -26,6 +26,7 @@ from mlx_teacache.stats import TeaCacheStats
 class _HandleState:
     cache: TeaCacheState = field(default_factory=TeaCacheState)
     stats: TeaCacheStats = field(default_factory=TeaCacheStats)
+    no_benefit_warned: bool = False
 
 
 @dataclass

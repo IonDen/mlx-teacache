@@ -20,11 +20,14 @@ from mlx_teacache.stats import StepDecision, TeaCacheStats
 @dataclass
 class _FakeHandle:
     variant_id: str = "flux1-dev"
+    skip_first_n_steps: int = 1
+    skip_last_n_steps: int = 1
     _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
     _state: SimpleNamespace = field(
         default_factory=lambda: SimpleNamespace(
             stats=TeaCacheStats(),
             cache=TeaCacheState(),
+            no_benefit_warned=False,
         )
     )
     _original_generate_image: object = None

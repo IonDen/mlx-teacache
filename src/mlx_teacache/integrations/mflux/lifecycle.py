@@ -15,6 +15,7 @@ arguments (e.g., kontext_image)."""
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -86,6 +87,50 @@ class GenerationContextCallback:
         # forward.py for FLUX.1 and flux2.py for FLUX.2). Using active_num_steps
         # (not nominal) makes the cache invariants consistent under img2img.
         self._handle._state.cache.reset_for_new_generation(num_steps=active_num_steps)
+
+        # --- Distilled-step / short-window no-benefit warning ---
+        # Suppression 1: FLUX.2 all-CFG path bypasses TeaCache gating entirely.
+        # mflux's Flux2Klein creates negative embeds when guidance > 1.0, which
+        # our predict closure routes to the vanilla CFG-fallback path with no
+        # skips possible. That's a different kind of no-benefit and gets its
+        # own warning category in a future release.
+        flux2_cfg_fallback = (
+            self._handle.variant_id.startswith("flux2-")
+            and float(getattr(config, "guidance", 1.0) or 1.0) > 1.0
+        )
+
+        # Suppression 2: the configuration is going to raise InvalidStepWindowError
+        # at lazy validation time — the error covers the case; a duplicate
+        # warning is noise.
+        window_invalid = (
+            active_num_steps > 0
+            and self._handle.skip_first_n_steps + self._handle.skip_last_n_steps >= active_num_steps
+        )
+
+        if active_num_steps == 0:
+            # image_strength=1.0 → mflux runs zero denoising calls. Valid no-op.
+            return
+        if flux2_cfg_fallback or window_invalid:
+            return
+
+        eligible = active_num_steps - self._handle.skip_first_n_steps - self._handle.skip_last_n_steps
+        possible_skips = max(0, eligible - 1)  # need ≥1 seed step + ≥1 candidate step
+
+        if possible_skips == 0 and not self._handle._state.no_benefit_warned:
+            from mlx_teacache.errors import TeaCacheNoBenefitWarning
+
+            warnings.warn(
+                f"TeaCache: only {eligible} eligible step(s) for caching with "
+                f"active_num_steps={active_num_steps}, "
+                f"skip_first_n_steps={self._handle.skip_first_n_steps}, "
+                f"skip_last_n_steps={self._handle.skip_last_n_steps} "
+                f"({possible_skips} possible skip(s)). The generation will run at "
+                f"vanilla speed. Increase num_inference_steps or reduce "
+                f"skip_first/skip_last to benefit from TeaCache.",
+                category=TeaCacheNoBenefitWarning,
+                stacklevel=2,
+            )
+            self._handle._state.no_benefit_warned = True
 
     def call_after_loop(
         self,

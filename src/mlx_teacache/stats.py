@@ -76,10 +76,7 @@ class TeaCacheStats:
     def total_active_steps(self) -> int:
         """Committed steps that ran under TeaCache (gated or forced). Excludes
         CFG fallback steps where mlx-teacache ran vanilla mflux."""
-        return (
-            self.computed_count + self.forced_count
-            + self.skipped_count + self.numerical_miss_count
-        )
+        return self.computed_count + self.forced_count + self.skipped_count + self.numerical_miss_count
 
     @property
     def total_steps_seen(self) -> int:
@@ -130,6 +127,7 @@ class TeaCacheStats:
         if self._frozen:
             raise StatsFrozenError("TeaCacheStats is frozen (handle.restore() was called)")
         from mlx_teacache.errors import InternalStateError
+
         st = self._staging
         if len(st.decisions) != num_inference_steps:
             actual = len(st.decisions)

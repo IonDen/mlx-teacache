@@ -35,6 +35,7 @@ class _FakeFlux2Klein:
 def _patch_mflux_types(monkeypatch):
     """Make the detect module recognize our fake classes as the mflux ones."""
     import mlx_teacache.integrations.mflux.detect as detect
+
     monkeypatch.setattr(detect, "_Flux1Type", _FakeFlux1)
     monkeypatch.setattr(detect, "_Flux2KleinType", _FakeFlux2Klein)
 
@@ -73,5 +74,6 @@ def test_flux2_klein_base_4b_rejected():
 
 def test_completely_unknown_type_rejected():
     class Other: ...
+
     with pytest.raises(IncompatibleModelError):
         identify_variant(Other())

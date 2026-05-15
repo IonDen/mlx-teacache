@@ -9,8 +9,11 @@ from mlx_teacache.stats import (
 
 def _make_decision(idx: int, kind: str = "computed", rel_l1: float | None = 0.1) -> StepDecision:
     return StepDecision(
-        step_idx=idx, timestep=float(idx), rel_l1=rel_l1,
-        accumulated_distance=0.0, decision=kind,
+        step_idx=idx,
+        timestep=float(idx),
+        rel_l1=rel_l1,
+        accumulated_distance=0.0,
+        decision=kind,
     )
 
 
@@ -31,7 +34,7 @@ def test_record_mutates_staging_not_public():
     s = TeaCacheStats()
     s.record(_make_decision(0, "computed"))
     s.record(_make_decision(1, "skipped"))
-    assert s.computed_count == 0      # public counters unchanged
+    assert s.computed_count == 0  # public counters unchanged
     assert s.skipped_count == 0
     assert s.last_generation is None
 
@@ -126,6 +129,7 @@ def test_finalize_length_mismatch_raises_and_discards_staging():
     """Per spec: len(decisions) == num_inference_steps. Mismatch must raise
     InternalStateError AND discard staging (no partial commit)."""
     from mlx_teacache.errors import InternalStateError
+
     s = TeaCacheStats()
     s.record(_make_decision(0, "computed"))
     s.record(_make_decision(1, "skipped"))

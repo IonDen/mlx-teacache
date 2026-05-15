@@ -63,27 +63,46 @@ class _FakeInner:
         return mx.zeros((1, self.text_seq, self.dim))
 
     def compute_text_embeddings(
-        self, t: int, pooled: mx.array, time_text_embed: Any, config: Any,
+        self,
+        t: int,
+        pooled: mx.array,
+        time_text_embed: Any,
+        config: Any,
     ) -> mx.array:
         return mx.zeros((1, self.dim))
 
     def compute_rotary_embeddings(
-        self, prompt_embeds: mx.array, pos_embed: Any, config: Any,
+        self,
+        prompt_embeds: mx.array,
+        pos_embed: Any,
+        config: Any,
         kontext_image_ids: Any,
     ) -> mx.array:
         return mx.zeros((1, self.text_seq + self.img_seq, self.dim // 2))
 
     def _apply_joint_transformer_block(
-        self, *, idx: int, block: Any, hidden_states: mx.array,
-        encoder_hidden_states: mx.array, text_embeddings: mx.array,
-        image_rotary_embeddings: mx.array, controlnet_block_samples: Any,
+        self,
+        *,
+        idx: int,
+        block: Any,
+        hidden_states: mx.array,
+        encoder_hidden_states: mx.array,
+        text_embeddings: mx.array,
+        image_rotary_embeddings: mx.array,
+        controlnet_block_samples: Any,
     ) -> tuple[mx.array, mx.array]:
         return encoder_hidden_states, hidden_states
 
     def _apply_single_transformer_block(
-        self, *, idx: int, block: Any, hidden_states: mx.array,
-        encoder_hidden_states: mx.array, text_embeddings: mx.array,
-        image_rotary_embeddings: mx.array, controlnet_single_block_samples: Any,
+        self,
+        *,
+        idx: int,
+        block: Any,
+        hidden_states: mx.array,
+        encoder_hidden_states: mx.array,
+        text_embeddings: mx.array,
+        image_rotary_embeddings: mx.array,
+        controlnet_single_block_samples: Any,
     ) -> mx.array:
         return hidden_states
 
@@ -114,7 +133,10 @@ def _run_one_step(handle: Any, *, t: int, num_inference_steps: int = 4) -> mx.ar
     inner = _FakeInner()
     config = SimpleNamespace(num_inference_steps=num_inference_steps)
     return flux1_forward_with_gate(
-        inner, handle, t=t, config=config,
+        inner,
+        handle,
+        t=t,
+        config=config,
         hidden_states=mx.zeros((1, 4, 4)),
         prompt_embeds=mx.zeros((1, 2, 4)),
         pooled_prompt_embeds=mx.zeros((1, 4)),
@@ -157,6 +179,7 @@ def test_threshold_zero_skip_window_validation_still_runs_at_t0():
     """The skip-window validation lives outside the gate; the fast path
     must still raise if the configuration is invalid."""
     from mlx_teacache.errors import InvalidStepWindowError
+
     handle = _make_handle(rel_l1_thresh=0.0, skip_first=2, skip_last=2)
     with pytest.raises(InvalidStepWindowError):
         _run_one_step(handle, t=0, num_inference_steps=3)

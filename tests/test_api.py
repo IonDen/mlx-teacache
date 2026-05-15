@@ -35,6 +35,7 @@ class _FakeTransformer(nn.Module):
     def __init__(self):
         super().__init__()
         self.x_embedder = nn.Linear(4, 8, bias=False)
+
     def __call__(self, **kwargs):
         return mx.zeros((1, 8))
 
@@ -42,6 +43,7 @@ class _FakeTransformer(nn.Module):
 def _make_fake_flux1(model_name="dev"):
     """Build a fake that detect.identify_variant will accept as Flux1."""
     from mflux.models.flux.variants.txt2img.flux import Flux1
+
     flux = Flux1.__new__(Flux1)
     flux.model_config = SimpleNamespace(model_name=model_name)
     flux.transformer = _FakeTransformer()
@@ -114,6 +116,7 @@ def test_invalid_coefficients_length_raises():
 
 def test_unsupported_model_raises_incompatible():
     class Other: ...
+
     other = Other()
     with pytest.raises(IncompatibleModelError):
         apply_teacache(other)
@@ -139,8 +142,10 @@ def test_transactional_apply_rollback_on_failure(monkeypatch):
 
     # Make wrap_generate_image raise.
     from mlx_teacache.integrations.mflux import lifecycle
+
     def boom(flux, handle):
         raise RuntimeError("simulated wrap failure")
+
     monkeypatch.setattr(lifecycle, "wrap_generate_image", boom)
 
     with pytest.raises(RuntimeError, match="simulated wrap failure"):

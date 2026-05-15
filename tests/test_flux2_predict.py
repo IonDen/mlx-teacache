@@ -29,9 +29,12 @@ class _FakeHandle:
     skip_first_n_steps: int = 1
     skip_last_n_steps: int = 1
     _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(
-        stats=TeaCacheStats(), cache=TeaCacheState(),
-    ))
+    _state: SimpleNamespace = field(
+        default_factory=lambda: SimpleNamespace(
+            stats=TeaCacheStats(),
+            cache=TeaCacheState(),
+        )
+    )
 
 
 def _set_ctx_ready(handle, num_steps):
@@ -52,15 +55,21 @@ def test_factory_returns_callable_per_generation():
 def test_missing_context_before_first_call_raises():
     handle = _FakeHandle()
     factory = make_teacache_predict_factory(handle)
+
     def transformer(**kw):
         return mx.ones((1, 2, 4))
+
     predict = factory(transformer)
     with pytest.raises(MissingGenerationContextError):
         predict(
-            latents=mx.ones((1, 2, 4)), latent_ids=mx.zeros((1, 2, 3)),
-            prompt_embeds=mx.ones((1, 8, 16)), text_ids=mx.zeros((1, 8, 3)),
-            negative_prompt_embeds=None, negative_text_ids=None,
-            guidance=1.0, timestep=mx.array(1.0),
+            latents=mx.ones((1, 2, 4)),
+            latent_ids=mx.zeros((1, 2, 3)),
+            prompt_embeds=mx.ones((1, 8, 16)),
+            text_ids=mx.zeros((1, 8, 3)),
+            negative_prompt_embeds=None,
+            negative_text_ids=None,
+            guidance=1.0,
+            timestep=mx.array(1.0),
         )
 
 
@@ -68,16 +77,22 @@ def test_invalid_step_window_raised_on_first_non_cfg_step():
     handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
     _set_ctx_ready(handle, num_steps=2)  # 1+1 >= 2 ⇒ invalid
     factory = make_teacache_predict_factory(handle)
+
     def transformer(**kw):
         return mx.ones((1, 2, 4))
+
     predict = factory(transformer)
     # Non-CFG call ⇒ validation fires here.
     with pytest.raises(InvalidStepWindowError):
         predict(
-            latents=mx.ones((1, 2, 4)), latent_ids=mx.zeros((1, 2, 3)),
-            prompt_embeds=mx.ones((1, 8, 16)), text_ids=mx.zeros((1, 8, 3)),
-            negative_prompt_embeds=None, negative_text_ids=None,
-            guidance=1.0, timestep=mx.array(1.0),
+            latents=mx.ones((1, 2, 4)),
+            latent_ids=mx.zeros((1, 2, 3)),
+            prompt_embeds=mx.ones((1, 8, 16)),
+            text_ids=mx.zeros((1, 8, 3)),
+            negative_prompt_embeds=None,
+            negative_text_ids=None,
+            guidance=1.0,
+            timestep=mx.array(1.0),
         )
 
 
@@ -90,16 +105,21 @@ def test_cfg_path_does_not_raise_invalid_step_window():
     # Use a fake transformer that returns a tensor — we only care that the
     # call completes without InvalidStepWindowError.
     call_count = [0]
+
     def transformer(**kw):
         call_count[0] += 1
         return mx.zeros((1, 2, 4))
+
     predict = factory(transformer)
     predict(
-        latents=mx.zeros((1, 2, 4)), latent_ids=mx.zeros((1, 2, 3)),
-        prompt_embeds=mx.zeros((1, 8, 16)), text_ids=mx.zeros((1, 8, 3)),
+        latents=mx.zeros((1, 2, 4)),
+        latent_ids=mx.zeros((1, 2, 3)),
+        prompt_embeds=mx.zeros((1, 8, 16)),
+        text_ids=mx.zeros((1, 8, 3)),
         negative_prompt_embeds=mx.zeros((1, 8, 16)),
         negative_text_ids=mx.zeros((1, 8, 3)),
-        guidance=3.5, timestep=mx.array(1.0),
+        guidance=3.5,
+        timestep=mx.array(1.0),
     )
     # CFG path calls transformer twice (positive + negative)
     assert call_count[0] == 2

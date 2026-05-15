@@ -22,15 +22,19 @@ from mlx_teacache.stats import StepDecision, TeaCacheStats
 class _FakeHandle:
     variant_id: str = "flux1-dev"
     _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(
-        stats=TeaCacheStats(), cache=TeaCacheState(),
-    ))
+    _state: SimpleNamespace = field(
+        default_factory=lambda: SimpleNamespace(
+            stats=TeaCacheStats(),
+            cache=TeaCacheState(),
+        )
+    )
     _original_generate_image: object = None
     _generate_image_was_instance_attr: bool = False
     _pending_finalize: PendingFinalize | None = None
 
 
 # -- _GenerationContextCallback --
+
 
 def _txt2img_config():
     return SimpleNamespace(image_path=None, image_strength=None, num_inference_steps=25)
@@ -74,7 +78,8 @@ def test_after_loop_marks_pending_finalize_does_not_commit():
     assert handle._state.stats.computed_count == 0
     # Pending finalize metadata recorded
     assert handle._pending_finalize == PendingFinalize(
-        num_inference_steps=25, cfg_was_active=False,
+        num_inference_steps=25,
+        cfg_was_active=False,
     )
 
 
@@ -83,8 +88,7 @@ def test_interrupt_does_not_finalize_stats():
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
     handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
-    cb.call_interrupt(t=5, seed=42, prompt="hi", latents=None,
-                      config=_txt2img_config(), time_steps=None)
+    cb.call_interrupt(t=5, seed=42, prompt="hi", latents=None, config=_txt2img_config(), time_steps=None)
     # call_interrupt is a no-op for stats — the generate_image wrapper handles cleanup
     assert handle._state.stats.generations == 0
     assert handle._state.stats.computed_count == 0  # staging not committed
@@ -96,12 +100,14 @@ def test_before_loop_accepts_extra_kwargs():
     handle = _FakeHandle()
     cb = GenerationContextCallback(handle)
     # Real mflux passes canny_image= and depth_image= via kwargs
-    cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config(),
-                        canny_image=None, depth_image=None)
+    cb.call_before_loop(
+        seed=42, prompt="hi", latents=None, config=_txt2img_config(), canny_image=None, depth_image=None
+    )
     assert handle._gen_ctx.active_num_steps == 25
 
 
 # -- wrap_generate_image --
+
 
 def test_wrap_finalizes_stats_only_when_call_after_loop_ran():
     """Wrapper finalizes only when call_after_loop set _pending_finalize AND
@@ -110,11 +116,13 @@ def test_wrap_finalizes_stats_only_when_call_after_loop_ran():
     handle._pending_finalize = None
 
     flux = SimpleNamespace()
+
     def original():
         # Simulate the after-loop callback running cleanly inside the loop
         handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
         handle._pending_finalize = PendingFinalize(num_inference_steps=1, cfg_was_active=False)
         return "ok"
+
     flux.generate_image = original
     wrap_generate_image(flux, handle)
     result = flux.generate_image()
@@ -133,12 +141,14 @@ def test_wrap_after_loop_user_callback_raises_no_partial_commit():
     handle._pending_finalize = None
 
     flux = SimpleNamespace()
+
     def original():
         # mlx-teacache call_after_loop ran and set _pending_finalize.
         handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
         handle._pending_finalize = PendingFinalize(num_inference_steps=1, cfg_was_active=False)
         # Now a later user after-loop callback raises.
         raise RuntimeError("user after-loop bug")
+
     flux.generate_image = original
     wrap_generate_image(flux, handle)
     with pytest.raises(RuntimeError, match="user after-loop bug"):
@@ -154,8 +164,10 @@ def test_wrap_clears_context_on_exception_and_discards_staging():
     handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
 
     flux = SimpleNamespace()
+
     def boom():
         raise RuntimeError("kaboom")
+
     flux.generate_image = boom
     wrap_generate_image(flux, handle)
 
@@ -170,9 +182,11 @@ def test_wrap_clears_context_on_exception_and_discards_staging():
 
 def test_wrap_records_no_prior_instance_attr_when_class_level():
     """If generate_image came from the class, _generate_image_was_instance_attr is False."""
+
     class FluxClass:
         def generate_image(self):
             return "class-method"
+
     handle = _FakeHandle()
     flux = FluxClass()
     wrap_generate_image(flux, handle)

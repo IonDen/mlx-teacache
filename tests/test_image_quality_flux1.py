@@ -98,8 +98,12 @@ def _capture(flux: Any, **gen_kwargs: Any) -> mx.array:
 
 def _gen_kwargs_dev(prompt: str) -> dict[str, Any]:
     return {
-        "prompt": prompt, "seed": 42, "num_inference_steps": 25,
-        "height": 512, "width": 512, "guidance": 3.5,
+        "prompt": prompt,
+        "seed": 42,
+        "num_inference_steps": 25,
+        "height": 512,
+        "width": 512,
+        "guidance": 3.5,
     }
 
 
@@ -109,10 +113,13 @@ def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: 
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
 
     unpacked = FluxLatentCreator.unpack_latents(
-        latents=packed_latent, height=height, width=width,
+        latents=packed_latent,
+        height=height,
+        width=width,
     )
     decoded = VAEUtil.decode(
-        vae=flux.vae, latent=unpacked,
+        vae=flux.vae,
+        latent=unpacked,
         tiling_config=getattr(flux, "tiling_config", None),
     )
     # mflux VAE outputs (B, C, H, W) in roughly [-1, 1] at the model's
@@ -128,6 +135,7 @@ def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: 
 @pytest.fixture(scope="module")
 def flux1_dev() -> Any:
     from mflux.models.flux.variants.txt2img.flux import Flux1
+
     flux = Flux1.from_name("dev", quantize=4)
     flux.freeze()
     return flux
@@ -153,10 +161,16 @@ def test_default_threshold_ssim_dev_pr_gate(flux1_dev: Any) -> None:
     )
 
     vanilla_img = _decode_to_uint8(
-        flux1_dev, vanilla_latent, height=kw["height"], width=kw["width"],
+        flux1_dev,
+        vanilla_latent,
+        height=kw["height"],
+        width=kw["width"],
     )
     wrapper_img = _decode_to_uint8(
-        flux1_dev, wrapper_latent, height=kw["height"], width=kw["width"],
+        flux1_dev,
+        wrapper_latent,
+        height=kw["height"],
+        width=kw["width"],
     )
     score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
     assert score >= _PR_GATE_SSIM, (
@@ -183,6 +197,4 @@ def test_default_threshold_ssim_dev_full(flux1_dev: Any, prompt: str) -> None:
     vanilla_img = _decode_to_uint8(flux1_dev, vanilla_latent, height=kw["height"], width=kw["width"])
     wrapper_img = _decode_to_uint8(flux1_dev, wrapper_latent, height=kw["height"], width=kw["width"])
     score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
-    assert score >= _FULL_SUITE_SSIM, (
-        f"SSIM {score:.4f} < {_FULL_SUITE_SSIM} on prompt {prompt!r}"
-    )
+    assert score >= _FULL_SUITE_SSIM, f"SSIM {score:.4f} < {_FULL_SUITE_SSIM} on prompt {prompt!r}"

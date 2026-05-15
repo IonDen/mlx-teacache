@@ -43,6 +43,7 @@ DEFAULT_WIDTH = 512
 
 class _LatentCapture:
     """Captures the final pre-VAE latent via after_loop. Use one per generation."""
+
     def __init__(self) -> None:
         self.latent: mx.array | None = None
 
@@ -67,8 +68,12 @@ def _generate_one(flux, prompt: str, *, num_steps: int, height: int, width: int,
     flux.callbacks.register(cap)
     try:
         flux.generate_image(
-            seed=DEFAULT_SEED, prompt=prompt, num_inference_steps=num_steps,
-            height=height, width=width, **gen_kwargs,
+            seed=DEFAULT_SEED,
+            prompt=prompt,
+            num_inference_steps=num_steps,
+            height=height,
+            width=width,
+            **gen_kwargs,
         )
     finally:
         # Remove the capture callback to avoid leaks between prompts.
@@ -94,8 +99,11 @@ def _generate_flux1(variant: str) -> None:
     out_root = Path(__file__).parent / "reference" / variant
     for prompt in REFERENCE_PROMPTS:
         latent = _generate_one(
-            flux, prompt,
-            num_steps=DEFAULT_STEPS, height=DEFAULT_HEIGHT, width=DEFAULT_WIDTH,
+            flux,
+            prompt,
+            num_steps=DEFAULT_STEPS,
+            height=DEFAULT_HEIGHT,
+            width=DEFAULT_WIDTH,
             guidance=guidance,
         )
         out_path = out_root / f"{_slug(prompt)}__seed{DEFAULT_SEED}__steps{DEFAULT_STEPS}.safetensors"
@@ -115,8 +123,11 @@ def _generate_flux2(variant: str) -> None:
     out_root = Path(__file__).parent / "reference" / variant
     for prompt in REFERENCE_PROMPTS:
         latent = _generate_one(
-            flux, prompt,
-            num_steps=DEFAULT_STEPS, height=DEFAULT_HEIGHT, width=DEFAULT_WIDTH,
+            flux,
+            prompt,
+            num_steps=DEFAULT_STEPS,
+            height=DEFAULT_HEIGHT,
+            width=DEFAULT_WIDTH,
             guidance=1.0,  # no CFG by default for Klein
         )
         out_path = out_root / f"{_slug(prompt)}__seed{DEFAULT_SEED}__steps{DEFAULT_STEPS}.safetensors"
@@ -125,8 +136,7 @@ def _generate_flux2(variant: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--variant", required=True,
-                        choices=["flux1-dev", "flux1-schnell", "flux2-klein-4b"])
+    parser.add_argument("--variant", required=True, choices=["flux1-dev", "flux1-schnell", "flux2-klein-4b"])
     args = parser.parse_args()
     if args.variant.startswith("flux1-"):
         _generate_flux1(args.variant)

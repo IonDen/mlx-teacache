@@ -66,8 +66,11 @@ def gate_step(  # type: ignore[no-untyped-def]
     # outputs and arbitrary custom coefficients.
     if rel_l1_thresh <= 0.0:
         return GateDecision(
-            kind="computed", should_compute=True, should_update_cache=False,
-            rel_l1=None, predicted_distance=None,
+            kind="computed",
+            should_compute=True,
+            should_update_cache=False,
+            rel_l1=None,
+            predicted_distance=None,
             accumulated_distance=state.accumulated_distance,
         )
 
@@ -75,24 +78,33 @@ def gate_step(  # type: ignore[no-untyped-def]
     # output doesn't poison the cache for a later threshold-gated step.
     if step_idx < skip_first or step_idx >= num_steps - skip_last:
         return GateDecision(
-            kind="forced", should_compute=True, should_update_cache=False,
-            rel_l1=None, predicted_distance=None,
+            kind="forced",
+            should_compute=True,
+            should_update_cache=False,
+            rel_l1=None,
+            predicted_distance=None,
             accumulated_distance=state.accumulated_distance,
         )
 
     # Numerical safety: non-finite mod_in. Compute (recover), but NEVER cache.
     if not _all_finite(mod_in):
         return GateDecision(
-            kind="numerical-miss", should_compute=True, should_update_cache=False,
-            rel_l1=None, predicted_distance=None,
+            kind="numerical-miss",
+            should_compute=True,
+            should_update_cache=False,
+            rel_l1=None,
+            predicted_distance=None,
             accumulated_distance=state.accumulated_distance,
         )
 
     # First eligible step with no cache yet: compute and cache (seeds the cache).
     if state.previous_mod_input is None:
         return GateDecision(
-            kind="computed", should_compute=True, should_update_cache=True,
-            rel_l1=None, predicted_distance=None,
+            kind="computed",
+            should_compute=True,
+            should_update_cache=True,
+            rel_l1=None,
+            predicted_distance=None,
             accumulated_distance=state.accumulated_distance,
         )
 
@@ -105,12 +117,20 @@ def gate_step(  # type: ignore[no-untyped-def]
     if new_acc < rel_l1_thresh:
         state.accumulated_distance = new_acc
         return GateDecision(
-            kind="skipped", should_compute=False, should_update_cache=False,
-            rel_l1=rel_l1, predicted_distance=predicted, accumulated_distance=new_acc,
+            kind="skipped",
+            should_compute=False,
+            should_update_cache=False,
+            rel_l1=rel_l1,
+            predicted_distance=predicted,
+            accumulated_distance=new_acc,
         )
 
     state.accumulated_distance = 0.0
     return GateDecision(
-        kind="computed", should_compute=True, should_update_cache=True,
-        rel_l1=rel_l1, predicted_distance=predicted, accumulated_distance=0.0,
+        kind="computed",
+        should_compute=True,
+        should_update_cache=True,
+        rel_l1=rel_l1,
+        predicted_distance=predicted,
+        accumulated_distance=0.0,
     )

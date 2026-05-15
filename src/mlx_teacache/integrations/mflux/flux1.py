@@ -36,14 +36,22 @@ class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
         object.__setattr__(self, "_handle", handle)
 
     def __call__(
-        self, t: int, config: Any, hidden_states: mx.array,
-        prompt_embeds: mx.array, pooled_prompt_embeds: mx.array,
+        self,
+        t: int,
+        config: Any,
+        hidden_states: mx.array,
+        prompt_embeds: mx.array,
+        pooled_prompt_embeds: mx.array,
         **kwargs: Any,
     ) -> Any:
         return flux1_forward_with_gate(
-            self._inner, self._handle,
-            t=t, config=config, hidden_states=hidden_states,
-            prompt_embeds=prompt_embeds, pooled_prompt_embeds=pooled_prompt_embeds,
+            self._inner,
+            self._handle,
+            t=t,
+            config=config,
+            hidden_states=hidden_states,
+            prompt_embeds=prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
             **kwargs,
         )
 

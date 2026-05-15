@@ -31,10 +31,7 @@ def test_all_pinned_fixtures_match_sha256():
 def test_every_reference_file_is_pinned():
     pins = _load_pins()
     pinned_paths = set(pins)
-    actual_files = {
-        str(p.relative_to(_REFERENCE_ROOT))
-        for p in _REFERENCE_ROOT.rglob("*.safetensors")
-    }
+    actual_files = {str(p.relative_to(_REFERENCE_ROOT)) for p in _REFERENCE_ROOT.rglob("*.safetensors")}
     assert actual_files == pinned_paths, (
         f"fixtures.toml out of sync. "
         f"Files not pinned: {actual_files - pinned_paths}. "

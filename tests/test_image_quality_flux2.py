@@ -75,8 +75,12 @@ def _capture(flux: Any, **gen_kwargs: Any) -> mx.array:
 
 def _gen_kwargs_klein(prompt: str, *, guidance: float = 1.0) -> dict[str, Any]:
     return {
-        "prompt": prompt, "seed": 42, "num_inference_steps": 8,
-        "height": 512, "width": 512, "guidance": guidance,
+        "prompt": prompt,
+        "seed": 42,
+        "num_inference_steps": 8,
+        "height": 512,
+        "width": 512,
+        "guidance": guidance,
     }
 
 
@@ -110,6 +114,7 @@ def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: 
 def flux2_klein() -> Any:
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
     flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
     flux.freeze()
     return flux
@@ -134,10 +139,16 @@ def test_default_threshold_ssim_klein_pr_gate(flux2_klein: Any) -> None:
     del skipped  # explicitly unused
 
     vanilla_img = _decode_to_uint8(
-        flux2_klein, vanilla_latent, height=kw["height"], width=kw["width"],
+        flux2_klein,
+        vanilla_latent,
+        height=kw["height"],
+        width=kw["width"],
     )
     wrapper_img = _decode_to_uint8(
-        flux2_klein, wrapper_latent, height=kw["height"], width=kw["width"],
+        flux2_klein,
+        wrapper_latent,
+        height=kw["height"],
+        width=kw["width"],
     )
     score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
     assert score >= _DEFAULT_THRESHOLD_SSIM, (

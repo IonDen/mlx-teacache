@@ -23,8 +23,7 @@ from mlx_teacache.integrations.mflux.forward import flux2_forward_with_gate
 from mlx_teacache.stats import StepDecision
 
 PredictFn = Callable[
-    [mx.array, mx.array, mx.array, mx.array,
-     "mx.array | None", "mx.array | None", float, mx.array],
+    [mx.array, mx.array, mx.array, mx.array, "mx.array | None", "mx.array | None", float, mx.array],
     Any,
 ]
 PredictFactory = Callable[[Any], PredictFn]
@@ -32,20 +31,32 @@ PredictFactory = Callable[[Any], PredictFn]
 
 def _vanilla_flux2_cfg_predict(
     transformer: Any,
-    latents: mx.array, latent_ids: mx.array,
-    prompt_embeds: mx.array, text_ids: mx.array,
-    negative_prompt_embeds: mx.array, negative_text_ids: mx.array,
-    guidance: float, timestep: mx.array,
+    latents: mx.array,
+    latent_ids: mx.array,
+    prompt_embeds: mx.array,
+    text_ids: mx.array,
+    negative_prompt_embeds: mx.array,
+    negative_text_ids: mx.array,
+    guidance: float,
+    timestep: mx.array,
 ) -> Any:
     """Bit-exact mirror of mflux's Flux2Klein._predict closure CFG path
     (flux2_klein.py:259-276). Used when TeaCache auto-falls-back."""
     noise = transformer(
-        hidden_states=latents, encoder_hidden_states=prompt_embeds,
-        timestep=timestep, img_ids=latent_ids, txt_ids=text_ids, guidance=None,
+        hidden_states=latents,
+        encoder_hidden_states=prompt_embeds,
+        timestep=timestep,
+        img_ids=latent_ids,
+        txt_ids=text_ids,
+        guidance=None,
     )
     negative_noise = transformer(
-        hidden_states=latents, encoder_hidden_states=negative_prompt_embeds,
-        timestep=timestep, img_ids=latent_ids, txt_ids=negative_text_ids, guidance=None,
+        hidden_states=latents,
+        encoder_hidden_states=negative_prompt_embeds,
+        timestep=timestep,
+        img_ids=latent_ids,
+        txt_ids=negative_text_ids,
+        guidance=None,
     )
     return negative_noise + guidance * (noise - negative_noise)
 
@@ -62,11 +73,14 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
         context_consumed = False
 
         def predict(
-            latents: mx.array, latent_ids: mx.array,
-            prompt_embeds: mx.array, text_ids: mx.array,
+            latents: mx.array,
+            latent_ids: mx.array,
+            prompt_embeds: mx.array,
+            text_ids: mx.array,
             negative_prompt_embeds: mx.array | None,
             negative_text_ids: mx.array | None,
-            guidance: float, timestep: mx.array,
+            guidance: float,
+            timestep: mx.array,
         ) -> Any:
             nonlocal context_consumed
             ctx = handle._gen_ctx
@@ -79,28 +93,32 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
                 ctx.consumed_at_token = ctx.token
                 context_consumed = True
 
-            timestep_val = (
-                float(timestep.flatten()[0])
-                if hasattr(timestep, "flatten")
-                else float(timestep)
-            )
+            timestep_val = float(timestep.flatten()[0]) if hasattr(timestep, "flatten") else float(timestep)
 
             # 2. CFG fallback path (no skip-window validation here — all-CFG
             #    generations should not raise InvalidStepWindowError).
             cfg_active = negative_prompt_embeds is not None and negative_text_ids is not None
             if cfg_active:
                 noise = _vanilla_flux2_cfg_predict(
-                    transformer, latents, latent_ids,
-                    prompt_embeds, text_ids,
-                    negative_prompt_embeds, negative_text_ids,  # type: ignore[arg-type]
-                    guidance, timestep,
+                    transformer,
+                    latents,
+                    latent_ids,
+                    prompt_embeds,
+                    text_ids,
+                    negative_prompt_embeds,
+                    negative_text_ids,  # type: ignore[arg-type]
+                    guidance,
+                    timestep,
                 )
-                handle._state.stats.record(StepDecision(
-                    step_idx=handle._state.cache.step_counter,
-                    timestep=timestep_val, rel_l1=None,
-                    accumulated_distance=handle._state.cache.accumulated_distance,
-                    decision="cfg-fallback",
-                ))
+                handle._state.stats.record(
+                    StepDecision(
+                        step_idx=handle._state.cache.step_counter,
+                        timestep=timestep_val,
+                        rel_l1=None,
+                        accumulated_distance=handle._state.cache.accumulated_distance,
+                        decision="cfg-fallback",
+                    )
+                )
                 handle._state.cache.step_counter += 1
                 handle._state.cache.last_timestep = timestep_val
                 return noise
@@ -108,8 +126,7 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
             # 3. Gated non-CFG path. Validate skip-window lazily here (first
             #    non-CFG call of the generation), per §5.6.
             if not handle._state.cache.skip_window_validated:
-                if (handle.skip_first_n_steps + handle.skip_last_n_steps
-                        >= ctx.active_num_steps):
+                if handle.skip_first_n_steps + handle.skip_last_n_steps >= ctx.active_num_steps:
                     raise InvalidStepWindowError(
                         skip_first=handle.skip_first_n_steps,
                         skip_last=handle.skip_last_n_steps,
@@ -118,10 +135,15 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
                 handle._state.cache.skip_window_validated = True
 
             return flux2_forward_with_gate(
-                transformer, handle,
-                hidden_states=latents, encoder_hidden_states=prompt_embeds,
-                timestep=timestep, img_ids=latent_ids, txt_ids=text_ids,
+                transformer,
+                handle,
+                hidden_states=latents,
+                encoder_hidden_states=prompt_embeds,
+                timestep=timestep,
+                img_ids=latent_ids,
+                txt_ids=text_ids,
             )
 
         return predict
+
     return predict_factory

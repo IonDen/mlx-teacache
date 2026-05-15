@@ -62,7 +62,11 @@ class _FakeFlux2Inner:
     """Synthetic Flux2Transformer surface — just enough for the fast path."""
 
     def __init__(
-        self, *, text_seq: int = 2, img_seq: int = 4, dim: int = 8,
+        self,
+        *,
+        text_seq: int = 2,
+        img_seq: int = 4,
+        dim: int = 8,
         rope_dim: int = 4,
     ) -> None:
         self.text_seq = text_seq
@@ -140,7 +144,8 @@ def _make_handle(*, rel_l1_thresh: float, num_inference_steps: int = 4) -> Any:
 def _run_one_step(handle: Any) -> mx.array:
     inner = _FakeFlux2Inner()
     return flux2_forward_with_gate(
-        inner, handle,
+        inner,
+        handle,
         hidden_states=mx.zeros((1, 4, 4)),
         encoder_hidden_states=mx.zeros((1, 2, 4)),
         timestep=mx.array([1000.0]),

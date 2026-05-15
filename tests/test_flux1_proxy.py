@@ -24,6 +24,7 @@ class _TinyInnerTransformer(nn.Module):
 @pytest.fixture
 def proxy_and_inner():
     from mlx_teacache.integrations.mflux.flux1 import ProxyFlux1Transformer
+
     inner = _TinyInnerTransformer()
     handle = object()  # not exercised in these compat tests
     proxy = ProxyFlux1Transformer(inner, handle)

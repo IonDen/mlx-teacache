@@ -23,9 +23,9 @@ from mlx_teacache.errors import Img2ImgNotSupportedError
 
 @dataclass
 class GenerationContext:
-    token: int = 0                              # incremented in call_before_loop
-    active_num_steps: int | None = None         # set in call_before_loop, cleared by wrapper
-    consumed_at_token: int | None = None        # set when FLUX.2 predict closure consumes
+    token: int = 0  # incremented in call_before_loop
+    active_num_steps: int | None = None  # set in call_before_loop, cleared by wrapper
+    consumed_at_token: int | None = None  # set when FLUX.2 predict closure consumes
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,7 @@ class PendingFinalize:
     """Set by call_after_loop; consumed by the generate_image wrapper after
     original() returns naturally. Typed (rather than dict) so strict mypy
     can verify the field shapes at every callsite."""
+
     num_inference_steps: int
     cfg_was_active: bool
 
@@ -141,6 +142,7 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
         registry = getattr(flux, "callbacks", None)
         if cb is not None and not _callback_present_by_identity(registry, cb):
             from mlx_teacache.errors import MissingGenerationContextError
+
             raise MissingGenerationContextError(
                 "TeaCache's lifecycle callback is no longer registered on "
                 "flux.callbacks. This usually means flux.callbacks was "
@@ -178,10 +180,18 @@ def _callback_present_by_identity(registry: Any, target: Any) -> bool:
     suffixed names (for fake-registry test fixtures), then generic fallbacks."""
     if registry is None:
         return False
-    for attr in ("before_loop", "in_loop", "after_loop", "interrupt",
-                 "before_loop_callbacks", "in_loop_callbacks",
-                 "after_loop_callbacks", "interrupt_callbacks",
-                 "_callbacks", "callbacks"):
+    for attr in (
+        "before_loop",
+        "in_loop",
+        "after_loop",
+        "interrupt",
+        "before_loop_callbacks",
+        "in_loop_callbacks",
+        "after_loop_callbacks",
+        "interrupt_callbacks",
+        "_callbacks",
+        "callbacks",
+    ):
         lst = getattr(registry, attr, None)
         if isinstance(lst, list) and any(item is target for item in lst):
             return True

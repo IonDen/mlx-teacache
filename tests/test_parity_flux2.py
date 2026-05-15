@@ -111,13 +111,20 @@ def _gen_kwargs_klein(prompt: str, *, guidance: float = 1.0) -> dict[str, Any]:
     """guidance=1.0 → no CFG fallback (our gate is exercised every step).
     guidance>1.0 → CFG fallback path bypasses our gate entirely."""
     return {
-        "prompt": prompt, "seed": 42, "num_inference_steps": 8,
-        "height": 512, "width": 512, "guidance": guidance,
+        "prompt": prompt,
+        "seed": 42,
+        "num_inference_steps": 8,
+        "height": 512,
+        "width": 512,
+        "guidance": guidance,
     }
 
 
 def _paired_parity(
-    flux: Any, gen_kwargs: dict[str, Any], *, rel_l1_thresh: float = 0.0,
+    flux: Any,
+    gen_kwargs: dict[str, Any],
+    *,
+    rel_l1_thresh: float = 0.0,
     **apply_kwargs: Any,
 ) -> tuple[mx.array, mx.array, mx.array, int]:
     """Same protocol as test_parity_flux1's helper.
@@ -141,6 +148,7 @@ def _paired_parity(
 def flux2_klein() -> Any:
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
     flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
     flux.freeze()
     return flux
@@ -171,9 +179,7 @@ def test_paired_parity_klein_pr_gate(flux2_klein: Any) -> None:
     )
     # vanilla_before vs vanilla_after IS bit-exact (both use the same
     # compiled _predict). If this fails, restore() leaked state.
-    assert mx.array_equal(vb, va), (
-        "restore() left a trace; vanilla_after differs from vanilla_before"
-    )
+    assert mx.array_equal(vb, va), "restore() left a trace; vanilla_after differs from vanilla_before"
     assert skipped == 0
 
 
@@ -184,9 +190,7 @@ def test_paired_parity_klein_full(flux2_klein: Any, prompt: str) -> None:
     kw = _gen_kwargs_klein(prompt)
     vb, w, va, skipped = _paired_parity(flux2_klein, kw)
     cos = _cosine(vb, w)
-    assert cos >= _FLUX2_COSINE_GATE, (
-        f"prompt={prompt!r} cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
-    )
+    assert cos >= _FLUX2_COSINE_GATE, f"prompt={prompt!r} cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
     assert mx.array_equal(vb, va)
     assert skipped == 0
 
@@ -198,9 +202,7 @@ def test_paired_parity_reverse_order_klein(flux2_klein: Any) -> None:
         wrapper = _capture(flux2_klein, **kw)
     vanilla = _capture(flux2_klein, **kw)
     cos = _cosine(wrapper, vanilla)
-    assert cos >= _FLUX2_COSINE_GATE, (
-        f"reverse-order parity cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
-    )
+    assert cos >= _FLUX2_COSINE_GATE, f"reverse-order parity cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +236,9 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: Any) -> 
     pathological = (0.0, 0.0, 0.0, -1000.0, 0.0)
     vanilla = _capture(flux2_klein, **kw)
     with apply_teacache(
-        flux2_klein, rel_l1_thresh=0.0, coefficients=pathological,
+        flux2_klein,
+        rel_l1_thresh=0.0,
+        coefficients=pathological,
     ) as h:
         wrapper = _capture(flux2_klein, **kw)
         skipped = h.stats.skipped_count
@@ -261,9 +265,7 @@ def test_restore_completeness(flux2_klein: Any) -> None:
     instance-attribute `_predict` replacement, not transformer proxy."""
     original_predict_was_instance_attr = "_predict" in vars(flux2_klein)
     original_predict = flux2_klein._predict if original_predict_was_instance_attr else None
-    original_generate = (
-        flux2_klein.generate_image if "generate_image" in vars(flux2_klein) else None
-    )
+    original_generate = flux2_klein.generate_image if "generate_image" in vars(flux2_klein) else None
 
     h = apply_teacache(flux2_klein, rel_l1_thresh=0.25)
     cb = h._callback_instance

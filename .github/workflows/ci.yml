@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:  # allows the parity job to be triggered manually
 
 jobs:
   lint:
@@ -34,7 +35,10 @@ jobs:
       - run: uv run mypy src/mlx_teacache
 
   test-pure-core:
-    runs-on: ubuntu-latest
+    # MLX has no Linux wheel (libmlx.so is macOS-only), so even the "pure
+    # core" job runs on macOS. The "pure" qualifier here means the [mflux]
+    # extra is NOT installed — we still need MLX itself as a hard dependency.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -115,6 +119,11 @@ jobs:
           "
 
   test-parity:
+    # Parity tests need real FLUX weights from a gated HuggingFace repo
+    # (black-forest-labs/FLUX.1-dev) which requires user terms-acceptance
+    # and an HF auth token. They are inherently local/nightly, not a
+    # per-PR gate. Trigger manually via `gh workflow run CI` when needed.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-14
     needs: test-mflux
     steps:
@@ -127,4 +136,6 @@ jobs:
       - name: Install test-mflux
         run: uv sync --group test-mflux
       - name: Run parity tests
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run pytest -m parity -v

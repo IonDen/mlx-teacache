@@ -34,9 +34,7 @@ class AlreadyPatchedError(TeaCacheError):
 
 class CalibrationError(TeaCacheError):
     def __init__(self, *, variant_id: str, reason: str) -> None:
-        super().__init__(
-            f"Coefficient calibration data for variant {variant_id!r} is invalid: {reason}."
-        )
+        super().__init__(f"Coefficient calibration data for variant {variant_id!r} is invalid: {reason}.")
         self.variant_id = variant_id
         self.reason = reason
 

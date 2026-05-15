@@ -62,16 +62,22 @@ def identify_variant(flux: object) -> VariantId:
         if "schnell" in aliases:
             return "flux1-schnell"
         raise IncompatibleModelError(
-            actual_type=actual_type, actual_model_name=model_name, supported=list(_SUPPORTED),
+            actual_type=actual_type,
+            actual_model_name=model_name,
+            supported=list(_SUPPORTED),
         )
 
     if isinstance(flux, _Flux2KleinType):
         if "flux2-klein-4b" in aliases:
             return "flux2-klein-4b"
         raise IncompatibleModelError(
-            actual_type=actual_type, actual_model_name=model_name, supported=list(_SUPPORTED),
+            actual_type=actual_type,
+            actual_model_name=model_name,
+            supported=list(_SUPPORTED),
         )
 
     raise IncompatibleModelError(
-        actual_type=actual_type, actual_model_name=model_name, supported=list(_SUPPORTED),
+        actual_type=actual_type,
+        actual_model_name=model_name,
+        supported=list(_SUPPORTED),
     )

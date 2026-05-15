@@ -119,13 +119,18 @@ def _make_capturing_closure(inner: Any, captures: list[dict[str, Any]], ModelCon
 
         mod_in = _flux2_extract_mod_input(inner, body_in, temb_mod_params_img)
         body_out_concat = _flux2_run_body(
-            inner, body_in, encoder_hs, temb,
-            temb_mod_params_img, temb_mod_params_txt, concat_rotary_emb,
+            inner,
+            body_in,
+            encoder_hs,
+            temb,
+            temb_mod_params_img,
+            temb_mod_params_txt,
+            concat_rotary_emb,
         )
         mx.eval(mod_in, body_out_concat)
         captures.append({"mod_in": mod_in, "body_out": body_out_concat})
 
-        out = body_out_concat[:, encoder_hs.shape[1]:, ...]
+        out = body_out_concat[:, encoder_hs.shape[1] :, ...]
         out = inner.norm_out(out, temb)
         out = inner.proj_out(out)
         return out
@@ -140,8 +145,12 @@ def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
     flux._predict = _build_capturing_predict_factory(captures)
     try:
         flux.generate_image(
-            prompt=prompt, seed=SEED, num_inference_steps=NUM_INFERENCE_STEPS,
-            height=HEIGHT, width=WIDTH, guidance=GUIDANCE,
+            prompt=prompt,
+            seed=SEED,
+            num_inference_steps=NUM_INFERENCE_STEPS,
+            height=HEIGHT,
+            width=WIDTH,
+            guidance=GUIDANCE,
         )
     finally:
         if had_instance_attr:
@@ -197,15 +206,20 @@ def main() -> None:
     report = {
         "variant": "flux2-klein-4b",
         "num_inference_steps": NUM_INFERENCE_STEPS,
-        "height": HEIGHT, "width": WIDTH, "guidance": GUIDANCE, "seed": SEED,
+        "height": HEIGHT,
+        "width": WIDTH,
+        "guidance": GUIDANCE,
+        "seed": SEED,
         "num_prompts": len(CALIBRATION_PROMPTS),
         "num_pairs": len(xs),
         "elapsed_seconds": elapsed,
         "coefficients_c4_to_c0": [float(c) for c in coeffs],
         "fit_r_squared": r2,
         "calibration_prompts": list(CALIBRATION_PROMPTS),
-        "x_min": float(min(xs)), "x_max": float(max(xs)),
-        "y_min": float(min(ys)), "y_max": float(max(ys)),
+        "x_min": float(min(xs)),
+        "x_max": float(max(xs)),
+        "y_min": float(min(ys)),
+        "y_max": float(max(ys)),
     }
     out_path = Path(__file__).parent / "_calibration_flux2_klein.json"
     out_path.write_text(json.dumps(report, indent=2))

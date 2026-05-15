@@ -65,7 +65,8 @@ def _flux1_run_body(
     hidden_states = body_in
     for idx, block in enumerate(inner.transformer_blocks):
         encoder_hidden_states, hidden_states = inner._apply_joint_transformer_block(
-            idx=idx, block=block,
+            idx=idx,
+            block=block,
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             text_embeddings=text_embeddings,
@@ -75,7 +76,8 @@ def _flux1_run_body(
     hidden_states = mx.concatenate([encoder_hidden_states, hidden_states], axis=1)
     for idx, block in enumerate(inner.single_transformer_blocks):
         hidden_states = inner._apply_single_transformer_block(
-            idx=idx, block=block,
+            idx=idx,
+            block=block,
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             text_embeddings=text_embeddings,
@@ -135,10 +137,16 @@ def flux1_forward_with_gate(
     body_in = inner.x_embedder(hidden_states)
     encoder_hidden_states = inner.context_embedder(prompt_embeds)
     text_embeddings = inner.compute_text_embeddings(
-        t, pooled_prompt_embeds, inner.time_text_embed, config,
+        t,
+        pooled_prompt_embeds,
+        inner.time_text_embed,
+        config,
     )
     image_rotary_embeddings = inner.compute_rotary_embeddings(
-        prompt_embeds, inner.pos_embed, config, kwargs.get("kontext_image_ids"),
+        prompt_embeds,
+        inner.pos_embed,
+        config,
+        kwargs.get("kontext_image_ids"),
     )
 
     # 2a. Threshold-zero fast path: every step is "computed", cache is never
@@ -146,15 +154,23 @@ def flux1_forward_with_gate(
     # subtraction to avoid keeping intermediates alive past the tail.
     if handle.rel_l1_thresh <= 0.0:
         body_out_concat = _flux1_run_body(
-            inner, body_in, encoder_hidden_states, text_embeddings,
-            image_rotary_embeddings, kwargs,
+            inner,
+            body_in,
+            encoder_hidden_states,
+            text_embeddings,
+            image_rotary_embeddings,
+            kwargs,
         )
-        stats.record(StepDecision(
-            step_idx=t, timestep=float(t),
-            rel_l1=None, accumulated_distance=state.accumulated_distance,
-            decision="computed",
-        ))
-        out = body_out_concat[:, encoder_hidden_states.shape[1]:, ...]
+        stats.record(
+            StepDecision(
+                step_idx=t,
+                timestep=float(t),
+                rel_l1=None,
+                accumulated_distance=state.accumulated_distance,
+                decision="computed",
+            )
+        )
+        out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
         out = inner.norm_out(out, text_embeddings)
         out = inner.proj_out(out)
         state.step_counter += 1
@@ -169,7 +185,9 @@ def flux1_forward_with_gate(
     # 4. Defensive shape check.
     if state.previous_mod_input is not None and mod_in.shape != state.previous_mod_input.shape:
         raise TransformerShapeError(
-            step_idx=t, expected=state.previous_mod_input.shape, actual=mod_in.shape,
+            step_idx=t,
+            expected=state.previous_mod_input.shape,
+            actual=mod_in.shape,
         )
 
     # 5. Gate.
@@ -190,8 +208,12 @@ def flux1_forward_with_gate(
     # 7. Compute path driven by decision.
     if decision.should_compute:
         body_out_concat = _flux1_run_body(
-            inner, body_in, encoder_hidden_states, text_embeddings,
-            image_rotary_embeddings, kwargs,
+            inner,
+            body_in,
+            encoder_hidden_states,
+            text_embeddings,
+            image_rotary_embeddings,
+            kwargs,
         )
         if decision.should_update_cache:
             state.cached_residual = body_out_concat - body_in_concat
@@ -207,7 +229,7 @@ def flux1_forward_with_gate(
         body_out_concat = body_in_concat + state.cached_residual
 
     # 8. Tail (mirrors mflux Transformer.__call__ lines 77-80, always runs).
-    out = body_out_concat[:, encoder_hidden_states.shape[1]:, ...]
+    out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
     out = inner.norm_out(out, text_embeddings)
     out = inner.proj_out(out)
 
@@ -226,6 +248,7 @@ def _flux2_compute_mod_in(inner: Any, hidden_states: mx.array, timestep: mx.arra
     the modulation-extraction point, so calibration recorders and the runtime
     gate see byte-identical mod_in tensors. (Per audit medium #6.)"""
     from mflux.models.common.config.model_config import ModelConfig
+
     if not isinstance(timestep, mx.array):
         timestep = mx.array(timestep, dtype=hidden_states.dtype)
     if timestep.ndim == 0:
@@ -241,7 +264,9 @@ def _flux2_compute_mod_in(inner: Any, hidden_states: mx.array, timestep: mx.arra
 
 
 def _flux2_extract_mod_input(
-    inner: Any, body_in: mx.array, temb_mod_params_img: Any,
+    inner: Any,
+    body_in: mx.array,
+    temb_mod_params_img: Any,
 ) -> Any:
     """Extract the modulated input for FLUX.2 — the TeaCache gating signal.
 
@@ -328,6 +353,7 @@ def flux2_forward_with_gate(
     #    Uses the shared _flux2_compute_mod_in helper for mod_in extraction so
     #    calibration and production see byte-identical signals (audit medium #6).
     from mflux.models.common.config.model_config import ModelConfig
+
     if not isinstance(timestep, mx.array):
         timestep = mx.array(timestep, dtype=hidden_states.dtype)
     if timestep.ndim == 0:
@@ -367,19 +393,25 @@ def flux2_forward_with_gate(
     # See docs/superpowers/notes/2026-05-14-task-25-fast-path-measurement.md.
     if handle.rel_l1_thresh <= 0.0:
         body_out_concat = _flux2_run_body(
-            inner, body_in, encoder_hidden_states, temb,
-            temb_mod_params_img, temb_mod_params_txt,
+            inner,
+            body_in,
+            encoder_hidden_states,
+            temb,
+            temb_mod_params_img,
+            temb_mod_params_txt,
             concat_rotary_emb,
         )
-        stats.record(StepDecision(
-            step_idx=state.step_counter,
-            timestep=float(timestep.flatten()[0]),
-            rel_l1=None,
-            accumulated_distance=state.accumulated_distance,
-            decision="computed",
-        ))
+        stats.record(
+            StepDecision(
+                step_idx=state.step_counter,
+                timestep=float(timestep.flatten()[0]),
+                rel_l1=None,
+                accumulated_distance=state.accumulated_distance,
+                decision="computed",
+            )
+        )
         state.last_timestep = float(timestep.flatten()[0])
-        out = body_out_concat[:, encoder_hidden_states.shape[1]:, ...]
+        out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
         out = inner.norm_out(out, temb)
         out = inner.proj_out(out)
         state.step_counter += 1
@@ -395,7 +427,8 @@ def flux2_forward_with_gate(
     if state.previous_mod_input is not None and mod_in.shape != state.previous_mod_input.shape:
         raise TransformerShapeError(
             step_idx=state.step_counter,
-            expected=state.previous_mod_input.shape, actual=mod_in.shape,
+            expected=state.previous_mod_input.shape,
+            actual=mod_in.shape,
         )
 
     # 4. Gate.
@@ -411,9 +444,13 @@ def flux2_forward_with_gate(
     )
 
     # 5. Stats record.
-    stats.record(_step_decision_from_gate(
-        decision, step_idx=state.step_counter, timestep=float(timestep.flatten()[0]),
-    ))
+    stats.record(
+        _step_decision_from_gate(
+            decision,
+            step_idx=state.step_counter,
+            timestep=float(timestep.flatten()[0]),
+        )
+    )
 
     # 6. Debug-only timestep tracking.
     state.last_timestep = float(timestep.flatten()[0])
@@ -421,8 +458,12 @@ def flux2_forward_with_gate(
     # 7. Compute path.
     if decision.should_compute:
         body_out_concat = _flux2_run_body(
-            inner, body_in, encoder_hidden_states, temb,
-            temb_mod_params_img, temb_mod_params_txt,
+            inner,
+            body_in,
+            encoder_hidden_states,
+            temb,
+            temb_mod_params_img,
+            temb_mod_params_txt,
             concat_rotary_emb,
         )
         if decision.should_update_cache:
@@ -431,13 +472,12 @@ def flux2_forward_with_gate(
     else:
         if state.cached_residual is None:
             raise InternalStateError(
-                "cached_residual is None on a skipped step (FLUX.2); "
-                "this indicates a gate.py logic bug."
+                "cached_residual is None on a skipped step (FLUX.2); this indicates a gate.py logic bug."
             )
         body_out_concat = body_in_concat + state.cached_residual
 
     # 8. Tail.
-    out = body_out_concat[:, encoder_hidden_states.shape[1]:, ...]
+    out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
     out = inner.norm_out(out, temb)
     out = inner.proj_out(out)
 

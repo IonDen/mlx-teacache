@@ -18,9 +18,13 @@ from mlx_teacache.errors import (
 
 def test_all_subclass_teacache_error():
     for cls in [
-        IncompatibleModelError, AlreadyPatchedError, CalibrationError,
-        TransformerShapeError, InvalidStepWindowError,
-        MissingGenerationContextError, Img2ImgNotSupportedError,
+        IncompatibleModelError,
+        AlreadyPatchedError,
+        CalibrationError,
+        TransformerShapeError,
+        InvalidStepWindowError,
+        MissingGenerationContextError,
+        Img2ImgNotSupportedError,
         InternalStateError,
     ]:
         assert issubclass(cls, TeaCacheError)

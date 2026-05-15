@@ -107,15 +107,23 @@ def _capture(flux: Any, **gen_kwargs: Any) -> mx.array:
 
 def _gen_kwargs_dev(prompt: str) -> dict[str, Any]:
     return {
-        "prompt": prompt, "seed": 42, "num_inference_steps": 25,
-        "height": 512, "width": 512, "guidance": 3.5,
+        "prompt": prompt,
+        "seed": 42,
+        "num_inference_steps": 25,
+        "height": 512,
+        "width": 512,
+        "guidance": 3.5,
     }
 
 
 def _gen_kwargs_schnell(prompt: str) -> dict[str, Any]:
     return {
-        "prompt": prompt, "seed": 42, "num_inference_steps": 25,
-        "height": 512, "width": 512, "guidance": 0.0,
+        "prompt": prompt,
+        "seed": 42,
+        "num_inference_steps": 25,
+        "height": 512,
+        "width": 512,
+        "guidance": 0.0,
     }
 
 
@@ -124,7 +132,10 @@ def _cosine(a: mx.array, b: mx.array) -> float:
 
 
 def _paired_parity(
-    flux: Any, gen_kwargs: dict[str, Any], *, rel_l1_thresh: float = 0.0,
+    flux: Any,
+    gen_kwargs: dict[str, Any],
+    *,
+    rel_l1_thresh: float = 0.0,
     **apply_kwargs: Any,
 ) -> tuple[mx.array, mx.array, mx.array, int]:
     """Run the paired same-process parity protocol.
@@ -147,6 +158,7 @@ def _paired_parity(
 @pytest.fixture(scope="module")
 def flux1_dev() -> Any:
     from mflux.models.flux.variants.txt2img.flux import Flux1
+
     flux = Flux1.from_name("dev", quantize=4)
     flux.freeze()
     return flux
@@ -155,6 +167,7 @@ def flux1_dev() -> Any:
 @pytest.fixture(scope="module")
 def flux1_schnell() -> Any:
     from mflux.models.flux.variants.txt2img.flux import Flux1
+
     flux = Flux1.from_name("schnell", quantize=4)
     flux.freeze()
     return flux
@@ -175,9 +188,7 @@ def test_paired_parity_dev_pr_gate(flux1_dev: Any) -> None:
     """
     kw = _gen_kwargs_dev(PR_TIME_PROMPT)
     vb, w, va, skipped = _paired_parity(flux1_dev, kw)
-    assert mx.array_equal(vb, w), (
-        "wrapper at rel_l1_thresh=0 must match same-process vanilla math"
-    )
+    assert mx.array_equal(vb, w), "wrapper at rel_l1_thresh=0 must match same-process vanilla math"
     assert mx.array_equal(vb, va), (
         "restore() left a trace; vanilla_after differs from vanilla_before "
         "— check callback / proxy / sentinel cleanup"
@@ -208,8 +219,7 @@ def test_paired_parity_reverse_order_dev(flux1_dev: Any) -> None:
         wrapper = _capture(flux1_dev, **kw)
     vanilla = _capture(flux1_dev, **kw)
     assert mx.array_equal(wrapper, vanilla), (
-        "reverse-order parity failed; wrapper-then-vanilla diverged from "
-        "the vanilla-then-wrapper baseline"
+        "reverse-order parity failed; wrapper-then-vanilla diverged from the vanilla-then-wrapper baseline"
     )
 
 
@@ -237,7 +247,9 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux1_dev: Any) -> No
     pathological = (0.0, 0.0, 0.0, -1000.0, 0.0)
     vanilla = _capture(flux1_dev, **kw)
     with apply_teacache(
-        flux1_dev, rel_l1_thresh=0.0, coefficients=pathological,
+        flux1_dev,
+        rel_l1_thresh=0.0,
+        coefficients=pathological,
     ) as h:
         wrapper = _capture(flux1_dev, **kw)
         skipped = h.stats.skipped_count
@@ -271,6 +283,7 @@ def test_failed_generation_retry_no_stale_cache(flux1_dev: Any) -> None:
     """A mid-loop crash must not leak state into a retry. Retry output
     must remain close to a same-process vanilla baseline."""
     import mlx_teacache.integrations.mflux.forward as fwd
+
     orig = fwd._flux1_run_body
     call_count = [0]
 
@@ -290,9 +303,7 @@ def test_failed_generation_retry_no_stale_cache(flux1_dev: Any) -> None:
             fwd._flux1_run_body = orig  # type: ignore[assignment]
             retry = _capture(flux1_dev, **kw)
             cos = _cosine(retry, vanilla)
-            assert cos >= _COSINE_GATE, (
-                f"retry diverged too far (cos={cos:.4f}); stale cache leak?"
-            )
+            assert cos >= _COSINE_GATE, f"retry diverged too far (cos={cos:.4f}); stale cache leak?"
     finally:
         fwd._flux1_run_body = orig  # type: ignore[assignment]
 
@@ -306,14 +317,20 @@ def test_short_schedule_raises_invalid_step_window(flux1_schnell: Any) -> None:
     """skip_first=1 + skip_last=1 with num_steps=2 must raise at t==0."""
     with (
         apply_teacache(
-            flux1_schnell, rel_l1_thresh=0.25,
-            skip_first_n_steps=1, skip_last_n_steps=1,
+            flux1_schnell,
+            rel_l1_thresh=0.25,
+            skip_first_n_steps=1,
+            skip_last_n_steps=1,
         ),
         pytest.raises(InvalidStepWindowError),
     ):
         flux1_schnell.generate_image(
-            seed=42, prompt="test", num_inference_steps=2,
-            height=512, width=512, guidance=0.0,
+            seed=42,
+            prompt="test",
+            num_inference_steps=2,
+            height=512,
+            width=512,
+            guidance=0.0,
         )
 
 
@@ -363,12 +380,19 @@ def test_custom_zero_coefficients_skip_count(flux1_dev: Any) -> None:
     skip_last = 1
     expected_skips = num_steps - skip_first - skip_last - 1
     with apply_teacache(
-        flux1_dev, rel_l1_thresh=0.25, coefficients=[0.0] * 5,
-        skip_first_n_steps=skip_first, skip_last_n_steps=skip_last,
+        flux1_dev,
+        rel_l1_thresh=0.25,
+        coefficients=[0.0] * 5,
+        skip_first_n_steps=skip_first,
+        skip_last_n_steps=skip_last,
     ) as h:
         flux1_dev.generate_image(
-            seed=42, prompt=PR_TIME_PROMPT, num_inference_steps=num_steps,
-            height=512, width=512, guidance=3.5,
+            seed=42,
+            prompt=PR_TIME_PROMPT,
+            num_inference_steps=num_steps,
+            height=512,
+            width=512,
+            guidance=3.5,
         )
     assert h.stats.skipped_count == expected_skips
 
@@ -390,17 +414,23 @@ def test_flux1_callback_replacement_raises(flux1_dev: Any) -> None:
     raise MissingGenerationContextError on the next generate_image rather
     than silently running degraded."""
     from mflux.callbacks.callback_registry import CallbackRegistry
+
     h = apply_teacache(flux1_dev, rel_l1_thresh=0.25)
     try:
         flux1_dev.callbacks = CallbackRegistry()
         with pytest.raises(MissingGenerationContextError) as exc:
             flux1_dev.generate_image(
-                seed=42, prompt=PR_TIME_PROMPT, num_inference_steps=4,
-                height=512, width=512, guidance=3.5,
+                seed=42,
+                prompt=PR_TIME_PROMPT,
+                num_inference_steps=4,
+                height=512,
+                width=512,
+                guidance=3.5,
             )
         assert "handle.restore()" in str(exc.value)
     finally:
         import contextlib
+
         with contextlib.suppress(Exception):
             h.restore()
 
@@ -413,9 +443,11 @@ def test_composes_with_mlx_taef_live_preview(flux1_dev: Any, tmp_path: Any) -> N
 
     preview_calls: list[int] = []
     preview = LivePreviewCallback(
-        variant="taef1", every=5,
+        variant="taef1",
+        every=5,
         save_to=str(tmp_path / "preview.png"),
-        latent_height=32, latent_width=32,
+        latent_height=32,
+        latent_width=32,
     )
     orig_in_loop = preview.call_in_loop
 
@@ -429,8 +461,12 @@ def test_composes_with_mlx_taef_live_preview(flux1_dev: Any, tmp_path: Any) -> N
     try:
         with apply_teacache(flux1_dev, rel_l1_thresh=0.25):
             flux1_dev.generate_image(
-                seed=42, prompt=PR_TIME_PROMPT,
-                num_inference_steps=25, height=512, width=512, guidance=3.5,
+                seed=42,
+                prompt=PR_TIME_PROMPT,
+                num_inference_steps=25,
+                height=512,
+                width=512,
+                guidance=3.5,
             )
     finally:
         for lst_name in ("in_loop", "in_loop_callbacks", "_callbacks", "callbacks"):

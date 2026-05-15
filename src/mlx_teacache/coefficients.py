@@ -119,9 +119,7 @@ def load_builtin(variant_id: str) -> tuple[tuple[float, float, float, float, flo
         )
     coeffs, prov = _REGISTRY[variant_id]
     if len(coeffs) != 5 or not all(math.isfinite(c) for c in coeffs):
-        raise CalibrationError(
-            variant_id=variant_id, reason=f"corrupt entry: coefficients {coeffs!r}"
-        )
+        raise CalibrationError(variant_id=variant_id, reason=f"corrupt entry: coefficients {coeffs!r}")
     return coeffs, prov
 
 

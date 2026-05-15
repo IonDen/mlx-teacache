@@ -32,6 +32,7 @@ class _HandleState:
 class TeaCacheHandle:
     """Returned by apply_teacache. Context-manager-compatible. Holds live stats
     and a restore() method that reverses every mutation from apply_teacache."""
+
     variant_id: Literal["flux1-dev", "flux1-schnell", "flux2-klein-4b"]
     rel_l1_thresh: float
     coefficients: tuple[float, float, float, float, float]
@@ -69,6 +70,7 @@ class TeaCacheHandle:
 
         # 3. Callback removal by identity. Warn if registry was replaced.
         import warnings
+
         cb = self._callback_instance
         registry = getattr(flux, "callbacks", None)
         if registry is not None and cb is not None:
@@ -105,10 +107,18 @@ def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
     We try the real list names first, then the suffixed names (for backward
     compat with existing fake-registry test fixtures), then generic fallbacks."""
     removed_any = False
-    for attr in ("before_loop", "in_loop", "after_loop", "interrupt",
-                 "before_loop_callbacks", "in_loop_callbacks",
-                 "after_loop_callbacks", "interrupt_callbacks",
-                 "_callbacks", "callbacks"):
+    for attr in (
+        "before_loop",
+        "in_loop",
+        "after_loop",
+        "interrupt",
+        "before_loop_callbacks",
+        "in_loop_callbacks",
+        "after_loop_callbacks",
+        "interrupt_callbacks",
+        "_callbacks",
+        "callbacks",
+    ):
         lst = getattr(registry, attr, None)
         if isinstance(lst, list):
             for i in range(len(lst) - 1, -1, -1):
@@ -165,12 +175,14 @@ def apply_teacache(
     existing = getattr(flux, "_teacache_handle", None)
     if existing is not None:
         raise AlreadyPatchedError(
-            variant_id=existing.variant_id, rel_l1_thresh=existing.rel_l1_thresh,
+            variant_id=existing.variant_id,
+            rel_l1_thresh=existing.rel_l1_thresh,
         )
     # Per audit Low #9: FLUX.1 secondary cross-check — proxy present but sentinel
     # missing indicates inconsistent state from a partial earlier patch.
     if variant_id.startswith("flux1-") and isinstance(flux.transformer, ProxyFlux1Transformer):
         from mlx_teacache.errors import InternalStateError
+
         raise InternalStateError(
             "flux.transformer is a ProxyFlux1Transformer but flux has no "
             "_teacache_handle sentinel. This indicates an inconsistent patch "
@@ -216,18 +228,22 @@ def apply_teacache(
         callback = GenerationContextCallback(handle)
         handle._callback_instance = callback
         flux.callbacks.register(callback)
+
         def _rollback_callback() -> None:
             _remove_callback_by_identity(flux.callbacks, callback)
+
         rollback.append(_rollback_callback)
 
         # Step B: wrap generate_image (records _generate_image_was_instance_attr).
         wrap_generate_image(flux, handle)
+
         def _rollback_generate_image() -> None:
             if handle._generate_image_was_instance_attr:
                 flux.generate_image = handle._original_generate_image
             else:
                 if "generate_image" in vars(flux):
                     del flux.generate_image
+
         rollback.append(_rollback_generate_image)
 
         # Step C: patch transformer / _predict.
@@ -237,16 +253,20 @@ def apply_teacache(
             rollback.append(lambda: setattr(flux, "transformer", handle._original_transformer))
         else:
             flux._predict = make_teacache_predict_factory(handle)
+
             def _rollback_predict() -> None:
                 if "_predict" in vars(flux):
                     del flux._predict
+
             rollback.append(_rollback_predict)
 
         # Step D: set sentinel.
         flux._teacache_handle = handle
+
         def _rollback_sentinel() -> None:
             if getattr(flux, "_teacache_handle", None) is handle:
                 delattr(flux, "_teacache_handle")
+
         rollback.append(_rollback_sentinel)
     except BaseException:
         # Reverse every applied mutation, swallowing rollback failures so we

@@ -38,6 +38,23 @@ class PendingFinalize:
     cfg_was_active: bool
 
 
+def _active_step_count(config: Any) -> int:
+    """Number of denoising calls mflux will actually run for this generation.
+
+    For txt2img: equals `config.num_inference_steps`. For img2img: equals
+    `num_inference_steps - init_time_step` per mflux's Config.time_steps
+    property (`range(init_time_step, num_inference_steps)`). We do NOT consume
+    `config.time_steps` directly because that property constructs a tqdm
+    instance mflux later reuses for progress timing — touching it would
+    fork the iterator.
+
+    Returns 0 when no denoising will happen (e.g., image_strength=1.0).
+    """
+    nominal = int(config.num_inference_steps)
+    init_step = int(getattr(config, "init_time_step", 0) or 0)
+    return max(0, nominal - init_step)
+
+
 class GenerationContextCallback:
     """Single callback class for both variants.
 

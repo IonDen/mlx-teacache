@@ -18,8 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from mlx_teacache.errors import Img2ImgNotSupportedError
-
 
 @dataclass
 class GenerationContext:
@@ -58,7 +56,7 @@ def _active_step_count(config: Any) -> int:
 class GenerationContextCallback:
     """Single callback class for both variants.
 
-    - call_before_loop: captures num_inference_steps + rejects img2img.
+    - call_before_loop: captures active_num_steps, resets cache, bumps token.
     - call_after_loop: marks PendingFinalize (does NOT commit stats — the
       wrapper commits after original() returns naturally).
     - call_interrupt: no-op for stats (would violate len(decisions) == num_steps
@@ -78,22 +76,16 @@ class GenerationContextCallback:
         depth_image: Any | None = None,
         **_extra: Any,
     ) -> None:
-        # img2img rejection. Applies to BOTH variants. mflux invokes before-loop
-        # callbacks after config/prompt/latent setup; the rejection happens before
-        # the first denoising transformer forward but mflux has already done its
-        # setup work — that cost is unavoidable.
-        if (
-            getattr(config, "image_path", None) is not None
-            and getattr(config, "image_strength", None) is not None
-            and config.image_strength > 0.0
-        ):
-            raise Img2ImgNotSupportedError(variant=self._handle.variant_id)
-
         # Bump generation token. FLUX.2 predict closure uses this to detect a
         # fresh, unconsumed context. FLUX.1 increments but doesn't read it.
+        active_num_steps = _active_step_count(config)
         self._handle._gen_ctx.token += 1
-        self._handle._gen_ctx.active_num_steps = config.num_inference_steps
+        self._handle._gen_ctx.active_num_steps = active_num_steps
         self._handle._gen_ctx.consumed_at_token = None
+        # Lifecycle is the single owner of cache reset (was: scattered across
+        # forward.py for FLUX.1 and flux2.py for FLUX.2). Using active_num_steps
+        # (not nominal) makes the cache invariants consistent under img2img.
+        self._handle._state.cache.reset_for_new_generation(num_steps=active_num_steps)
 
     def call_after_loop(
         self,
@@ -108,10 +100,19 @@ class GenerationContextCallback:
         # If we finalized eagerly, public counters would be committed for a
         # generation that ends up raising. Instead the generate_image wrapper
         # finalizes after original() returns naturally.
+        active_num_steps = self._handle._gen_ctx.active_num_steps
+        if active_num_steps is None:
+            # Defensive: before_loop should have set this. Recompute rather
+            # than skipping finalization, so a missing setup doesn't silently
+            # discard stats.
+            active_num_steps = _active_step_count(config)
+
         self._handle._pending_finalize = PendingFinalize(
-            num_inference_steps=config.num_inference_steps,
+            num_inference_steps=active_num_steps,
             cfg_was_active=self._handle._state.stats._staging.cfg_fallback > 0,
         )
+        # Clear gen-ctx fields only after capture so a subsequent before_loop
+        # sees None.
         self._handle._gen_ctx.active_num_steps = None
         self._handle._gen_ctx.consumed_at_token = None
 

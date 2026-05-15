@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.errors import Img2ImgNotSupportedError
 from mlx_teacache.integrations.mflux.lifecycle import (
     GenerationContext,
     GenerationContextCallback,
@@ -41,7 +40,13 @@ def _txt2img_config():
 
 
 def _img2img_config():
-    return SimpleNamespace(image_path="x.png", image_strength=0.5, num_inference_steps=25)
+    # 0.5 * 25 = 12 init_time_step; matches mflux Config semantics.
+    return SimpleNamespace(
+        image_path="x.png",
+        image_strength=0.5,
+        num_inference_steps=25,
+        init_time_step=12,
+    )
 
 
 def test_before_loop_captures_num_steps():
@@ -53,12 +58,14 @@ def test_before_loop_captures_num_steps():
     assert handle._gen_ctx.consumed_at_token is None
 
 
-def test_before_loop_rejects_img2img_for_variant_in_error():
+def test_before_loop_accepts_img2img_no_rejection():
+    """img2img is supported as of v0.2 — no exception expected."""
     handle = _FakeHandle(variant_id="flux2-klein-4b")
     cb = GenerationContextCallback(handle)
-    with pytest.raises(Img2ImgNotSupportedError) as exc:
-        cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_img2img_config())
-    assert "flux2-klein-4b" in str(exc.value)
+    # Should not raise:
+    cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_img2img_config())
+    # active_num_steps is set from _active_step_count: 25 - 12 = 13 for this config.
+    assert handle._gen_ctx.active_num_steps == 13
 
 
 def test_after_loop_marks_pending_finalize_does_not_commit():

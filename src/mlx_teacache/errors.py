@@ -53,15 +53,41 @@ class TransformerShapeError(TeaCacheError):
 
 
 class InvalidStepWindowError(TeaCacheError):
-    def __init__(self, *, skip_first: int, skip_last: int, num_steps: int) -> None:
+    def __init__(
+        self,
+        *,
+        skip_first: int,
+        skip_last: int,
+        num_steps: int,                            # legacy alias for active count
+        nominal_num_inference_steps: int | None = None,
+        active_num_steps: int | None = None,
+    ) -> None:
+        # Resolve which value represents the "active" denoising step count.
+        # New callers may pass active_num_steps explicitly; old callers pass it
+        # via the legacy `num_steps` keyword.
+        active = num_steps if active_num_steps is None else active_num_steps
+
+        if nominal_num_inference_steps is not None and nominal_num_inference_steps != active:
+            tail = (
+                f"; got skip_first={skip_first}, skip_last={skip_last}, "
+                f"active_num_steps={active}, nominal_num_inference_steps={nominal_num_inference_steps} "
+                f"(sum {skip_first + skip_last} >= {active})."
+            )
+        else:
+            tail = (
+                f". Got skip_first={skip_first}, skip_last={skip_last}, "
+                f"active_num_steps={active} "
+                f"(sum {skip_first + skip_last} >= {active})."
+            )
         super().__init__(
-            f"skip_first_n_steps + skip_last_n_steps must be < num_inference_steps. "
-            f"Got skip_first={skip_first}, skip_last={skip_last}, num_steps={num_steps} "
-            f"(sum {skip_first + skip_last} >= {num_steps})."
+            "skip_first_n_steps + skip_last_n_steps must be < active denoising steps"
+            + tail
         )
         self.skip_first = skip_first
         self.skip_last = skip_last
-        self.num_steps = num_steps
+        self.num_steps = num_steps  # legacy attribute name preserved
+        self.nominal_num_inference_steps = nominal_num_inference_steps
+        self.active_num_steps = active
 
 
 class MissingGenerationContextError(TeaCacheError):
@@ -78,13 +104,25 @@ class MissingGenerationContextError(TeaCacheError):
 
 
 class Img2ImgNotSupportedError(TeaCacheError):
+    """DEPRECATED — kept for v0.2 import compatibility only.
+
+    img2img is supported as of v0.2.0; this error is no longer raised
+    internally. Constructing it emits DeprecationWarning. Will be removed in v0.3.0.
+    """
+
     def __init__(self, *, variant: str) -> None:
+        import warnings
+
+        warnings.warn(
+            "Img2ImgNotSupportedError is deprecated and no longer raised "
+            "internally; img2img is supported as of mlx-teacache 0.2.0. "
+            "This class will be removed in v0.3.0.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(
-            f"Image-to-image generation is not supported in mlx-teacache v0.1 "
-            f"(variant={variant!r}). Passing image_path with image_strength > 0.0 "
-            f"to generate_image() while TeaCache is active is rejected here. "
-            f"Call handle.restore() to use mflux's img2img directly. "
-            f"img2img support is planned for v0.2."
+            f"Image-to-image generation is not supported "
+            f"(variant={variant!r}). [Deprecated — see DeprecationWarning above.]"
         )
         self.variant = variant
 

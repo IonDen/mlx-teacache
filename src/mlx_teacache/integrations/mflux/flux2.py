@@ -86,10 +86,13 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
             ctx = handle._gen_ctx
 
             # 1. Consume context on the first call of THIS generation's closure.
+            #    Cache reset is now lifecycle-owned (see lifecycle.py
+            #    call_before_loop) — we still need the guard so a missing /
+            #    stale gen-ctx raises a clear error rather than silently using
+            #    stale cache state.
             if not context_consumed:
                 if ctx.active_num_steps is None or ctx.consumed_at_token == ctx.token:
                     raise MissingGenerationContextError()
-                handle._state.cache.reset_for_new_generation(num_steps=ctx.active_num_steps)
                 ctx.consumed_at_token = ctx.token
                 context_consumed = True
 

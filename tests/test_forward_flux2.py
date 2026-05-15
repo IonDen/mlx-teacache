@@ -27,7 +27,15 @@ from mlx_teacache.stats import TeaCacheStats
 
 
 class _FakeFlux2Block:
-    """Stand-in for Flux2TransformerBlock — pass-through."""
+    """Stand-in for Flux2TransformerBlock — pass-through.
+
+    `norm1` must exist because `_flux2_extract_mod_input` reaches into
+    `inner.transformer_blocks[0].norm1` to apply the ada-LN-zero
+    normalization that produces the gating signal (mirrors real mflux's
+    Flux2TransformerBlock.__call__ lines 32-36)."""
+
+    def __init__(self) -> None:
+        self.norm1 = lambda x: x  # pass-through LayerNorm
 
     def __call__(
         self,
@@ -78,23 +86,23 @@ class _FakeFlux2Inner:
     def time_guidance_embed(self, timestep: mx.array, _ignored: Any) -> mx.array:
         return mx.zeros((1, self.dim))
 
-    def double_stream_modulation_img(self, temb: mx.array) -> tuple[mx.array, mx.array, mx.array]:
-        # Flux2Modulation returns (shift, scale, gate, ...). We only care
-        # about shapes for fast-path skipping the modulation use.
-        b = int(temb.shape[0])
+    def _mod_set(self, b: int) -> tuple[mx.array, mx.array, mx.array]:
+        # Real Flux2Modulation expand_dims to [B, 1, D] before splitting.
         return (
-            mx.zeros((b, self.dim)),  # shift
-            mx.zeros((b, self.dim)),  # scale
-            mx.zeros((b, self.dim)),  # gate
+            mx.zeros((b, 1, self.dim)),  # shift
+            mx.zeros((b, 1, self.dim)),  # scale
+            mx.zeros((b, 1, self.dim)),  # gate
         )
 
-    def double_stream_modulation_txt(self, temb: mx.array) -> tuple[mx.array, mx.array, mx.array]:
+    def double_stream_modulation_img(self, temb: mx.array) -> tuple[Any, Any]:
+        # Real Flux2Modulation with mod_param_sets=2 returns a nested tuple:
+        #   ((shift_msa, scale_msa, gate_msa), (shift_mlp, scale_mlp, gate_mlp))
         b = int(temb.shape[0])
-        return (
-            mx.zeros((b, self.dim)),
-            mx.zeros((b, self.dim)),
-            mx.zeros((b, self.dim)),
-        )
+        return (self._mod_set(b), self._mod_set(b))
+
+    def double_stream_modulation_txt(self, temb: mx.array) -> tuple[Any, Any]:
+        b = int(temb.shape[0])
+        return (self._mod_set(b), self._mod_set(b))
 
     def single_stream_modulation(self, temb: mx.array) -> tuple[Any, Any]:
         b = int(temb.shape[0])

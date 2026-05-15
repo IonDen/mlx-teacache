@@ -40,11 +40,19 @@ _UPSTREAM_FLUX_COEFFS: tuple[float, float, float, float, float] = (
     0.264230861,
 )
 
-# Derived in-repo by scripts/calibrate.py on 50 prompts × 25 steps on M1 Max.
+# Derived in-repo by scripts/calibrate_flux2_klein.py on 2026-05-15:
+#   10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, guidance=1.0,
+#   512×512, vanilla forward (no caching). 70 consecutive-step pairs of
+#   (rel_l1(mod_in_t, mod_in_{t-1}), rel_l1(body_out_t, body_out_{t-1})).
+#   numpy.polyfit degree=4 → R² = 0.6530.
+# See scripts/_calibration_flux2_klein.json for the full report.
 # Stored verbatim; do not hand-edit. New calibrations bump revision and minor version.
-# Placeholder values updated by Task 29 after calibration runs.
 _FLUX2_KLEIN_4B_COEFFS: tuple[float, float, float, float, float] = (
-    0.0, 0.0, 0.0, 0.0, 0.0,  # filled by Task 29
+    236.9190176127698,
+    -201.47401360106662,
+    66.91354236854073,
+    -11.14796738073235,
+    1.2674506310647067,
 )
 
 
@@ -89,11 +97,11 @@ _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]
         _FLUX2_KLEIN_4B_COEFFS,
         Provenance(
             source="builtin",
-            revision="builtin-v1",
-            calibration_dataset="50 prompts × 25 steps × seed range, M1 Max 32GB, fp16",
-            fit_metric="max-abs-error on held-out 10-prompt validation set",
-            fit_metric_value=None,  # filled by Task 29
-            reference_url="https://github.com/IonDen/mlx-teacache/blob/main/docs/calibration.md",
+            revision="in-repo-2026-05-15",
+            calibration_dataset="10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0",
+            fit_metric="numpy.polyfit R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs",
+            fit_metric_value=0.6530168924992779,
+            reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2_klein.py",
         ),
     ),
 }

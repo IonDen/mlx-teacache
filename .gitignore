@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.DS_Store
 .venv/
 .hypothesis/
 .pytest_cache/

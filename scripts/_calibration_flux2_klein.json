@@ -1,0 +1,35 @@
+{
+  "variant": "flux2-klein-4b",
+  "num_inference_steps": 8,
+  "height": 512,
+  "width": 512,
+  "guidance": 1.0,
+  "seed": 42,
+  "num_prompts": 10,
+  "num_pairs": 70,
+  "elapsed_seconds": 196.37411785125732,
+  "coefficients_c4_to_c0": [
+    236.9190176127698,
+    -201.47401360106662,
+    66.91354236854073,
+    -11.14796738073235,
+    1.2674506310647067
+  ],
+  "fit_r_squared": 0.6530168924992779,
+  "calibration_prompts": [
+    "a red apple on a wooden table",
+    "mountain landscape at sunset",
+    "portrait of a woman",
+    "abstract pattern with circles",
+    "text saying HELLO",
+    "a futuristic cityscape at night",
+    "a watercolor painting of a cat",
+    "a steampunk airship in the clouds",
+    "macro photograph of a butterfly wing",
+    "neon signs in a rainy street"
+  ],
+  "x_min": 0.2001306414604187,
+  "x_max": 0.4252921938896179,
+  "y_min": 0.261385053396225,
+  "y_max": 1.0081627368927002
+}

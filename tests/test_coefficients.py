@@ -31,10 +31,11 @@ def test_load_builtin_flux2_klein_4b_has_dataset_and_metric():
     coeffs, prov = load_builtin("flux2-klein-4b")
     assert len(coeffs) == 5
     assert prov.source == "builtin"
-    assert prov.revision == "builtin-v1"
+    assert prov.revision == "in-repo-2026-05-15"
     assert prov.calibration_dataset is not None
     assert prov.fit_metric is not None
-    # fit_metric_value is filled by Task 29 (calibration run); allow None for now.
+    assert prov.fit_metric_value is not None
+    assert 0.0 < prov.fit_metric_value <= 1.0
 
 
 def test_load_builtin_unknown_variant_raises_calibration_error():

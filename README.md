@@ -7,11 +7,11 @@
 
 **TeaCache step-skipping for FLUX diffusion on Apple Silicon, in pure MLX.**
 
-`mlx-teacache` is the first MLX port of TeaCache — a training-free inference optimization that skips ~40-60% of denoising steps in FLUX-family diffusion models by predicting which steps contribute little to the final image. Targets ~1.4–1.9× wall-clock speedup at non-distilled schedules with minimal perceptual quality loss.
+`mlx-teacache` is the first MLX port of TeaCache — a training-free inference optimization that skips ~20-50% of denoising steps in FLUX-family diffusion models by predicting which steps contribute little to the final image. Measured ~1.48× wall-clock speedup at the default threshold on FLUX.1-dev / 25 steps with visually-equivalent output (SSIM ≥ 0.80 on a 5-prompt suite).
 
 ## What it does
 
-Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little; TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max FLUX.2 Klein 4b @ 25 steps: ~12s vanilla → ~8s with `rel_l1_thresh=0.25`.
+Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little; TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max FLUX.1-dev @ 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps for a ~1.48× speedup.
 
 ```python
 from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
@@ -19,7 +19,7 @@ from mflux.models.common.config.model_config import ModelConfig
 from mlx_teacache import apply_teacache
 
 flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
-with apply_teacache(flux, rel_l1_thresh=0.25):
+with apply_teacache(flux):  # default rel_l1_thresh=0.20
     flux.generate_image(prompt="a red apple", seed=42, num_inference_steps=25)
 ```
 
@@ -46,20 +46,23 @@ from mflux.models.flux.variants.txt2img.flux import Flux1
 from mlx_teacache import apply_teacache
 
 flux = Flux1.from_name("dev", quantize=4)
-with apply_teacache(flux, rel_l1_thresh=0.25) as handle:
+with apply_teacache(flux) as handle:  # default rel_l1_thresh=0.20
     flux.generate_image(prompt="...", seed=42, num_inference_steps=25, guidance=3.5)
     print(f"Speedup: {handle.stats.speedup_estimate:.2f}×")
 ```
 
 ## Threshold guide
 
-Measured on M1 Max 32GB, FLUX.2 Klein 4b @ 25 steps, fp16 (numbers filled after Task 28's benchmark run):
+Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`, red-apple prompt:
 
-| `rel_l1_thresh` | Speedup | SSIM vs vanilla | Recommended use |
-|---|---|---|---|
-| 0.1 | ~1.3× | ≥ 0.99 | Quality-critical |
-| **0.25 (default)** | **~1.5×** | **≥ 0.97** | Most workflows |
-| 0.4 | ~1.9× | ≥ 0.93 | Speed-critical |
+| `rel_l1_thresh` | Skipped steps | Speedup | SSIM vs vanilla | Recommended use |
+|---|---|---|---|---|
+| 0.10 | 0 / 25 | 1.07× | 1.0000 | Cache never engages |
+| 0.15 | 0 / 25 | 1.13× | 1.0000 | Cache never engages |
+| **0.20 (default)** | **6 / 25** | **1.48×** | **≥ 0.80 (5-prompt suite)** | **Visually-lossless sweet spot** |
+| 0.25 | 11 / 25 | 1.96× | 0.57-0.93 | Visible style changes on text/synthetic prompts |
+
+The 0.20 default was chosen after side-by-side visual comparison: at 0.25 a text prompt that vanilla renders as neon tubes can come out as dot-matrix; at 0.20 the output is indistinguishable from vanilla while still skipping ~25% of steps. SSIM is a conservative metric on high-frequency-detail prompts (text, synthetic patterns).
 
 ## Supported models
 
@@ -79,7 +82,7 @@ preview = LivePreviewCallback(variant="taef2", every=5, save_to="preview.png",
                               latent_height=32, latent_width=32)
 flux.callbacks.register(preview)
 
-with apply_teacache(flux, rel_l1_thresh=0.25):
+with apply_teacache(flux):  # default rel_l1_thresh=0.20
     flux.generate_image(prompt="...", seed=42, num_inference_steps=25)
 ```
 
@@ -109,7 +112,14 @@ mlx-teacache implements this for mflux on Apple Silicon. We replace `flux.transf
 
 ## Benchmarks
 
-(Numbers filled in by Task 28's benchmark run.)
+M1 Max 32GB, default threshold (`rel_l1_thresh=0.20`):
+
+| Model | Steps | Vanilla | With TeaCache | Speedup | SSIM (PR-gate prompt) |
+|---|---|---|---|---|---|
+| FLUX.1-dev @ 512² | 25 | ~5:18 | ~3:35 | 1.48× | ≥ 0.90 |
+| FLUX.2 Klein 4b @ 512² | 8 | ~37s | ~30s | ~1.2× | ≥ 0.85 |
+
+FLUX.2's smaller speedup at 8 steps reflects the short non-distilled denoising trajectory at Klein's recommended step count. Longer schedules (`num_inference_steps>=15`) give larger gains.
 
 ## Limitations
 
@@ -118,6 +128,7 @@ mlx-teacache implements this for mflux on Apple Silicon. We replace `flux.transf
 - **Distilled schedules see no speedup.** FLUX.1 schnell 4-step and Klein 4-step defaults have too few non-forced steps. Use `num_inference_steps >= 10` for benefit.
 - **Klein variants other than `flux2-klein-4b` are not supported in v0.1.** 9b and base configs planned for v0.2.
 - **M3+ users lose mflux's `mx.compile` of `_predict`.** v0.1 provides a manual benchmark recipe (`docs/m3-plus-tradeoff.md`) and does not claim a measured M3+ speedup.
+- **FLUX.2 parity is numerical, not bit-exact.** Because the wrapper replaces a function mflux wraps in `mx.compile`, vanilla-compiled vs wrapper-eager differ by ~1 ULP per element from Metal kernel-dispatch noise (compounds across steps; cosine similarity stays ≥ 0.99). The CFG-fallback path remains bit-exact. End-to-end image quality (SSIM ≥ 0.85 on Klein 4b) is the user-facing guarantee.
 - **mflux pin is strict (`>=0.17,<0.18`).** Bumping requires a deliberate release.
 - **Parent-level `flux.parameters()` may miss transformer parameters while patched.** Use `flux.transformer.parameters()` directly, or `handle.restore()` first.
 

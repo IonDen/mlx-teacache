@@ -241,22 +241,28 @@ def _flux2_compute_mod_in(inner: Any, hidden_states: mx.array, timestep: mx.arra
 
 
 def _flux2_extract_mod_input(
-    inner: Any, body_in: mx.array, temb_mod_params_img: tuple[mx.array, ...],
+    inner: Any, body_in: mx.array, temb_mod_params_img: Any,
 ) -> Any:
-    """Extract the modulated input for FLUX.2.
+    """Extract the modulated input for FLUX.2 — the TeaCache gating signal.
 
-    Flux2Modulation produces a tuple of modulation parameters. The first
-    set is applied to body_in inside Flux2TransformerBlock; we replicate
-    the modulation step here without running attention so we can use the
-    result as the gating signal.
+    Mirrors the first ada-LN-zero block of `Flux2TransformerBlock.__call__`
+    exactly so the signal we threshold against is the same tensor the
+    attention path actually sees:
 
-    Reference: mflux flux2_transformer/modulation.py + transformer_block.py.
+        norm_hidden_states = self.norm1(hidden_states)
+        norm_hidden_states = (1 + scale_msa) * norm_hidden_states + shift_msa
 
-    Flux2Modulation returns (shift, scale, gate, ...). We apply ada-LN-zero
-    to body_in: out = body_in * (1 + scale) + shift."""
-    scale = temb_mod_params_img[1][:, None, :]
-    shift = temb_mod_params_img[0][:, None, :]
-    return body_in * (1.0 + scale) + shift
+    Reference: mflux flux2_transformer/transformer_block.py lines 32-36.
+
+    `Flux2Modulation` with `mod_param_sets=2` returns a nested tuple:
+        temb_mod_params_img = ((shift_msa, scale_msa, gate_msa),
+                                (shift_mlp, scale_mlp, gate_mlp))
+    We use the MSA (first) set — that's the one applied to the body input
+    before attention. Each element is already shaped [B, 1, D] (from
+    `expand_dims` inside `Flux2Modulation.__call__`)."""
+    (shift_msa, scale_msa, _gate_msa), *_ = temb_mod_params_img
+    norm_in = inner.transformer_blocks[0].norm1(body_in)
+    return (1.0 + scale_msa) * norm_in + shift_msa
 
 
 def _flux2_run_body(

@@ -81,21 +81,28 @@ def _gen_kwargs_klein(prompt: str, *, guidance: float = 1.0) -> dict[str, Any]:
 
 
 def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: int) -> np.ndarray:
-    """Decode a FLUX.2 packed latent through mflux's VAE to HxWx3 uint8."""
-    from mflux.models.common.vae.vae_util import VAEUtil
-    from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCreator
+    """Decode a FLUX.2 packed latent through mflux's VAE to HxWx3 uint8.
 
-    unpacked = Flux2LatentCreator.unpack_latents(
-        latents=packed_latent, height=height, width=width,
-    )
-    decoded = VAEUtil.decode(
-        vae=flux.vae, latent=unpacked,
-        tiling_config=getattr(flux, "tiling_config", None),
-    )
+    The `after_loop` callback fires with `latents` shaped
+    `(batch, latent_h*latent_w, channels)` (pre-reshape). mflux then reshapes
+    to `(batch, channels, latent_h, latent_w)` and calls
+    `vae.decode_packed_latents`. We mirror that here. See
+    `mflux/models/flux2/variants/txt2img/flux2_klein.py` lines 114-118."""
+    # FLUX.2 packed-latent scale factor: image dim / 16 (vae_scale_factor=8
+    # combined with patch_size=2).
+    latent_h = height // 16
+    latent_w = width // 16
+    batch = packed_latent.shape[0]
+    channels = packed_latent.shape[-1]
+    packed = packed_latent.reshape(batch, latent_h, latent_w, channels).transpose(0, 3, 1, 2)
+    decoded = flux.vae.decode_packed_latents(packed)
     decoded_fp32 = decoded.astype(mx.float32)
     mx.eval(decoded_fp32)
-    img_np = np.asarray(decoded_fp32[0]).transpose(1, 2, 0)
-    img_np = np.clip((img_np + 1.0) * 127.5, 0.0, 255.0).astype(np.uint8)
+    arr = np.asarray(decoded_fp32[0])
+    # mflux VAE outputs (C, H, W) in roughly [-1, 1].
+    if arr.ndim == 3 and arr.shape[0] in (1, 3):
+        arr = arr.transpose(1, 2, 0)
+    img_np = np.clip((arr + 1.0) * 127.5, 0.0, 255.0).astype(np.uint8)
     return img_np
 
 

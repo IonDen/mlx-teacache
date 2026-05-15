@@ -9,6 +9,7 @@ perceptually close to same-process vanilla).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
@@ -128,10 +129,22 @@ def flux2_klein() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_default_threshold_ssim_klein_pr_gate(flux2_klein: Any) -> None:
+@pytest.mark.parametrize("image_strength,init_image_name", [
+    (0.0, None),                  # txt2img baseline
+    (0.5, "natural_512.png"),     # img2img with natural init image
+])
+def test_default_threshold_ssim_klein_pr_gate(
+    flux2_klein: Any, image_strength: float, init_image_name: str | None
+) -> None:
     """PR-time gate: wrapper at the package-default rel_l1_thresh must
     produce a decoded image whose SSIM vs same-process vanilla is >= the gate."""
     kw = _gen_kwargs_klein(PR_TIME_PROMPT)
+    if init_image_name is not None:
+        kw["image_path"] = str(
+            Path(__file__).parent / "fixtures" / "init_images" / init_image_name
+        )
+        kw["image_strength"] = image_strength
+
     vanilla_latent = _capture(flux2_klein, **kw)
     with apply_teacache(flux2_klein) as h:  # uses package default rel_l1_thresh
         wrapper_latent = _capture(flux2_klein, **kw)
@@ -156,7 +169,8 @@ def test_default_threshold_ssim_klein_pr_gate(flux2_klein: Any) -> None:
     score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
     assert score >= _DEFAULT_THRESHOLD_SSIM, (
         f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM}; wrapper image "
-        f"diverged from same-process vanilla baseline at default threshold"
+        f"diverged from same-process vanilla baseline at default threshold "
+        f"(image_strength={image_strength})"
     )
 
 

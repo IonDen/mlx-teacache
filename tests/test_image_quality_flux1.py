@@ -24,9 +24,14 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 import pytest
-from skimage.metrics import structural_similarity as ssim
 
-from mlx_teacache import apply_teacache
+# scikit-image only lives in the test-mflux group, not test-core. When this
+# file is collected by the pure-core CI job the bare `from skimage` import
+# fails before pytest can evaluate the `parity` marker. `importorskip` makes
+# collection skip the whole module cleanly in that environment.
+ssim = pytest.importorskip("skimage.metrics").structural_similarity
+
+from mlx_teacache import apply_teacache  # noqa: E402
 
 pytestmark = pytest.mark.parity
 

@@ -14,9 +14,12 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 import pytest
-from skimage.metrics import structural_similarity as ssim
 
-from mlx_teacache import apply_teacache
+# scikit-image only lives in the test-mflux group, not test-core. See
+# `test_image_quality_flux1.py` for the same pattern + rationale.
+ssim = pytest.importorskip("skimage.metrics").structural_similarity
+
+from mlx_teacache import apply_teacache  # noqa: E402
 
 pytestmark = pytest.mark.parity
 

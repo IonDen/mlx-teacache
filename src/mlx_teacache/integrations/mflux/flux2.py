@@ -99,6 +99,8 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
             #    generations should not raise InvalidStepWindowError).
             cfg_active = negative_prompt_embeds is not None and negative_text_ids is not None
             if cfg_active:
+                assert negative_prompt_embeds is not None  # narrowed by cfg_active
+                assert negative_text_ids is not None
                 noise = _vanilla_flux2_cfg_predict(
                     transformer,
                     latents,
@@ -106,7 +108,7 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
                     prompt_embeds,
                     text_ids,
                     negative_prompt_embeds,
-                    negative_text_ids,  # type: ignore[arg-type]
+                    negative_text_ids,
                     guidance,
                     timestep,
                 )

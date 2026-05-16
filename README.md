@@ -7,7 +7,9 @@
 
 **TeaCache step-skipping for FLUX diffusion on Apple Silicon, in pure MLX.**
 
-`mlx-teacache` is the first MLX port of TeaCache, a training-free inference optimization that skips 20-50% of denoising steps in FLUX-family diffusion models by predicting which steps add little to the final image. On FLUX.1-dev / 25 steps at the default threshold we measure 1.48× wall-clock speedup with output that stays visually equivalent (SSIM ≥ 0.80 across a 5-prompt suite, ≥ 0.90 on the PR-gate prompt).
+`mlx-teacache` is the first MLX port of TeaCache, a training-free inference optimization that predicts which denoising steps add little to the final image and reuses the previous step's output instead of running the full transformer. On FLUX.1-dev at 25 steps the polynomial gate skips 6 of 25 steps and produces a measured 1.44× wall-clock speedup with visually-equivalent output (SSIM ≥ 0.80 across a 5-prompt suite, ≥ 0.90 on the PR-gate prompt).
+
+On FLUX.2 Klein at the distilled 4-8 step defaults the polynomial gate does not trigger any skips. Every adjacent-step body output change already exceeds the default threshold, so the gate signals "compute" every time. The wrapper still runs ~1.3-1.9× faster than vanilla mflux on Klein, but the win comes from sidestepping mflux's `mx.compile` of `_predict` rather than from caching. See [Benchmarks](#benchmarks) → "How the speedup happens" and the [postmortem](docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md) for the full story.
 
 ## What it does
 
@@ -96,7 +98,7 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 | `flux2-klein-4b` | `Flux2Klein(model_config=ModelConfig.flux2_klein_4b())` | in-repo (see `docs/calibration.md`) |
 | `flux2-klein-9b`¹ | `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` | in-repo (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
 
-¹ `flux2-klein-9b` coefficients are calibrated and validated at `num_inference_steps=8`. The mflux/BFL default of 4 steps leaves only a single skip opportunity per generation (`eligible=2`, `possible_skips=1`); TeaCache will still run but the wall-clock benefit at 4 steps is bounded by that single skip. For meaningful speedup pass `num_inference_steps=8` (or higher).
+¹ `flux2-klein-9b` coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See the [Benchmarks](#benchmarks) "How the speedup happens" subsection.
 
 ## Combining with mlx-taef
 
@@ -138,19 +140,40 @@ mlx-teacache implements this for mflux on Apple Silicon. For FLUX.1 we replace `
 
 ## Benchmarks
 
-M1 Max 32GB, bf16, 512×512, `seed=42`, default threshold (`rel_l1_thresh=0.20`):
+All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 26.x, mflux 0.17.5, bf16, quantize=4, 512×512, `seed=42`, red-apple prompt; one vanilla warmup + 3 timed reps per condition, median reported, default `rel_l1_thresh=0.20`. Measured 2026-05-16.
 
-| Model | Steps | Mode | Vanilla | With TeaCache | Speedup | Quality gate |
+| Variant | Steps | Vanilla | Wrapper | Speedup | Skipped | Mechanism |
 |---|---|---|---|---|---|---|
-| FLUX.1-dev | 25 | txt2img | ~5:18 | ~3:35 | 1.48× | SSIM ≥ 0.90 (PR-gate prompt) |
-| FLUX.1-dev | 25 | img2img, strength 0.7 | — | — | ≈ same skip fraction | SSIM ≥ 0.80 (parametrized suite) |
-| FLUX.2 Klein 4B | 8 | txt2img | ~37s | ~30s | ~1.2× | SSIM ≥ 0.85 (PR-gate prompt) |
-| FLUX.2 Klein 4B | 8 | img2img, strength 0.5 | — | — | ≈ same skip fraction | SSIM ≥ 0.85 (parametrized suite) |
-| FLUX.2 Klein 9B | 8 | txt2img | — | — | tracked-only | SSIM ≥ 0.85 (PR-gate prompt) |
+| `flux1-dev` | 25 | 103.7s | 71.8s | **1.44×** | **6 / 25** | TeaCache step-skipping |
+| `flux1-schnell` | — | — | — | — | — | shares dev's coefficients; gate behaves like dev at long schedules, like Klein at the 4-step distilled default (no benefit) |
+| `flux2-klein-4b` | 8 | 28.1s | 22.3s | 1.26× | **0 / 8** | `mx.compile` avoidance only |
+| `flux2-klein-9b` | 8 | 119.0s | 61.8s | 1.93×† | **0 / 8** | `mx.compile` avoidance only |
 
-Klein's 8-step speedup is smaller than FLUX.1-dev because Klein is distilled to converge in fewer steps, so the trajectory has fewer adjacent-step redundancies to exploit. Longer schedules (`num_inference_steps >= 15`) give larger gains. The wall-clock columns for img2img are blank because mflux's active window shrinks with `image_strength`, so absolute timings stop being apples-to-apples; the per-step speedup tracks the txt2img skip fraction.
+† Klein 9B wall-clock has high variance from thermal throttling on M1 Max at quantize=4. The 1.93× median combined a thermally-throttled vanilla rep (227s) with a recovered wrapper rep (46s); the steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps.
 
-The five prompts in the SSIM suite are defined at `tests/test_image_quality_flux1.py:45` and reused at `tests/test_image_quality_flux2.py:28`:
+Reproduce any row:
+
+```bash
+uv run python scripts/bench_speedup.py --variant flux1-dev   # 25-step dev
+uv run python scripts/bench_speedup.py --variant klein-4b    # 8-step Klein 4B
+uv run python scripts/bench_speedup.py --variant klein-9b    # 8-step Klein 9B
+```
+
+### How the speedup happens
+
+The wall-clock improvement above comes from two distinct mechanisms; they fire independently depending on variant and schedule.
+
+**1. TeaCache step-skipping.** This is the headline feature. The polynomial gate predicts how much the transformer body output will change since the last actual compute step. When the accumulated predicted change stays below `rel_l1_thresh`, the wrapper reuses the cached residual instead of running the body again. On FLUX.1-dev at 25 steps, 6 of 25 steps are skippable and this is where the 1.44× speedup comes from.
+
+**2. `mx.compile` avoidance on FLUX.2.** mflux wraps `Flux2Klein._predict` in `mx.compile` on every chip except base M1 / base M2. mlx-teacache replaces the compiled `_predict` with an eager Python closure so the gate can run live per step. On M1 Max at quantize=4, the eager closure happens to be ~1.2-1.9× faster than the compiled path even when zero steps get skipped — kernel-dispatch round-trips drop, and there's no recompile pressure when input shapes change between generations.
+
+On FLUX.2 Klein at the distilled 4-8 step defaults, mechanism (1) does not engage: the empirical adjacent-step rel-L1 between consecutive transformer outputs is ≥ 0.25, so every step's predicted change exceeds the default 0.20 threshold and the gate signals "compute" every time. Klein's wall-clock improvement is real and reproducible, but it comes entirely from mechanism (2). See [`docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`](docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md) for the investigation and the v0.4 research plan (FirstBlockCache, per-step-index lookup, fixed-interval caching).
+
+If you specifically want the gate to engage on Klein, bump `rel_l1_thresh` to 0.30 or higher and accept that quality at that threshold on a distilled schedule is untested.
+
+### SSIM suite
+
+Quality gates use a 5-prompt SSIM suite defined at `tests/test_image_quality_flux1.py:45` and reused at `tests/test_image_quality_flux2.py:28`:
 
 - "a red apple on a wooden table"
 - "mountain landscape at sunset"
@@ -158,7 +181,7 @@ The five prompts in the SSIM suite are defined at `tests/test_image_quality_flux
 - "abstract pattern with circles"
 - "text saying HELLO"
 
-The PR-gate prompt is the red-apple one. Reproduce these numbers with `uv run pytest tests/test_image_quality_flux1.py -m parity` (requires real model weights).
+The PR-gate prompt is the red-apple one; SSIM ≥ 0.90 on FLUX.1-dev and ≥ 0.85 on Klein 4B / 9B at the default threshold. Full suite floor is 0.80 to absorb high-frequency-detail variance (text, synthetic patterns). Run `uv run pytest tests/test_image_quality_flux1.py tests/test_image_quality_flux2.py -m parity` with real model weights to reproduce.
 
 ## Performance by chip
 
@@ -175,11 +198,11 @@ mflux 0.17.5 wraps `_predict` in `mx.compile` on every Apple Silicon chip except
 
 ## Limitations
 
-img2img reuses the txt2img calibration. A dedicated img2img calibration may follow in v0.2.x if SSIM gates flag drift on specific schedules.
+img2img reuses the txt2img calibration. A dedicated img2img calibration may follow in a future release if SSIM gates flag drift on specific schedules.
 
 FLUX.2 with CFG (`guidance > 1.0`) falls back to vanilla mflux automatically. Per-branch caching is planned for v0.4.
 
-Very short schedules barely benefit. At the mflux/BFL Klein default of 4 steps with the package's default skip windows (`skip_first=1`, `skip_last=1`), the gate has at most one possible skip per generation, so wall-clock benefit is bounded. FLUX.1 schnell at 4 steps is the same story. Use `num_inference_steps >= 8` for Klein, `>= 10` for schnell, or stick to dev for big wins.
+The polynomial gate does not engage on FLUX.2 Klein at the distilled 4-8 step defaults. Empirical adjacent-step body-output rel-L1 on Klein is ≥ 0.25, above the package default `rel_l1_thresh=0.20`, so the gate never signals "skip" on Klein at the calibrated 8-step schedule (0 skips measured across 3 reps on both Klein 4B and 9B). Klein still gets wall-clock improvement from `mx.compile`-path avoidance (~1.2-1.9× on M1 Max at quantize=4), but the headline TeaCache step-skipping feature only fires on FLUX.1-dev at long schedules (25+ steps). FLUX.1 schnell at the distilled 4-step default behaves like Klein on this axis. See the postmortem at `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md` and the v0.4 research roadmap.
 
 Klein base variants (`flux2-klein-base-4b`, `flux2-klein-base-9b`) are not supported yet. They are planned for v0.4.0 (base-4B, Apache-2.0) and v0.5.0 (base-9B) respectively.
 

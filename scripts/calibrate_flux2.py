@@ -220,11 +220,23 @@ def main() -> None:
         choices=sorted(_VARIANTS.keys()),
         help="Which variant to calibrate. v0.3.0 wires klein-4b and klein-9b.",
     )
+    parser.add_argument(
+        "--fit-mode",
+        default="free",
+        choices=["free", "origin"],
+        help=(
+            "Polynomial fit mode. 'free' = standard numpy.polyfit (c0 unconstrained); "
+            "'origin' = forces the polynomial through (0, 0) so the predicted output "
+            "rel_l1 is 0 when the input rel_l1 is 0. Use 'origin' when the free fit "
+            "gives a non-zero intercept that prevents the gate from ever signaling 'skip'."
+        ),
+    )
     args = parser.parse_args()
     cfg = _VARIANTS[args.variant]
     variant_id: str = cfg["variant_id"]
     num_inference_steps: int = cfg["num_inference_steps"]
     output_json: str = cfg["output_json"]
+    fit_mode: str = args.fit_mode
 
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
@@ -255,12 +267,24 @@ def main() -> None:
 
     # Degree-4 polynomial. numpy.polyfit returns high-to-low which matches
     # the (c4, c3, c2, c1, c0) convention used by gate.poly_eval.
-    coeffs = np.polyfit(xs, ys, 4)
+    xs_np = np.array(xs)
+    ys_np = np.array(ys)
+    if fit_mode == "free":
+        coeffs = np.polyfit(xs_np, ys_np, 4)
+    elif fit_mode == "origin":
+        # Constrained least squares: fit y = a4*x^4 + a3*x^3 + a2*x^2 + a1*x
+        # (no intercept), then pad c0 = 0 so the returned shape is still (5,).
+        X = np.column_stack([xs_np**4, xs_np**3, xs_np**2, xs_np])
+        a, *_ = np.linalg.lstsq(X, ys_np, rcond=None)
+        coeffs = np.array([a[0], a[1], a[2], a[3], 0.0])
+    else:
+        raise ValueError(f"unknown fit_mode={fit_mode!r}")
     p = np.poly1d(coeffs)
-    y_pred = p(xs)
-    ss_res = float(np.sum((np.array(ys) - y_pred) ** 2))
-    ss_tot = float(np.sum((np.array(ys) - np.mean(ys)) ** 2))
+    y_pred = p(xs_np)
+    ss_res = float(np.sum((ys_np - y_pred) ** 2))
+    ss_tot = float(np.sum((ys_np - np.mean(ys_np)) ** 2))
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    print(f"fit_mode = {fit_mode}")
     print(f"R^2 = {r2:.6f}")
     print("Coefficients (c4, c3, c2, c1, c0):")
     for c in coeffs:
@@ -276,9 +300,12 @@ def main() -> None:
         "num_prompts": len(CALIBRATION_PROMPTS),
         "num_pairs": len(xs),
         "elapsed_seconds": elapsed,
+        "fit_mode": fit_mode,
         "coefficients_c4_to_c0": [float(c) for c in coeffs],
         "fit_r_squared": r2,
         "calibration_prompts": list(CALIBRATION_PROMPTS),
+        "x_values": [float(x) for x in xs],  # raw x array for offline refit
+        "y_values": [float(y) for y in ys],  # raw y array for offline refit
         "x_min": float(min(xs)),
         "x_max": float(max(xs)),
         "y_min": float(min(ys)),

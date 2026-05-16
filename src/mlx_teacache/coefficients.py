@@ -55,18 +55,30 @@ _FLUX2_KLEIN_4B_COEFFS: tuple[float, float, float, float, float] = (
     1.2674506310647067,
 )
 
-# Derived in-repo by scripts/calibrate_flux2.py --variant klein-9b on
-# 2026-05-16: 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16,
-# guidance=1.0, 512×512, vanilla forward (no caching). 70 consecutive-step
-# pairs of (rel_l1(mod_in_t, mod_in_{t-1}), rel_l1(body_out_t, body_out_{t-1})).
-# See scripts/_calibration_flux2_klein_9b.json for the full report.
+# Derived in-repo by scripts/calibrate_flux2.py --variant klein-9b
+# --fit-mode origin on 2026-05-16: 10 prompts × 8 steps × seed=42 on
+# M1 Max 32GB, bf16, guidance=1.0, 512×512, vanilla forward (no caching).
+# 70 consecutive-step pairs of (rel_l1(mod_in_t, mod_in_{t-1}),
+# rel_l1(body_out_t, body_out_{t-1})). Origin-constrained least-squares
+# fit (forces poly(0)=0 so the polynomial is physically sensible at small
+# input rel_l1). See scripts/_calibration_flux2_klein_9b.json for the
+# full report.
+#
+# Note: at the package default rel_l1_thresh=0.20 these coefficients do
+# not trigger any skips on Klein 9B's 8-step distilled schedule — the
+# empirical y range starts at 0.25 (every adjacent-step body_out change
+# exceeds the threshold). Apply does not raise or warn at this state;
+# the wrapper is still useful through `mx.compile` avoidance on chips
+# that compile `_predict`. See docs/superpowers/notes/ for the
+# 2026-05-16 postmortem and the v0.4 FLUX.2 research task.
+#
 # Stored verbatim; do not hand-edit. New calibrations bump revision.
 _FLUX2_KLEIN_9B_COEFFS: tuple[float, float, float, float, float] = (
-    656.4333189496849,
-    -813.7792148543009,
-    363.79521003323794,
-    -69.94817924621485,
-    5.362745652413115,
+    -523.8412980807129,
+    530.2492512602308,
+    -177.64385734082498,
+    20.893264957040557,
+    0.0,
 )
 
 
@@ -122,10 +134,10 @@ _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]
         _FLUX2_KLEIN_9B_COEFFS,
         Provenance(
             source="builtin",
-            revision="in-repo-2026-05-16",
-            calibration_dataset="10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0",
-            fit_metric="numpy.polyfit R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs",
-            fit_metric_value=0.542113049363836,
+            revision="in-repo-2026-05-16-origin",
+            calibration_dataset="10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0, origin-constrained polyfit",
+            fit_metric="constrained-LSQ R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
+            fit_metric_value=0.4710289350635284,
             reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
         ),
     ),

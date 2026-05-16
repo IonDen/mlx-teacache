@@ -43,7 +43,7 @@ def test_load_builtin_flux2_klein_9b_has_dataset_and_metric():
     assert len(coeffs) == 5
     assert all(math.isfinite(c) for c in coeffs)
     assert prov.source == "builtin"
-    assert prov.revision == "in-repo-2026-05-16"
+    assert prov.revision == "in-repo-2026-05-16-origin"
     assert prov.calibration_dataset is not None
     assert prov.fit_metric is not None
     assert prov.fit_metric_value is not None

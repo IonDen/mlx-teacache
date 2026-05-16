@@ -1,10 +1,12 @@
 # tests/test_detect.py
 """Variant detection. Maps an mflux model instance to a variant_id string.
-Uses (class name, model_config.model_name) so we can distinguish:
+Uses (class name, model_config.aliases) so we can distinguish:
 - Flux1 + dev   ⇒ flux1-dev
 - Flux1 + schnell ⇒ flux1-schnell
 - Flux2Klein + flux2_klein_4b ⇒ flux2-klein-4b
-Rejects everything else (including Klein 9b/base in v0.1) with IncompatibleModelError."""
+- Flux2Klein + flux2_klein_9b ⇒ flux2-klein-9b
+Rejects everything else (Klein base-4b, base-9b, unknown Flux1 aliases,
+non-Flux types) with IncompatibleModelError."""
 
 import pytest
 
@@ -59,17 +61,18 @@ def test_unknown_flux1_model_raises():
     assert "flux1-dev" in str(exc.value)
 
 
-def test_flux2_klein_9b_rejected():
-    with pytest.raises(IncompatibleModelError) as exc:
-        identify_variant(_FakeFlux2Klein("flux2-klein-9b"))
-    msg = str(exc.value)
-    assert "flux2-klein-9b" in msg
-    assert "flux2-klein-4b" in msg  # message lists supported alternatives
+def test_identify_flux2_klein_9b():
+    assert identify_variant(_FakeFlux2Klein("flux2-klein-9b")) == "flux2-klein-9b"
 
 
 def test_flux2_klein_base_4b_rejected():
     with pytest.raises(IncompatibleModelError):
         identify_variant(_FakeFlux2Klein("flux2-klein-base-4b"))
+
+
+def test_flux2_klein_base_9b_rejected():
+    with pytest.raises(IncompatibleModelError):
+        identify_variant(_FakeFlux2Klein("flux2-klein-base-9b"))
 
 
 def test_completely_unknown_type_rejected():

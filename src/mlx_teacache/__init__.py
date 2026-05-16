@@ -26,7 +26,6 @@ from mlx_teacache.coefficients import Provenance
 from mlx_teacache.errors import (
     AlreadyPatchedError,
     CalibrationError,
-    Img2ImgNotSupportedError,
     IncompatibleModelError,
     InternalStateError,
     InvalidStepWindowError,
@@ -60,5 +59,4 @@ __all__ = [
     "InternalStateError",
     "InvalidStepWindowError",
     "MissingGenerationContextError",
-    "Img2ImgNotSupportedError",
 ]

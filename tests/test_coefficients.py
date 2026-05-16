@@ -38,6 +38,31 @@ def test_load_builtin_flux2_klein_4b_has_dataset_and_metric():
     assert 0.0 < prov.fit_metric_value <= 1.0
 
 
+def test_load_builtin_flux2_klein_9b_has_dataset_and_metric():
+    coeffs, prov = load_builtin("flux2-klein-9b")
+    assert len(coeffs) == 5
+    assert all(math.isfinite(c) for c in coeffs)
+    assert prov.source == "builtin"
+    assert prov.revision == "in-repo-2026-05-16"
+    assert prov.calibration_dataset is not None
+    assert prov.fit_metric is not None
+    assert prov.fit_metric_value is not None
+    assert 0.0 < prov.fit_metric_value <= 1.0
+    assert (prov.reference_url or "").endswith("calibrate_flux2.py")
+
+
+@pytest.mark.parametrize(
+    "variant_id",
+    ["flux1-dev", "flux1-schnell", "flux2-klein-4b", "flux2-klein-9b"],
+)
+def test_every_supported_variant_has_builtin_coefficients(variant_id):
+    coeffs, prov = load_builtin(variant_id)
+    assert isinstance(coeffs, tuple)
+    assert len(coeffs) == 5
+    assert all(math.isfinite(c) for c in coeffs)
+    assert prov.source == "builtin"
+
+
 def test_load_builtin_unknown_variant_raises_calibration_error():
     with pytest.raises(CalibrationError) as excinfo:
         load_builtin("flux42-mythical")

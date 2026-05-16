@@ -7,6 +7,51 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-16
+
+### Added
+- **img2img support** for FLUX.1 dev/schnell and FLUX.2 Klein 4B. Pass
+  `image_path` + `image_strength > 0` to `flux.generate_image()` with TeaCache
+  active. Caching engages on the effective denoising window
+  (`num_inference_steps - init_time_step` predict calls per mflux's `Config`
+  semantics). Same polynomial coefficients as txt2img — verified by SSIM gates
+  on a fixed init-image suite.
+- **`TeaCacheNoBenefitWarning`** category emitted once per handle when the
+  current configuration cannot produce any cache-skipped steps — i.e., when
+  `active_num_steps - skip_first_n_steps - skip_last_n_steps <= 1`. Examples:
+  very short schedules (`num_inference_steps=3` with default skip windows),
+  or aggressive `skip_first` / `skip_last` on any schedule. Suppress via the
+  standard `warnings` module.
+- `docs/calibration.md` documents the coefficient calibration procedure
+  (cross-reference for `scripts/calibrate_flux2_klein.py`).
+
+### Changed
+- `InvalidStepWindowError` message now references "active denoising steps"
+  and reports both nominal and active step counts under img2img.
+- FLUX.1 forward path: cache reset is now lifecycle-owned (was: triggered by
+  `t == 0`); step indexing inside the gate uses a 0-based counter (was:
+  absolute scheduler timestep). No behavior change for txt2img; fixes
+  silent state leakage under img2img.
+- FLUX.2 predict closure: removed the redundant cache reset (lifecycle owns
+  it now); the context-consumption guard and `MissingGenerationContextError`
+  paths are unchanged.
+- README per-chip Performance section corrected: M1 Pro / M2 Pro are eager
+  in mflux 0.17.5 (the `is_m1_or_m2()` predicate only excludes Max + Ultra
+  variants). M5 TensorOps wording softened to "may lose some or all" pending
+  hardware-side benchmark confirmation.
+- `docs/manual-verification.md` rewritten to use a working recipe
+  (`after_loop` callback for latent capture; FLUX.2 cosine oracle).
+
+### Deprecated
+- `Img2ImgNotSupportedError` is deprecated; constructing it issues
+  `DeprecationWarning`. It is no longer raised internally. Removal planned
+  for v0.3.0.
+
+### Fixed
+- Stats finalization under img2img now passes the active denoising step count
+  (not nominal) to `finalize_last_generation`, preserving the
+  `len(decisions) == num_inference_steps` invariant.
+
 ## [0.1.1] — 2026-05-15
 
 ### Changed

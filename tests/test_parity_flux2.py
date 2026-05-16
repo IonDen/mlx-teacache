@@ -46,12 +46,13 @@ pytestmark = pytest.mark.parity
 # Cosine-similarity gate for "wrapper at threshold=0 matches same-process
 # vanilla". Per-element tolerance (mx.allclose) is the wrong oracle on the
 # FLUX.2 gated path: our re-implementation of Flux2Transformer.__call__ runs
-# eager Python (mflux's predict path is mx.compile-wrapped on M3+, eager
-# elsewhere), and MLX lazy-eval ordering between our eager structure and
-# mflux's compiled/eager structure differs in subtle ref-count / dispatch
-# ways that compound to ~3-4 max_abs over 8 steps even though the math is
-# equivalent. Cosine similarity catches catastrophic divergence (real math
-# bugs) while accepting the ULP-level dispatch noise.
+# eager Python (mflux's predict path is mx.compile-wrapped on every chip
+# except base M1 / base M2 — see docs/m3-plus-tradeoff.md), and MLX lazy-eval
+# ordering between our eager structure and mflux's compiled/eager structure
+# differs in subtle ref-count / dispatch ways that compound to ~3-4 max_abs
+# over 8 steps even though the math is equivalent. Cosine similarity catches
+# catastrophic divergence (real math bugs) while accepting the ULP-level
+# dispatch noise.
 #
 # Measured 2026-05-15: cosine ~0.99+ on M1 Max FLUX.2 Klein 4b at 8 steps
 # with the current implementation. Gate set 0.02 below that to absorb

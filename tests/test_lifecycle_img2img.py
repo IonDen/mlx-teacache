@@ -4,11 +4,20 @@ plumbing through before/after-loop, image_strength=1.0 no-op, and the deletion
 regression guard for img2img rejection.
 """
 
+from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
+from mlx_teacache.cache import TeaCacheState
+from mlx_teacache.integrations.mflux.lifecycle import (
+    GenerationContext,
+    GenerationContextCallback,
+    PendingFinalize,
+    _active_step_count,
+)
+from mlx_teacache.stats import StepDecision, TeaCacheStats
 
 
 def _make_config(num_inference_steps: int, *, image_strength: float | None = None) -> SimpleNamespace:
@@ -67,17 +76,6 @@ def test_active_step_count_floor_at_zero():
 
 
 # ---- Lifecycle plumbing ----
-
-from dataclasses import dataclass, field
-from typing import Any
-
-from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.integrations.mflux.lifecycle import (
-    GenerationContext,
-    GenerationContextCallback,
-    PendingFinalize,
-)
-from mlx_teacache.stats import StepDecision, TeaCacheStats
 
 
 @dataclass

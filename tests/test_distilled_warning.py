@@ -10,7 +10,6 @@ and when the configuration is about to raise InvalidStepWindowError.
 import warnings
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 

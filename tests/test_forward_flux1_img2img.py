@@ -8,7 +8,6 @@ that change.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
 from unittest.mock import MagicMock
 
 import mlx.core as mx
@@ -19,7 +18,6 @@ from mlx_teacache.errors import InvalidStepWindowError
 from mlx_teacache.integrations.mflux.forward import flux1_forward_with_gate
 from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
 from mlx_teacache.stats import TeaCacheStats
-
 
 # --- Stubs ---
 
@@ -88,7 +86,7 @@ def test_img2img_first_call_uses_step_counter_zero_even_when_t_positive():
     # Step decision has step_idx=0 (relative), timestep=17.0 (absolute).
     assert len(handle._state.stats._staging.decisions) == 1
     decision = handle._state.stats._staging.decisions[0]
-    assert decision.step_idx == 0, "expected relative 0-based index, got {}".format(decision.step_idx)
+    assert decision.step_idx == 0, f"expected relative 0-based index, got {decision.step_idx}"
     assert decision.timestep == 17.0, "expected absolute scheduler timestep"
 
 

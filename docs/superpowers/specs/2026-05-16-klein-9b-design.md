@@ -37,7 +37,7 @@ v0.2.0 deprecated it with a `DeprecationWarning` on construction and the CHANGEL
 
 ## Architecture
 
-mlx-teacache's runtime is already variant-agnostic: lifecycle, gate, forward, and cache code routes by `variant_id` string. Adding a variant is a five-touch change: detect, coefficients, calibration script, tests, docs.
+mlx-teacache's runtime is already variant-agnostic in lifecycle, gate, forward, and cache — those routes by `variant_id` string with no per-variant branching. The public `api.py` surface, however, still hard-codes the 4B-only support list in three places (the handle's `variant_id` `Literal`, the docstring, the FLUX.2 `_predict` defensive guard, and an `IncompatibleModelError` arm), so adding a variant is a **six-touch change**: api, detect, coefficients, calibration script, tests, docs.
 
 ```
 flux instance
@@ -52,58 +52,75 @@ Provenance is recorded in `_FLUX2_KLEIN_9B_COEFFS_PROVENANCE` next to the tuple,
 
 ## Components
 
-### 1. Variant registry — `src/mlx_teacache/integrations/mflux/detect.py`
+### 1. Public API — `src/mlx_teacache/api.py`
+
+The current code paths that hard-code 4B-only support all need to learn about 9B:
+
+- `TeaCacheHandle.variant_id: Literal["flux1-dev", "flux1-schnell", "flux2-klein-4b"]` at `api.py:37` — add `"flux2-klein-9b"`. Import the `VariantId` alias from `detect.py` and reuse it here so the two cannot drift.
+- The `apply_teacache` public docstring at `api.py:142-145` — extend the supported-variants list.
+- The defensive `_predict` override guard at `api.py:194-200` — change `variant_id == "flux2-klein-4b"` to `variant_id.startswith("flux2-")` so 9B (and future FLUX.2 variants) get the same protection.
+- The hard-coded `supported=["flux1-dev", "flux1-schnell", "flux2-klein-4b"]` in the `IncompatibleModelError` raise at `api.py:199` and `api.py:227` — replace with the `_SUPPORTED` tuple imported from `detect.py` so the supported list has one source of truth.
+
+### 2. Variant registry — `src/mlx_teacache/integrations/mflux/detect.py`
 
 - Add `"flux2-klein-9b"` to the `VariantId` `Literal` and to `_SUPPORTED`.
 - In the `isinstance(flux, _Flux2KleinType)` branch, accept both `"flux2-klein-4b"` and `"flux2-klein-9b"` aliases. The `base-4b` / `base-9b` aliases continue to raise `IncompatibleModelError`.
 
-### 2. Coefficients — `src/mlx_teacache/coefficients.py`
+### 3. Coefficients — `src/mlx_teacache/coefficients.py`
 
-Add a new constant + provenance block alongside the existing 4B set:
+The existing layout stores coefficients and `Provenance` together as a tuple value inside the `_REGISTRY` dict (with `source: Literal["builtin", "user"]`), not as separate module-level constants. Match that shape for 9B:
 
 ```python
-_FLUX2_KLEIN_9B_COEFFS: tuple[float, float, float, float, float] = (
-    # filled in by running scripts/calibrate_flux2.py --variant klein-9b
-    # and copying the rounded coefficients from scripts/_calibration_flux2_klein_9b.json
-    ...
-)
-
-_FLUX2_KLEIN_9B_PROVENANCE = Provenance(
-    source="in-repo",
-    revision="<git short-sha of the calibration commit>",
-    calibration_dataset="10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512×512, guidance=1.0",
-    fit_metric="R^2",
-    fit_metric_value=<from JSON>,
-    reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
-)
+# Inside _REGISTRY (coefficients.py:73-105 region), add a third entry:
+"flux2-klein-9b": (
+    (a4, a3, a2, a1, a0),  # filled in from scripts/_calibration_flux2_klein_9b.json
+    Provenance(
+        source="builtin",  # matches the 4B entry's value
+        revision="<short-sha of the v0.3.0 calibration commit>",
+        calibration_dataset="10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512×512, guidance=1.0",
+        fit_metric="R^2",
+        fit_metric_value=<from JSON>,
+        reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
+    ),
+),
 ```
 
-Register the new variant in the existing `_COEFF_REGISTRY` dict.
+Existing public symbols used by callers stay the same: `load_builtin(variant_id)` and the `_REGISTRY` dict. **Do not invent `get_coefficients()` or `_COEFF_REGISTRY`** — those names do not exist in the codebase.
 
-### 3. Calibration script — rename + parameterize
+In the same commit, also update the existing 4B entry's `reference_url` to point at the renamed `scripts/calibrate_flux2.py` (the script is renamed in component #4, so the URL would otherwise rot). The 4B coefficient tuple itself stays byte-for-byte identical.
+
+The leading comment at `coefficients.py:43-49` that names `scripts/calibrate_flux2_klein.py` and `scripts/_calibration_flux2_klein.json` also gets updated to the new filenames.
+
+### 4. Calibration script — rename + parameterize
 
 Rename `scripts/calibrate_flux2_klein.py` → `scripts/calibrate_flux2.py`. Add an argparse `--variant` flag with the four declared Klein variants:
 
-| `--variant` flag | mflux factory | Wired in v0.3.0? | Default `num_inference_steps` | Output JSON |
+| `--variant` flag | mflux factory | Wired in v0.3.0? | Calibration `num_inference_steps` | Output JSON |
 |---|---|---|---|---|
-| `klein-4b` | `ModelConfig.flux2_klein_4b()` | Yes (rerun of existing fit, identical inputs) | 8 | `scripts/_calibration_flux2_klein_4b.json` |
+| `klein-4b` | `ModelConfig.flux2_klein_4b()` | Yes (rerun, identical inputs) | 8 | `scripts/_calibration_flux2_klein_4b.json` |
 | `klein-9b` | `ModelConfig.flux2_klein_9b()` | Yes (new) | 8 | `scripts/_calibration_flux2_klein_9b.json` |
 | `klein-base-4b` | `ModelConfig.flux2_klein_base_4b()` | Declared, raises `NotImplementedError("wired in v0.4.0")` | (n/a) | (n/a) |
 | `klein-base-9b` | `ModelConfig.flux2_klein_base_9b()` | Declared, raises `NotImplementedError("wired in v0.5.0")` | (n/a) | (n/a) |
 
 The existing output `scripts/_calibration_flux2_klein.json` is renamed to `_calibration_flux2_klein_4b.json` so the file layout is uniform. The 4B coefficients themselves stay byte-for-byte identical (we don't recalibrate 4B; the file rename is mechanical).
 
-The prompt list, seed, guidance, and per-step capture wrapper are unchanged. Calibration prompts stay at 10. Step counts default to 8 for both klein-4b and klein-9b.
+The prompt list, seed, guidance, and per-step capture wrapper are unchanged. Calibration prompts stay at 10.
 
-### 4. Tests
+**Why 8 steps, not the mflux default 4.** mflux 0.17.5's `Flux2Klein.generate_image` defaults `num_inference_steps=4`, and the BFL Hugging Face card for `FLUX.2-klein-9B` also shows 4-step inference. Calibrating at 4 steps is the *user-facing* default, but it is also the configuration the v0.2.0 `TeaCacheNoBenefitWarning` is designed to *block* — at 4 steps with the library's default `skip_first=1` + `skip_last=1`, `eligible = 4 - 2 = 2`, so `possible_skips = eligible - 1 = 1`. The polynomial would be fit on a degenerate ≤1-skip-opportunity dataset.
+
+The 4B coefficients were fit at 8 steps for exactly this reason: TeaCache's value proposition only opens at schedules with at least a few skip opportunities. Keeping 9B's calibration at 8 steps matches that choice and keeps the 4B/9B fits on comparable footing.
+
+The acceptance criteria do **not** assert quality at 4 steps. Users running Klein 9B at the mflux default of 4 steps continue to be guided by `TeaCacheNoBenefitWarning` (firing at this exact configuration) rather than by polynomial quality. The CHANGELOG and `docs/calibration.md` say this explicitly: "Klein 9B coefficients are calibrated at 8 steps; using them at `num_inference_steps < 8` produces a `TeaCacheNoBenefitWarning` rather than measurable benefit."
+
+### 5. Tests
 
 - `tests/test_detect.py`
   - Drop `test_flux2_klein_9b_rejected`.
   - Add `test_flux2_klein_9b_accepted` (mirroring the existing 4B-accepted test).
   - Keep `test_flux2_klein_base_4b_rejected` and add `test_flux2_klein_base_9b_rejected`.
 - `tests/test_coefficients.py`
-  - Add a parametrized check that `get_coefficients(variant_id)` returns a length-5 tuple of finite floats for every variant in `_SUPPORTED`, including the new 9B entry.
-  - Add a provenance round-trip assertion for the 9B entry.
+  - Add a parametrized check that `load_builtin(variant_id)` returns a length-5 tuple of finite floats for every variant in `_SUPPORTED`, including the new 9B entry.
+  - Add a provenance round-trip assertion for the 9B entry (`Provenance.source == "builtin"`, `revision` non-empty, `reference_url` points at the renamed script).
 - `tests/test_parity_flux2.py` (parity-marked, opt-in)
   - Add a `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` fixture branch parametrized by variant id.
   - Reuse the existing `image_strength=[0.0, 0.5, 0.7]` parametrization.
@@ -112,15 +129,23 @@ The prompt list, seed, guidance, and per-step capture wrapper are unchanged. Cal
   - Add a Klein 9B fixture branch parametrized by variant.
   - SSIM ≥ 0.85 on the PR-gate prompt at default threshold (matches 4B).
   - SSIM ≥ 0.80 on the 5-prompt suite at default threshold.
+- `tests/test_api.py` (existing parity-marked file)
+  - Add one positive smoke that `apply_teacache(Flux2Klein(model_config=ModelConfig.flux2_klein_9b()))` returns a handle and `handle.variant_id == "flux2-klein-9b"`. Catches the api.py `Literal` regression directly.
 
-### 5. Img2ImgNotSupportedError removal
+### 6. Img2ImgNotSupportedError removal
 
-- Delete the class definition and its `DeprecationWarning` constructor from `src/mlx_teacache/errors.py`.
-- Remove it from `src/mlx_teacache/__init__.py`'s imports and `__all__`.
-- Delete `test_errors.py::test_img2img_not_supported_error_construction_warns`.
-- CHANGELOG entry under `### Removed` for v0.3.0 with a one-line migration note.
+The error was deprecated in v0.2.0 with the explicit promise "Removal planned for v0.3.0." Following through:
 
-### 6. Docs
+- Delete the class definition (the entire `class Img2ImgNotSupportedError(...)` block, including its `__init__` `DeprecationWarning` emission) from `src/mlx_teacache/errors.py`.
+- Remove the `Img2ImgNotSupportedError` import and `__all__` entry from `src/mlx_teacache/__init__.py:26-37` and `:45-64`.
+- In `tests/test_errors.py`:
+  - Remove the `Img2ImgNotSupportedError` import at `tests/test_errors.py:8-18`.
+  - Remove its entry from the subclass-iteration list at `tests/test_errors.py:21-32`.
+  - Delete the test function `test_img2img_not_supported_error_deprecated` at `tests/test_errors.py:107-111`.
+- Add a small negative-import assertion to `test_errors.py`: `with pytest.raises(ImportError): from mlx_teacache.errors import Img2ImgNotSupportedError` and likewise for `from mlx_teacache import Img2ImgNotSupportedError`. Covers acceptance criterion 8 directly.
+- CHANGELOG entry under `### Removed` for v0.3.0 with a one-line migration note ("Catch the underlying `IncompatibleModelError` or `InvalidStepWindowError` instead").
+
+### 7. Docs
 
 - `README.md`
   - Add a `flux2-klein-9b` row to the "Supported models" table.
@@ -134,7 +159,7 @@ The prompt list, seed, guidance, and per-step capture wrapper are unchanged. Cal
 
 ## Data flow
 
-Unchanged from v0.2.0. The variant-id string flows from `identify_variant(flux)` into `apply_teacache`'s handle, and the handle reads the matching polynomial out of `_COEFF_REGISTRY` whenever the gate runs. No per-variant branching in lifecycle or forward.
+Unchanged from v0.2.0. The variant-id string flows from `identify_variant(flux)` into `apply_teacache`, which resolves the matching built-in polynomial **once** via `load_builtin(variant_id)` and stores `(coefficients, provenance)` on the handle. The runtime gate reads `handle.coefficients` per step; the `_REGISTRY` dict is not touched on the hot path. No per-variant branching in lifecycle or forward.
 
 ## Error handling
 
@@ -158,15 +183,18 @@ If the calibration or parity time budget proves wrong on the first 9B run, the s
 
 ## Acceptance criteria
 
+0. **Author-machine prerequisites for the calibration step:** `hf auth login` with a read-scoped token; gated access to `black-forest-labs/FLUX.2-klein-9B` accepted on the Hugging Face website; weights cached locally (32 GB, see MODELS.md). The calibration command in criterion 2 does not run without these.
 1. `from mlx_teacache import apply_teacache; apply_teacache(Flux2Klein(model_config=ModelConfig.flux2_klein_9b()))` returns a handle and does not raise.
 2. `scripts/calibrate_flux2.py --variant klein-9b` runs end-to-end, writes `_calibration_flux2_klein_9b.json`, and reports R² ≥ 0.50 (matches the 4B floor).
-3. SSIM ≥ 0.85 on the PR-gate prompt at `rel_l1_thresh=0.20`.
-4. SSIM ≥ 0.80 on the 5-prompt suite at `rel_l1_thresh=0.20`.
-5. Cosine similarity ≥ 0.97 at `rel_l1_thresh=0.0` (parity oracle).
+3. SSIM ≥ 0.85 on the PR-gate prompt at `num_inference_steps=8`, `rel_l1_thresh=0.20`.
+4. SSIM ≥ 0.80 on the 5-prompt suite at `num_inference_steps=8`, `rel_l1_thresh=0.20`.
+5. Cosine similarity ≥ 0.97 at `rel_l1_thresh=0.0` (parity oracle, `num_inference_steps=8`).
 6. `pytest tests/ -m "not parity and not slow and not benchmark and not network"` stays green, with the new unit tests included.
 7. `ruff check .` and `ruff format --check .` both clean.
-8. `Img2ImgNotSupportedError` no longer importable.
+8. `Img2ImgNotSupportedError` no longer importable from either `mlx_teacache` or `mlx_teacache.errors` (asserted by a negative-import test).
 9. README + CHANGELOG + `docs/calibration.md` updated. Tag `v0.3.0` cuts the release.
+
+Quality at the mflux default of `num_inference_steps=4` is explicitly out of scope — that configuration triggers `TeaCacheNoBenefitWarning` (introduced in v0.2.0) rather than the polynomial.
 
 ## Risks
 

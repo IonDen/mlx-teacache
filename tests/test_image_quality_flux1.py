@@ -19,6 +19,7 @@ PR-time uses one prompt; full 5-prompt suite is gated by `@pytest.mark.slow`.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
@@ -151,19 +152,36 @@ def flux1_dev() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_default_threshold_ssim_dev_pr_gate(flux1_dev: Any) -> None:
+@pytest.mark.parametrize(
+    "image_strength,init_image_name",
+    [
+        (0.0, None),  # txt2img baseline
+        (0.5, "natural_512.png"),  # img2img with natural init image
+    ],
+)
+def test_default_threshold_ssim_dev_pr_gate(
+    flux1_dev: Any, image_strength: float, init_image_name: str | None
+) -> None:
     """PR-time image-quality gate: wrapper at the package-default
     rel_l1_thresh must produce a decoded image whose SSIM vs same-process
-    vanilla is >= _PR_GATE_SSIM. ~5 min walltime."""
+    vanilla is >= _PR_GATE_SSIM. ~5 min walltime per parametrize case."""
     kw = _gen_kwargs_dev(PR_TIME_PROMPT)
+    if init_image_name is not None:
+        kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / init_image_name)
+        kw["image_strength"] = image_strength
+
     vanilla_latent = _capture(flux1_dev, **kw)
     with apply_teacache(flux1_dev) as h:  # uses package default rel_l1_thresh
         wrapper_latent = _capture(flux1_dev, **kw)
         skipped = h.stats.skipped_count
-    assert skipped >= 1, (
-        "default threshold should skip at least one step on the PR-gate "
-        "prompt (cache must engage at the default)"
-    )
+    # For txt2img the cache must engage at the default threshold. For img2img
+    # with short active windows the skip count is not guaranteed > 0, so we
+    # only assert for the txt2img case.
+    if image_strength == 0.0:
+        assert skipped >= 1, (
+            "default threshold should skip at least one step on the PR-gate "
+            "prompt (cache must engage at the default)"
+        )
 
     vanilla_img = _decode_to_uint8(
         flux1_dev,
@@ -181,7 +199,7 @@ def test_default_threshold_ssim_dev_pr_gate(flux1_dev: Any) -> None:
     assert score >= _PR_GATE_SSIM, (
         f"SSIM {score:.4f} < {_PR_GATE_SSIM}; wrapper image "
         f"diverged from same-process vanilla baseline at default threshold "
-        f"({skipped} steps skipped)"
+        f"(image_strength={image_strength}, {skipped} steps skipped)"
     )
 
 

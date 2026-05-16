@@ -36,6 +36,7 @@ They are NOT the parity oracle.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
@@ -194,6 +195,24 @@ def test_paired_parity_dev_pr_gate(flux1_dev: Any) -> None:
         "— check callback / proxy / sentinel cleanup"
     )
     assert skipped == 0
+
+
+@pytest.mark.parametrize("image_strength", [0.0, 0.5, 0.7])
+def test_paired_parity_at_threshold_zero_dev(flux1_dev: Any, image_strength: float) -> None:
+    """Same-process paired parity at rel_l1_thresh=0.0 should be bit-exact
+    for FLUX.1 across txt2img (strength=0) and img2img (strength>0)."""
+    kwargs = _gen_kwargs_dev("a red apple on a wooden table")
+    if image_strength > 0.0:
+        kwargs["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png")
+        kwargs["image_strength"] = image_strength
+
+    vanilla_latent = _capture(flux1_dev, **kwargs)
+    with apply_teacache(flux1_dev, rel_l1_thresh=0.0):
+        wrapper_latent = _capture(flux1_dev, **kwargs)
+
+    assert mx.array_equal(vanilla_latent, wrapper_latent), (
+        f"FLUX.1-dev paired parity failed at rel_l1_thresh=0 with image_strength={image_strength}"
+    )
 
 
 @pytest.mark.slow

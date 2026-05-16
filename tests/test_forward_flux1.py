@@ -113,7 +113,9 @@ class _FakeInner:
         return x
 
 
-def _make_handle(*, rel_l1_thresh: float, skip_first: int = 0, skip_last: int = 0) -> Any:
+def _make_handle(
+    *, rel_l1_thresh: float, skip_first: int = 0, skip_last: int = 0, num_inference_steps: int = 25
+) -> Any:
     """Minimal handle stub with the attributes forward.py reads."""
     coefficients, _ = load_builtin("flux1-dev")
     state = SimpleNamespace(
@@ -126,6 +128,7 @@ def _make_handle(*, rel_l1_thresh: float, skip_first: int = 0, skip_last: int = 
         skip_first_n_steps=skip_first,
         skip_last_n_steps=skip_last,
         _state=state,
+        _gen_ctx=SimpleNamespace(active_num_steps=num_inference_steps),
     )
 
 
@@ -180,7 +183,7 @@ def test_threshold_zero_skip_window_validation_still_runs_at_t0():
     must still raise if the configuration is invalid."""
     from mlx_teacache.errors import InvalidStepWindowError
 
-    handle = _make_handle(rel_l1_thresh=0.0, skip_first=2, skip_last=2)
+    handle = _make_handle(rel_l1_thresh=0.0, skip_first=2, skip_last=2, num_inference_steps=3)
     with pytest.raises(InvalidStepWindowError):
         _run_one_step(handle, t=0, num_inference_steps=3)
 

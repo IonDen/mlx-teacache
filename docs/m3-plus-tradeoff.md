@@ -1,15 +1,51 @@
-# M3+ silicon tradeoff
+# Apple Silicon compile tradeoff
 
 ## Why
 
-mflux's `Flux2Klein._predict` is wrapped in `mx.compile(predict)` on M3+ silicon
-(see `mflux/models/flux2/variants/txt2img/flux2_klein.py:279`). `mx.compile` traces
-the Python function once; subsequent calls reuse the compiled graph. This means
-Python-side gating logic in our predict closure would NOT run after step 1.
+mflux wraps `Flux2Klein._predict` in `mx.compile(predict)` on **most** Apple
+Silicon chips. The exact gate (`mflux/utils/apple_silicon.py` +
+`mflux/models/flux2/variants/txt2img/flux2_klein.py:278-281`):
 
-To keep TeaCache's gating live on M3+, `mlx-teacache` replaces `flux._predict`
-with an **uncompiled** eager-Python closure. M3+ users lose mflux's compile gain
-on this code path.
+```python
+if AppleSiliconUtil.is_m1_or_m2():   # base M1 / base M2 only
+    return predict                    # eager
+return mx.compile(predict)            # compiled
+```
+
+`is_m1_or_m2()` returns True only when the chip brand-string is "Apple M1" or
+"Apple M2" with neither "Max" nor "Ultra". So:
+
+| Chip | Vanilla mflux `_predict` |
+|---|---|
+| Apple M1 (base), Apple M2 (base) | **eager** |
+| M1 Pro / Max / Ultra | compiled |
+| M2 Pro / Max / Ultra | compiled |
+| All M3* / M4* / M5* | compiled |
+
+`mx.compile` traces the Python function once; subsequent calls reuse the compiled
+graph. This means Python-side gating logic in our predict closure would NOT run
+after step 1.
+
+To keep TeaCache's gating live on every chip where mflux compiles, `mlx-teacache`
+replaces `flux._predict` with an **uncompiled** eager-Python closure. Users on
+those chips lose mflux's compile gain on this code path. The tradeoff: we skip
+~25% of steps, which more than compensates on M1 Max / M1 Pro / M2 Max / M2 Pro
+(measured 1.48× on FLUX.1-dev / 25 steps / M1 Max), but the magnitude of the
+compile-loss tax grows on newer hardware.
+
+## M5 specifically: Neural Accelerators
+
+The M5 generation (October 2025+) adds dedicated matrix-multiplication hardware
+("Neural Accelerators") to each GPU core, analogous to NVIDIA's tensor cores.
+MLX dispatches onto them through Metal 4 `TensorOps`. **Neural Accelerators are
+only available via the compiled (TensorOps) path** — our eager wrapper falls
+back to MLX's general matmul kernels. Combined with Apple's claimed 4× AI compute
+boost on M5 vs M4, the compile-loss tax may be large enough on M5 that the net
+speedup approaches 1.0× (i.e., no speedup vs vanilla). Output correctness is
+preserved on M5 — only value proposition shrinks. Requires macOS 26.2+ for MLX
+to use Neural Accelerators.
+
+References: [Apple ML Research — Exploring LLMs with MLX and the M5 GPU](https://machinelearning.apple.com/research/exploring-llms-mlx-m5), Apple M5 announcement (Oct 2025).
 
 ## What to measure on your hardware
 
@@ -40,7 +76,10 @@ print(f"vanilla: {vanilla:.2f}s  teacache: {teacache:.2f}s  speedup: {vanilla/te
 If `vanilla/teacache > 1.0` on your hardware, mlx-teacache helps. Otherwise file an
 issue with your timings.
 
-## v0.2 plans
+## v0.2+ plans
 
 Investigate splitting `_predict` so the body-only computation can stay compiled
-while gating runs in eager Python. Adds complexity; deferred until v0.1 is in users' hands.
+while gating runs in eager Python. Adds complexity; deferred until v0.1 is in
+users' hands. On M5 specifically this is the only realistic path to keep the
+Neural Accelerator fast path engaged — see ROADMAP.md "Compile-friendly gating"
+for the design sketch.

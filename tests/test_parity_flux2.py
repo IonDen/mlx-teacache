@@ -30,6 +30,7 @@ pattern.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
@@ -45,12 +46,13 @@ pytestmark = pytest.mark.parity
 # Cosine-similarity gate for "wrapper at threshold=0 matches same-process
 # vanilla". Per-element tolerance (mx.allclose) is the wrong oracle on the
 # FLUX.2 gated path: our re-implementation of Flux2Transformer.__call__ runs
-# eager Python (mflux's predict path is mx.compile-wrapped on M3+, eager
-# elsewhere), and MLX lazy-eval ordering between our eager structure and
-# mflux's compiled/eager structure differs in subtle ref-count / dispatch
-# ways that compound to ~3-4 max_abs over 8 steps even though the math is
-# equivalent. Cosine similarity catches catastrophic divergence (real math
-# bugs) while accepting the ULP-level dispatch noise.
+# eager Python (mflux's predict path is mx.compile-wrapped on every chip
+# except base M1 / base M2 — see docs/m3-plus-tradeoff.md), and MLX lazy-eval
+# ordering between our eager structure and mflux's compiled/eager structure
+# differs in subtle ref-count / dispatch ways that compound to ~3-4 max_abs
+# over 8 steps even though the math is equivalent. Cosine similarity catches
+# catastrophic divergence (real math bugs) while accepting the ULP-level
+# dispatch noise.
 #
 # Measured 2026-05-15: cosine ~0.99+ on M1 Max FLUX.2 Klein 4b at 8 steps
 # with the current implementation. Gate set 0.02 below that to absorb
@@ -181,6 +183,28 @@ def test_paired_parity_klein_pr_gate(flux2_klein: Any) -> None:
     # compiled _predict). If this fails, restore() leaked state.
     assert mx.array_equal(vb, va), "restore() left a trace; vanilla_after differs from vanilla_before"
     assert skipped == 0
+
+
+@pytest.mark.parametrize("image_strength", [0.0, 0.5, 0.7])
+def test_paired_parity_at_threshold_zero_klein_pr_gate(flux2_klein: Any, image_strength: float) -> None:
+    """Same-process paired parity at rel_l1_thresh=0 for FLUX.2 Klein 4B.
+    Cosine >= 0.97 (not bit-exact) because the wrapper is eager-Python and
+    vanilla _predict is compiled — dispatch noise compounds ~1 ULP/element
+    across steps. Covers txt2img + img2img schedule slices."""
+    kw = _gen_kwargs_klein("a red apple on a wooden table")
+    if image_strength > 0.0:
+        kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png")
+        kw["image_strength"] = image_strength
+
+    vanilla_latent = _capture(flux2_klein, **kw)
+    with apply_teacache(flux2_klein, rel_l1_thresh=0.0):
+        wrapper_latent = _capture(flux2_klein, **kw)
+
+    score = _cosine(vanilla_latent, wrapper_latent)
+    assert score >= 0.97, (
+        f"FLUX.2 cosine parity below gate at image_strength={image_strength}: "
+        f"got {score:.4f}, required >= 0.97"
+    )
 
 
 @pytest.mark.slow

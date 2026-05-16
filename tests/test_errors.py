@@ -3,6 +3,8 @@
 and inherits from TeaCacheError so users can catch the whole family with one
 except clause. Tests are pure Python — no mflux, no MLX."""
 
+import pytest
+
 from mlx_teacache.errors import (
     AlreadyPatchedError,
     CalibrationError,
@@ -61,7 +63,23 @@ def test_invalid_step_window_names_values():
     msg = str(err)
     assert "skip_first=1" in msg
     assert "skip_last=1" in msg
-    assert "num_steps=2" in msg
+    assert "active_num_steps=2" in msg
+    # The legacy num_steps kwarg still works for construction; the old wording
+    # "num_steps=2" is no longer in the message.
+
+
+def test_invalid_step_window_message_reports_both_counts_when_provided():
+    """New img2img call sites pass both nominal and active counts."""
+    err = InvalidStepWindowError(
+        skip_first=2,
+        skip_last=2,
+        num_steps=4,
+        nominal_num_inference_steps=25,
+        active_num_steps=4,
+    )
+    msg = str(err)
+    assert "active_num_steps=4" in msg
+    assert "nominal_num_inference_steps=25" in msg
 
 
 def test_transformer_shape_error_names_step_and_shapes():
@@ -86,8 +104,8 @@ def test_missing_generation_context_has_remediation():
     assert "apply_teacache" in msg
 
 
-def test_img2img_not_supported_names_variant():
-    err = Img2ImgNotSupportedError(variant="flux1-dev")
-    msg = str(err)
-    assert "flux1-dev" in msg
-    assert "image_path" in msg or "image_strength" in msg
+def test_img2img_not_supported_error_deprecated():
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        err = Img2ImgNotSupportedError(variant="flux1-dev")
+    assert err.variant == "flux1-dev"
+    assert "flux1-dev" in str(err)

@@ -101,8 +101,9 @@ def flux1_forward_with_gate(
     """Replacement for mflux.models.flux.model.flux_transformer.transformer.Transformer.__call__
     with TeaCache gating inserted between body and tail.
 
-    img2img has already been rejected by GenerationContextCallback before any
-    transformer call. We don't re-check config.image_path here.
+    img2img is supported as of v0.2.0. The forward path uses state.step_counter
+    (0-based, per-generation) rather than the scheduler's absolute `t` for gate
+    indexing, so img2img runs starting mid-schedule still index correctly.
 
     `rel_l1_thresh <= 0` takes a fast-path branch that does NOT build the
     gating tensors (`body_in_concat`, `mod_in`, `cached_residual`,
@@ -119,16 +120,22 @@ def flux1_forward_with_gate(
     state = handle._state.cache
     stats = handle._state.stats
 
-    # 1. Per-generation reset (§5.2): unconditional on every t == 0.
-    if t == 0:
-        state.reset_for_new_generation(num_steps=config.num_inference_steps)
-        # FLUX.1 lazy skip-window validation (§5.6): every step is TeaCache-active
-        # (no CFG path), so validate at t == 0 unconditionally.
-        if handle.skip_first_n_steps + handle.skip_last_n_steps >= config.num_inference_steps:
+    # 1. Per-generation skip-window validation. Cache reset is lifecycle-owned
+    #    (see lifecycle.py call_before_loop). We use state.step_counter == 0 as
+    #    the once-per-generation marker for validation — not absolute `t == 0`,
+    #    which would never fire under img2img where the first call has t > 0.
+    if state.step_counter == 0 and not state.skip_window_validated:
+        active_num_steps = handle._gen_ctx.active_num_steps
+        if active_num_steps is None:
+            # Defensive: lifecycle should have set this. Fall back to nominal
+            # so we still validate something rather than silently passing.
+            active_num_steps = config.num_inference_steps
+        if handle.skip_first_n_steps + handle.skip_last_n_steps >= active_num_steps:
             raise InvalidStepWindowError(
                 skip_first=handle.skip_first_n_steps,
                 skip_last=handle.skip_last_n_steps,
-                num_steps=config.num_inference_steps,
+                num_steps=active_num_steps,  # legacy alias; carries the active count
+                nominal_num_inference_steps=config.num_inference_steps,
             )
         state.skip_window_validated = True
 
@@ -163,7 +170,7 @@ def flux1_forward_with_gate(
         )
         stats.record(
             StepDecision(
-                step_idx=t,
+                step_idx=state.step_counter,
                 timestep=float(t),
                 rel_l1=None,
                 accumulated_distance=state.accumulated_distance,
@@ -190,20 +197,27 @@ def flux1_forward_with_gate(
             actual=mod_in.shape,
         )
 
-    # 5. Gate.
+    # 5. Gate. Use state.step_counter (0-based, per-generation) as step_idx
+    #    so img2img generations starting at t > 0 still index the gate
+    #    relative to the start of this generation. num_steps uses the active
+    #    window (from lifecycle's _gen_ctx) so skip_last is measured from the
+    #    actual end of denoising, not the nominal schedule.
+    active_num_steps = handle._gen_ctx.active_num_steps
+    if active_num_steps is None:
+        active_num_steps = config.num_inference_steps  # defensive fallback
     decision = gate_step(
         state,
         rel_l1_thresh=handle.rel_l1_thresh,
         coefficients=handle.coefficients,
         skip_first=handle.skip_first_n_steps,
         skip_last=handle.skip_last_n_steps,
-        num_steps=config.num_inference_steps,
-        step_idx=t,
+        num_steps=active_num_steps,
+        step_idx=state.step_counter,
         mod_in=mod_in,
     )
 
     # 6. Stats — staging only; commit happens in call_after_loop.
-    stats.record(_step_decision_from_gate(decision, step_idx=t, timestep=float(t)))
+    stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=float(t)))
 
     # 7. Compute path driven by decision.
     if decision.should_compute:
@@ -342,10 +356,11 @@ def flux2_forward_with_gate(
 ) -> Any:
     """Replacement for Flux2Transformer.__call__ with gating.
 
-    img2img is rejected pre-loop. CFG is handled in the predict closure (we
-    only reach this function for non-CFG steps). Skip-window validation is
-    handled in the predict closure too (this function is the 'first non-CFG
-    gated step' boundary — see §5.6)."""
+    img2img is supported as of v0.2.0; the active denoising window is set up
+    by lifecycle's call_before_loop and consumed via handle._gen_ctx. CFG is
+    handled in the predict closure (we only reach this function for non-CFG
+    steps). Skip-window validation is handled in the predict closure too
+    (this function is the 'first non-CFG gated step' boundary — see §5.6)."""
     state = handle._state.cache
     stats = handle._state.stats
 

@@ -8,7 +8,7 @@ numpy.polyval). FLUX.1 coefficients are vendored from ali-vilab/TeaCache
 upstream (TeaCache4FLUX/teacache_flux.py); flux1-schnell reuses the same
 set because upstream does not distinguish, and FLUX.1 dev/schnell share
 the same transformer architecture. flux2-klein-4b coefficients are derived
-in-repo via scripts/calibrate.py."""
+in-repo via scripts/calibrate_flux2.py."""
 
 from __future__ import annotations
 
@@ -40,12 +40,12 @@ _UPSTREAM_FLUX_COEFFS: tuple[float, float, float, float, float] = (
     0.264230861,
 )
 
-# Derived in-repo by scripts/calibrate_flux2_klein.py on 2026-05-15:
+# Derived in-repo by scripts/calibrate_flux2.py --variant klein-4b on 2026-05-15:
 #   10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, guidance=1.0,
 #   512×512, vanilla forward (no caching). 70 consecutive-step pairs of
 #   (rel_l1(mod_in_t, mod_in_{t-1}), rel_l1(body_out_t, body_out_{t-1})).
 #   numpy.polyfit degree=4 → R² = 0.6530.
-# See scripts/_calibration_flux2_klein.json for the full report.
+# See scripts/_calibration_flux2_klein_4b.json for the full report.
 # Stored verbatim; do not hand-edit. New calibrations bump revision and minor version.
 _FLUX2_KLEIN_4B_COEFFS: tuple[float, float, float, float, float] = (
     236.9190176127698,
@@ -101,7 +101,7 @@ _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]
             calibration_dataset="10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0",
             fit_metric="numpy.polyfit R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs",
             fit_metric_value=0.6530168924992779,
-            reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2_klein.py",
+            reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
         ),
     ),
 }

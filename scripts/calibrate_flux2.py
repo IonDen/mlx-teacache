@@ -1,22 +1,23 @@
-"""Calibrate Flux2 Klein 4b polynomial coefficients.
+"""Calibrate FLUX.2 polynomial coefficients for one variant.
+
+Run as: `uv run python scripts/calibrate_flux2.py --variant klein-4b`
+        `uv run python scripts/calibrate_flux2.py --variant klein-9b`
+
+klein-base-4b and klein-base-9b are declared but raise NotImplementedError
+(wired in v0.4.0 and v0.5.0 respectively).
 
 For each calibration prompt:
 - Patch `flux._predict` with a capturing wrapper that runs the full vanilla
   forward (no skipping) and records `mod_in` and `body_out_concat` per step.
 - Run `flux.generate_image(...)` at the target inference budget.
-- Compute, for every consecutive step pair (t-1, t), the relative-L1 deltas
-    x_t = ||mod_in_t       - mod_in_{t-1}||_1     / ||mod_in_{t-1}||_1
-    y_t = ||body_out_t     - body_out_{t-1}||_1   / ||body_out_{t-1}||_1
+- Compute, for every consecutive step pair (t-1, t), the relative-L1 deltas:
+    x_t = ||mod_in_t   - mod_in_{t-1}||_1   / ||mod_in_{t-1}||_1
+    y_t = ||body_out_t - body_out_{t-1}||_1 / ||body_out_{t-1}||_1
 - Aggregate (x_t, y_t) pairs across all prompts and fit a degree-4 polynomial
   with `numpy.polyfit` (returns coefficients high-to-low, matching the
   `poly_eval` convention used at runtime in `mlx_teacache.gate`).
 
-Output: a JSON report at `scripts/_calibration_flux2_klein.json` with the
-fitted coefficients, R^2, sample count, and a summary the user can inspect
-before committing the new constants into `src/mlx_teacache/coefficients.py`.
-
-Run as: `uv run python scripts/calibrate_flux2_klein.py`.
-"""
+Output: a JSON report at `scripts/_calibration_flux2_<variant>.json`."""
 
 from __future__ import annotations
 
@@ -48,11 +49,57 @@ CALIBRATION_PROMPTS = (
     "neon signs in a rainy street",
 )
 
-NUM_INFERENCE_STEPS = 8
 HEIGHT = 512
 WIDTH = 512
-GUIDANCE = 1.0  # no CFG so the captured path matches the gated path at runtime
+GUIDANCE = 1.0
 SEED = 42
+
+
+def _model_config_klein_4b() -> Any:
+    from mflux.models.common.config.model_config import ModelConfig
+
+    return ModelConfig.flux2_klein_4b()
+
+
+def _model_config_klein_9b() -> Any:
+    from mflux.models.common.config.model_config import ModelConfig
+
+    return ModelConfig.flux2_klein_9b()
+
+
+def _not_wired(release: str) -> Any:
+    def _raise() -> Any:
+        raise NotImplementedError(f"--variant wired in {release}; out of scope for v0.3.0")
+
+    return _raise
+
+
+_VARIANTS: dict[str, dict[str, Any]] = {
+    "klein-4b": {
+        "variant_id": "flux2-klein-4b",
+        "model_config_factory": _model_config_klein_4b,
+        "num_inference_steps": 8,
+        "output_json": "_calibration_flux2_klein_4b.json",
+    },
+    "klein-9b": {
+        "variant_id": "flux2-klein-9b",
+        "model_config_factory": _model_config_klein_9b,
+        "num_inference_steps": 8,
+        "output_json": "_calibration_flux2_klein_9b.json",
+    },
+    "klein-base-4b": {
+        "variant_id": "flux2-klein-base-4b",
+        "model_config_factory": _not_wired("v0.4.0"),
+        "num_inference_steps": None,
+        "output_json": None,
+    },
+    "klein-base-9b": {
+        "variant_id": "flux2-klein-base-9b",
+        "model_config_factory": _not_wired("v0.5.0"),
+        "num_inference_steps": None,
+        "output_json": None,
+    },
+}
 
 
 def _rel_l1(curr: mx.array, prev: mx.array) -> float:
@@ -138,7 +185,7 @@ def _make_capturing_closure(inner: Any, captures: list[dict[str, Any]], ModelCon
     return predict
 
 
-def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
+def _capture_one_prompt(flux: Any, prompt: str, *, num_inference_steps: int) -> list[dict[str, Any]]:
     captures: list[dict[str, Any]] = []
     had_instance_attr = "_predict" in vars(flux)
     original = flux._predict if had_instance_attr else None
@@ -147,7 +194,7 @@ def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
         flux.generate_image(
             prompt=prompt,
             seed=SEED,
-            num_inference_steps=NUM_INFERENCE_STEPS,
+            num_inference_steps=num_inference_steps,
             height=HEIGHT,
             width=WIDTH,
             guidance=GUIDANCE,
@@ -161,11 +208,24 @@ def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
 
 
 def main() -> None:
-    from mflux.models.common.config.model_config import ModelConfig
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--variant",
+        required=True,
+        choices=sorted(_VARIANTS.keys()),
+        help="Which variant to calibrate. v0.3.0 wires klein-4b and klein-9b.",
+    )
+    args = parser.parse_args()
+    cfg = _VARIANTS[args.variant]
+    variant_id: str = cfg["variant_id"]
+    num_inference_steps: int = cfg["num_inference_steps"]
+    output_json: str = cfg["output_json"]
+
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
-    print("Loading Flux2Klein 4b...")
-    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
+    flux = Flux2Klein(quantize=4, model_config=cfg["model_config_factory"]())
     flux.freeze()
 
     xs: list[float] = []
@@ -174,9 +234,9 @@ def main() -> None:
     t_start = time.time()
     for i, prompt in enumerate(CALIBRATION_PROMPTS, 1):
         print(f"[{i}/{len(CALIBRATION_PROMPTS)}] {prompt!r}")
-        capture = _capture_one_prompt(flux, prompt)
-        assert len(capture) == NUM_INFERENCE_STEPS, (
-            f"expected {NUM_INFERENCE_STEPS} captures, got {len(capture)}"
+        capture = _capture_one_prompt(flux, prompt, num_inference_steps=num_inference_steps)
+        assert len(capture) == num_inference_steps, (
+            f"expected {num_inference_steps} captures, got {len(capture)}"
         )
         prompt_pairs: list[tuple[float, float]] = []
         for t in range(1, len(capture)):
@@ -204,8 +264,8 @@ def main() -> None:
         print(f"  {c:.10g}")
 
     report = {
-        "variant": "flux2-klein-4b",
-        "num_inference_steps": NUM_INFERENCE_STEPS,
+        "variant": variant_id,
+        "num_inference_steps": num_inference_steps,
         "height": HEIGHT,
         "width": WIDTH,
         "guidance": GUIDANCE,
@@ -221,7 +281,7 @@ def main() -> None:
         "y_min": float(min(ys)),
         "y_max": float(max(ys)),
     }
-    out_path = Path(__file__).parent / "_calibration_flux2_klein.json"
+    out_path = Path(__file__).parent / output_json
     out_path.write_text(json.dumps(report, indent=2))
     print(f"\nWrote {out_path}")
 

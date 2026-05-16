@@ -47,7 +47,7 @@ def identify_variant(flux: object) -> VariantId:
     """Return the variant_id for a supported mflux Flux1 / Flux2Klein instance.
 
     Raises IncompatibleModelError for unsupported model_name, unsupported
-    Flux2Klein configuration (9b, base variants), or any non-Flux type."""
+    Flux2Klein configuration (base-4b, base-9b variants), or any non-Flux type."""
     global _Flux1Type, _Flux2KleinType
     if _Flux1Type is None or _Flux2KleinType is None:
         _Flux1Type, _Flux2KleinType = _import_mflux_types()

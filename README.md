@@ -94,6 +94,9 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 | `flux1-dev` | `Flux1(model_config=ModelConfig.dev())` | upstream ali-vilab/TeaCache |
 | `flux1-schnell` | `Flux1(model_config=ModelConfig.schnell())` | upstream (shared with dev) |
 | `flux2-klein-4b` | `Flux2Klein(model_config=ModelConfig.flux2_klein_4b())` | in-repo (see `docs/calibration.md`) |
+| `flux2-klein-9b`¹ | `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` | in-repo (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
+
+¹ `flux2-klein-9b` coefficients are calibrated and validated at `num_inference_steps=8`. The mflux/BFL default of 4 steps leaves only a single skip opportunity per generation (`eligible=2`, `possible_skips=1`); TeaCache will still run but the wall-clock benefit at 4 steps is bounded by that single skip. For meaningful speedup pass `num_inference_steps=8` (or higher).
 
 ## Combining with mlx-taef
 
@@ -143,6 +146,7 @@ M1 Max 32GB, bf16, 512×512, `seed=42`, default threshold (`rel_l1_thresh=0.20`)
 | FLUX.1-dev | 25 | img2img, strength 0.7 | — | — | ≈ same skip fraction | SSIM ≥ 0.80 (parametrized suite) |
 | FLUX.2 Klein 4B | 8 | txt2img | ~37s | ~30s | ~1.2× | SSIM ≥ 0.85 (PR-gate prompt) |
 | FLUX.2 Klein 4B | 8 | img2img, strength 0.5 | — | — | ≈ same skip fraction | SSIM ≥ 0.85 (parametrized suite) |
+| FLUX.2 Klein 9B | 8 | txt2img | — | — | tracked-only | SSIM ≥ 0.85 (PR-gate prompt) |
 
 Klein's 8-step speedup is smaller than FLUX.1-dev because Klein is distilled to converge in fewer steps, so the trajectory has fewer adjacent-step redundancies to exploit. Longer schedules (`num_inference_steps >= 15`) give larger gains. The wall-clock columns for img2img are blank because mflux's active window shrinks with `image_strength`, so absolute timings stop being apples-to-apples; the per-step speedup tracks the txt2img skip fraction.
 
@@ -186,6 +190,12 @@ FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps
 The mflux pin is strict at `>=0.17,<0.18`. Bumping it is a deliberate release.
 
 Calling `flux.parameters()` at the parent level can miss transformer parameters while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first.
+
+## License obligations
+
+The FLUX.1 variants (`flux1-dev`, `flux1-schnell`) and `flux2-klein-4b` come with their own upstream weight licenses; the wrapper this library applies does not change those terms.
+
+`flux2-klein-9b` is distributed under the FLUX.2 Klein license (non-commercial use + BFL safety-filter obligations). These terms flow with the weights, not with mlx-teacache. If you call `apply_teacache(Flux2Klein(model_config=ModelConfig.flux2_klein_9b()))`, you are responsible for ensuring your use complies with the upstream license — including the safety-filter requirements that the BFL model card describes. See the official model card at https://huggingface.co/black-forest-labs/FLUX.2-klein-9B for the full terms.
 
 ## Contributing
 

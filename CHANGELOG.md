@@ -7,6 +7,37 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-16
+
+### Added
+- **`flux2-klein-9b` support.** Apply TeaCache to mflux's `Flux2Klein` with
+  `ModelConfig.flux2_klein_9b()`. Coefficients calibrated in-repo on M1 Max
+  (10 prompts × 8 steps; see `docs/calibration.md`). SSIM gate ≥ 0.85 on the
+  PR-gate prompt at the package default threshold. The built-in coefficients
+  target `num_inference_steps=8`; at the mflux/BFL default of 4 steps the
+  gate has only one possible skip per generation, which limits wall-clock
+  benefit (caching still runs, but do not expect 4-step speedup curves).
+- README `## License obligations` section flagging the FLUX.2 Klein
+  non-commercial terms and BFL safety-filter requirements for 9B.
+
+### Changed
+- `scripts/calibrate_flux2_klein.py` renamed to `scripts/calibrate_flux2.py`
+  with a `--variant` flag (klein-4b, klein-9b wired; klein-base-4b and
+  klein-base-9b declared but raise `NotImplementedError`, wired in v0.4.0
+  and v0.5.0).
+- `scripts/_calibration_flux2_klein.json` renamed to
+  `_calibration_flux2_klein_4b.json` (4B coefficients themselves unchanged).
+- `TeaCacheHandle.variant_id` now reuses `detect.VariantId`; the
+  `IncompatibleModelError` `supported` list in `api.py` has a single source
+  of truth (`detect._SUPPORTED`).
+- FLUX.2 `_predict` defensive guard broadened from
+  `variant_id == "flux2-klein-4b"` to `variant_id.startswith("flux2-")`.
+
+### Removed
+- **`Img2ImgNotSupportedError`** (deprecated in v0.2.0 with explicit
+  removal-in-v0.3.0 intent). Migration: catch the underlying
+  `IncompatibleModelError` or `InvalidStepWindowError` instead.
+
 ## [0.2.0] — 2026-05-16
 
 ### Added

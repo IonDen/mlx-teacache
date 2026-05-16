@@ -11,13 +11,19 @@ are stored per variant in `src/mlx_teacache/coefficients.py`.
 |---|---|---|
 | `flux1-dev`, `flux1-schnell` | Vendored from ali-vilab/TeaCache (`TeaCache4FLUX/teacache_flux.py`); Apache-2.0. | `_UPSTREAM_FLUX_COEFFS` in `coefficients.py`. The FLUX dev/schnell architecture is shared, so both reuse the same set. |
 | `flux2-klein-4b` | Derived in-repo on 2026-05-15 from 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.65. | `_FLUX2_KLEIN_4B_COEFFS` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2_klein.py`. Full report: `scripts/_calibration_flux2_klein.json`. |
+| `flux2-klein-9b` | Derived in-repo on 2026-05-16 from 10 prompts × **8 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.5421. **Target schedule: `num_inference_steps=8`.** At the mflux default of 4 steps with default skip windows the gate has only one possible skip per generation; ship with that bound in mind. | `_REGISTRY["flux2-klein-9b"]` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-9b`. Full report: `scripts/_calibration_flux2_klein_9b.json`. |
 
 ## Producing new coefficients
 
 Run the calibration script with the model loaded locally:
 
 ```bash
-uv run python scripts/calibrate_flux2_klein.py
+# Klein 4B
+uv run python scripts/calibrate_flux2.py --variant klein-4b
+# Klein 9B
+uv run python scripts/calibrate_flux2.py --variant klein-9b
+# klein-base-4b and klein-base-9b are declared but raise
+# NotImplementedError until v0.4.0 and v0.5.0 respectively.
 ```
 
 The script monkeypatches `flux._predict` with a capturing factory that

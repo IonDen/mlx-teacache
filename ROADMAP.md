@@ -4,9 +4,12 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
+- **v0.3.0** — `flux2-klein-9b` support (in-repo calibration). Calibration
+  script parameterized via `--variant` so v0.4 / v0.5 are additive.
+  `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed.
 - **v0.1.0 / v0.1.1** — Initial public release. FLUX.1 dev/schnell, FLUX.2 Klein 4B. Calibrated coefficients. Five-tier test pyramid. Trusted-Publishing pipeline.
 
-## Active (next release: v0.2.0)
+## Active (next Klein-family: v0.4.0 `klein-base-4b`, v0.5.0 `klein-base-9b`)
 
 Two feature tracks plus a doc track ship together as v0.2.0.
 
@@ -111,8 +114,6 @@ Ranked by value-per-effort. None of these are committed; they're a menu for pick
 ## Deferred work (no current release target)
 
 These items are real and tracked, but not in the current release window. No 0.3.0 plan is committed yet.
-
-- **FLUX.2 Klein 9B variant support** — structural code, fresh coefficient calibration, 32 GB on-disk weights post-prune (see MODELS.md). FLUX Non-Commercial License + BFL safety-filter obligations need explicit support-matrix call-out before shipping.
 
 ## How to use this doc
 

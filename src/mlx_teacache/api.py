@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from mlx_teacache.cache import TeaCacheState
 from mlx_teacache.coefficients import Provenance, load_builtin, validate_custom
@@ -19,6 +19,7 @@ from mlx_teacache.errors import (
     AlreadyPatchedError,
     IncompatibleModelError,
 )
+from mlx_teacache.integrations.mflux.detect import _SUPPORTED, VariantId
 from mlx_teacache.stats import TeaCacheStats
 
 
@@ -34,7 +35,7 @@ class TeaCacheHandle:
     """Returned by apply_teacache. Context-manager-compatible. Holds live stats
     and a restore() method that reverses every mutation from apply_teacache."""
 
-    variant_id: Literal["flux1-dev", "flux1-schnell", "flux2-klein-4b"]
+    variant_id: VariantId
     rel_l1_thresh: float
     coefficients: tuple[float, float, float, float, float]
     skip_first_n_steps: int
@@ -139,9 +140,9 @@ def apply_teacache(
 ) -> TeaCacheHandle:
     """Enable TeaCache step-skipping on an mflux Flux1 or Flux2Klein instance.
 
-    Supported variants (detected via flux.model_config.model_name):
+    Supported variants (detected via flux.model_config.aliases):
       - flux1-dev, flux1-schnell
-      - flux2-klein-4b
+      - flux2-klein-4b, flux2-klein-9b
 
     See docs/superpowers/specs/2026-05-14-mlx-teacache-design.md §6.1 for the
     full docstring; this is the runtime entry point."""
@@ -192,11 +193,11 @@ def apply_teacache(
             "otherwise instantiate a fresh Flux1 model."
         )
     # Defensive: detect non-TeaCache _predict overrides on FLUX.2.
-    if variant_id == "flux2-klein-4b" and "_predict" in vars(flux):
+    if variant_id.startswith("flux2-") and "_predict" in vars(flux):
         raise IncompatibleModelError(
             actual_type=type(flux).__name__,
             actual_model_name=getattr(flux.model_config, "model_name", None),
-            supported=["flux1-dev", "flux1-schnell", "flux2-klein-4b"],
+            supported=list(_SUPPORTED),
         )
 
     # Build handle.
@@ -224,7 +225,7 @@ def apply_teacache(
             raise IncompatibleModelError(
                 actual_type=type(flux).__name__,
                 actual_model_name=getattr(getattr(flux, "model_config", None), "model_name", None),
-                supported=["flux1-dev", "flux1-schnell", "flux2-klein-4b"],
+                supported=list(_SUPPORTED),
             )
         callback = GenerationContextCallback(handle)
         handle._callback_instance = callback

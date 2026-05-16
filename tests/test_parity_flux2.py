@@ -186,18 +186,14 @@ def test_paired_parity_klein_pr_gate(flux2_klein: Any) -> None:
 
 
 @pytest.mark.parametrize("image_strength", [0.0, 0.5, 0.7])
-def test_paired_parity_at_threshold_zero_klein_pr_gate(
-    flux2_klein: Any, image_strength: float
-) -> None:
+def test_paired_parity_at_threshold_zero_klein_pr_gate(flux2_klein: Any, image_strength: float) -> None:
     """Same-process paired parity at rel_l1_thresh=0 for FLUX.2 Klein 4B.
     Cosine >= 0.97 (not bit-exact) because the wrapper is eager-Python and
     vanilla _predict is compiled — dispatch noise compounds ~1 ULP/element
     across steps. Covers txt2img + img2img schedule slices."""
     kw = _gen_kwargs_klein("a red apple on a wooden table")
     if image_strength > 0.0:
-        kw["image_path"] = str(
-            Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png"
-        )
+        kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png")
         kw["image_strength"] = image_strength
 
     vanilla_latent = _capture(flux2_klein, **kw)

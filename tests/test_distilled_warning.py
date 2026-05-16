@@ -38,8 +38,9 @@ class _FakeHandle:
     _state: _FakeHandleState = field(default_factory=_FakeHandleState)
 
 
-def _config(num_inference_steps: int, *, image_strength: float | None = None,
-            guidance: float = 1.0) -> SimpleNamespace:
+def _config(
+    num_inference_steps: int, *, image_strength: float | None = None, guidance: float = 1.0
+) -> SimpleNamespace:
     if image_strength is None or image_strength <= 0.0:
         init_time_step = 0
     else:
@@ -62,8 +63,7 @@ def test_does_not_fire_at_schnell_default_eligible_is_two():
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                            config=_config(4))
+        cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(4))
     matched = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
     assert matched == [], f"unexpected warning at eligible=2: {[str(w.message) for w in matched]}"
 
@@ -74,8 +74,7 @@ def test_fires_when_eligible_is_one():
     handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
     cb = GenerationContextCallback(handle)
     with pytest.warns(TeaCacheNoBenefitWarning, match=r"eligible"):
-        cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                            config=_config(3))
+        cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(3))
 
 
 def test_does_not_fire_when_eligible_is_two():
@@ -84,8 +83,7 @@ def test_does_not_fire_when_eligible_is_two():
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                            config=_config(4))
+        cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(4))
     matched = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
     assert matched == []
 
@@ -97,8 +95,7 @@ def test_does_not_fire_when_window_is_invalid():
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                            config=_config(4))
+        cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(4))
     matched = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
     assert matched == [], "no-benefit warning should be suppressed when window is invalid"
 
@@ -111,8 +108,7 @@ def test_does_not_fire_under_flux2_all_cfg():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         # Eligible would be 1 (would normally fire), but variant + guidance trigger suppression.
-        cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                            config=_config(3, guidance=3.5))
+        cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(3, guidance=3.5))
     matched = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
     assert matched == []
 
@@ -123,8 +119,7 @@ def test_does_not_fire_for_active_zero():
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                            config=_config(25, image_strength=1.0))
+        cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(25, image_strength=1.0))
     matched = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
     assert matched == []
 

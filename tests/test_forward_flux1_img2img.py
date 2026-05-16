@@ -77,7 +77,10 @@ def test_img2img_first_call_uses_step_counter_zero_even_when_t_positive():
     pooled = mx.zeros((1, 4))
 
     flux1_forward_with_gate(
-        inner, handle, t=17, config=config,
+        inner,
+        handle,
+        t=17,
+        config=config,
         hidden_states=hidden_states,
         prompt_embeds=prompt_embeds,
         pooled_prompt_embeds=pooled,
@@ -107,7 +110,10 @@ def test_forward_does_not_reset_cache_on_t_zero():
     pooled = mx.zeros((1, 4))
 
     flux1_forward_with_gate(
-        inner, handle, t=0, config=config,
+        inner,
+        handle,
+        t=0,
+        config=config,
         hidden_states=hidden_states,
         prompt_embeds=prompt_embeds,
         pooled_prompt_embeds=pooled,
@@ -138,7 +144,10 @@ def test_skip_window_validated_against_active_num_steps_not_nominal():
 
     with pytest.raises(InvalidStepWindowError) as exc:
         flux1_forward_with_gate(
-            inner, handle, t=21, config=config,  # absolute t = 21 (img2img start)
+            inner,
+            handle,
+            t=21,
+            config=config,  # absolute t = 21 (img2img start)
             hidden_states=hidden_states,
             prompt_embeds=prompt_embeds,
             pooled_prompt_embeds=pooled,
@@ -170,7 +179,10 @@ def test_forward_does_not_call_reset_directly():
     pooled = mx.zeros((1, 4))
 
     flux1_forward_with_gate(
-        inner, handle, t=3, config=config,
+        inner,
+        handle,
+        t=3,
+        config=config,
         hidden_states=hidden_states,
         prompt_embeds=prompt_embeds,
         pooled_prompt_embeds=pooled,

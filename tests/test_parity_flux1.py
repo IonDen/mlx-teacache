@@ -203,9 +203,7 @@ def test_paired_parity_at_threshold_zero_dev(flux1_dev: Any, image_strength: flo
     for FLUX.1 across txt2img (strength=0) and img2img (strength>0)."""
     kwargs = _gen_kwargs_dev("a red apple on a wooden table")
     if image_strength > 0.0:
-        kwargs["image_path"] = str(
-            Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png"
-        )
+        kwargs["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png")
         kwargs["image_strength"] = image_strength
 
     vanilla_latent = _capture(flux1_dev, **kwargs)
@@ -213,8 +211,7 @@ def test_paired_parity_at_threshold_zero_dev(flux1_dev: Any, image_strength: flo
         wrapper_latent = _capture(flux1_dev, **kwargs)
 
     assert mx.array_equal(vanilla_latent, wrapper_latent), (
-        f"FLUX.1-dev paired parity failed at rel_l1_thresh=0 with "
-        f"image_strength={image_strength}"
+        f"FLUX.1-dev paired parity failed at rel_l1_thresh=0 with image_strength={image_strength}"
     )
 
 

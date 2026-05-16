@@ -113,7 +113,9 @@ class _FakeInner:
         return x
 
 
-def _make_handle(*, rel_l1_thresh: float, skip_first: int = 0, skip_last: int = 0, num_inference_steps: int = 25) -> Any:
+def _make_handle(
+    *, rel_l1_thresh: float, skip_first: int = 0, skip_last: int = 0, num_inference_steps: int = 25
+) -> Any:
     """Minimal handle stub with the attributes forward.py reads."""
     coefficients, _ = load_builtin("flux1-dev")
     state = SimpleNamespace(

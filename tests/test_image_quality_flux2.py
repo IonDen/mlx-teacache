@@ -129,10 +129,13 @@ def flux2_klein() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("image_strength,init_image_name", [
-    (0.0, None),                  # txt2img baseline
-    (0.5, "natural_512.png"),     # img2img with natural init image
-])
+@pytest.mark.parametrize(
+    "image_strength,init_image_name",
+    [
+        (0.0, None),  # txt2img baseline
+        (0.5, "natural_512.png"),  # img2img with natural init image
+    ],
+)
 def test_default_threshold_ssim_klein_pr_gate(
     flux2_klein: Any, image_strength: float, init_image_name: str | None
 ) -> None:
@@ -140,9 +143,7 @@ def test_default_threshold_ssim_klein_pr_gate(
     produce a decoded image whose SSIM vs same-process vanilla is >= the gate."""
     kw = _gen_kwargs_klein(PR_TIME_PROMPT)
     if init_image_name is not None:
-        kw["image_path"] = str(
-            Path(__file__).parent / "fixtures" / "init_images" / init_image_name
-        )
+        kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / init_image_name)
         kw["image_strength"] = image_strength
 
     vanilla_latent = _capture(flux2_klein, **kw)

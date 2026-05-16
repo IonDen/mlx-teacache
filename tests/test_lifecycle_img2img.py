@@ -43,12 +43,12 @@ def _make_config(num_inference_steps: int, *, image_strength: float | None = Non
 @pytest.mark.parametrize(
     "image_strength,expected_init,expected_active",
     [
-        (None, 0, 25),   # txt2img
-        (0.0, 0, 25),    # txt2img (explicit zero strength)
-        (0.04, 1, 24),   # img2img — tiny strength
-        (0.5, 12, 13),   # img2img — half
-        (0.7, 17, 8),    # img2img — 0.7 yields 8 calls per mflux semantics
-        (1.0, 25, 0),    # img2img — full preservation, zero denoising calls
+        (None, 0, 25),  # txt2img
+        (0.0, 0, 25),  # txt2img (explicit zero strength)
+        (0.04, 1, 24),  # img2img — tiny strength
+        (0.5, 12, 13),  # img2img — half
+        (0.7, 17, 8),  # img2img — 0.7 yields 8 calls per mflux semantics
+        (1.0, 25, 0),  # img2img — full preservation, zero denoising calls
     ],
 )
 def test_active_step_count_matches_mflux_semantics(image_strength, expected_init, expected_active):
@@ -108,8 +108,7 @@ def test_before_loop_sets_active_num_steps_for_txt2img():
 def test_before_loop_sets_active_num_steps_for_img2img_07():
     handle = _FakeHandle()
     cb = GenerationContextCallback(handle)
-    cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                        config=_make_config(25, image_strength=0.7))
+    cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25, image_strength=0.7))
     assert handle._gen_ctx.active_num_steps == 8  # 25 - 17
 
 
@@ -118,8 +117,7 @@ def test_before_loop_zero_active_steps_for_strength_1():
     cleanly with num_steps=0 (cache simply never engages)."""
     handle = _FakeHandle()
     cb = GenerationContextCallback(handle)
-    cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                        config=_make_config(25, image_strength=1.0))
+    cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25, image_strength=1.0))
     assert handle._gen_ctx.active_num_steps == 0
 
 
@@ -128,8 +126,7 @@ def test_before_loop_does_not_raise_img2img_supported_error():
     handle = _FakeHandle()
     cb = GenerationContextCallback(handle)
     # Must not raise:
-    cb.call_before_loop(seed=1, prompt="hi", latents=None,
-                        config=_make_config(25, image_strength=0.5))
+    cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25, image_strength=0.5))
 
 
 def test_after_loop_uses_active_num_steps_for_pending_finalize():

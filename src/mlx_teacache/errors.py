@@ -58,7 +58,7 @@ class InvalidStepWindowError(TeaCacheError):
         *,
         skip_first: int,
         skip_last: int,
-        num_steps: int,                            # legacy alias for active count
+        num_steps: int,  # legacy alias for active count
         nominal_num_inference_steps: int | None = None,
         active_num_steps: int | None = None,
     ) -> None:
@@ -79,10 +79,7 @@ class InvalidStepWindowError(TeaCacheError):
                 f"active_num_steps={active} "
                 f"(sum {skip_first + skip_last} >= {active})."
             )
-        super().__init__(
-            "skip_first_n_steps + skip_last_n_steps must be < active denoising steps"
-            + tail
-        )
+        super().__init__("skip_first_n_steps + skip_last_n_steps must be < active denoising steps" + tail)
         self.skip_first = skip_first
         self.skip_last = skip_last
         self.num_steps = num_steps  # legacy attribute name preserved

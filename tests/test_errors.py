@@ -71,7 +71,8 @@ def test_invalid_step_window_names_values():
 def test_invalid_step_window_message_reports_both_counts_when_provided():
     """New img2img call sites pass both nominal and active counts."""
     err = InvalidStepWindowError(
-        skip_first=2, skip_last=2,
+        skip_first=2,
+        skip_last=2,
         num_steps=4,
         nominal_num_inference_steps=25,
         active_num_steps=4,

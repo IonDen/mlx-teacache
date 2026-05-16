@@ -34,7 +34,7 @@ uv add "mlx-teacache[mflux]"
 Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17,<0.18`.
 
 ```bash
-pip install "mlx-teacache==0.2.0[mflux]"  # pin for reproducibility
+pip install "mlx-teacache==0.3.0[mflux]"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -177,15 +177,15 @@ mflux 0.17.5 wraps `_predict` in `mx.compile` on every Apple Silicon chip except
 
 img2img reuses the txt2img calibration. A dedicated img2img calibration may follow in v0.2.x if SSIM gates flag drift on specific schedules.
 
-FLUX.2 with CFG (`guidance > 1.0`) falls back to vanilla mflux automatically. Output is bit-exact; per-branch caching is planned for v0.3.
+FLUX.2 with CFG (`guidance > 1.0`) falls back to vanilla mflux automatically. Per-branch caching is planned for v0.4.
 
-Very short schedules cannot benefit. FLUX.1 schnell at 4 steps and Klein at 4 steps have too few non-forced steps for the gate to engage. Use `num_inference_steps >= 8` for Klein, `>= 10` for schnell, or stick to dev for big wins.
+Very short schedules barely benefit. At the mflux/BFL Klein default of 4 steps with the package's default skip windows (`skip_first=1`, `skip_last=1`), the gate has at most one possible skip per generation, so wall-clock benefit is bounded. FLUX.1 schnell at 4 steps is the same story. Use `num_inference_steps >= 8` for Klein, `>= 10` for schnell, or stick to dev for big wins.
 
-Klein variants other than `flux2-klein-4b` are not supported yet. 9B and base configs are planned for v0.3.0.
+Klein base variants (`flux2-klein-base-4b`, `flux2-klein-base-9b`) are not supported yet. They are planned for v0.4.0 (base-4B, Apache-2.0) and v0.5.0 (base-9B) respectively.
 
 The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exchange for live per-step gating. Vanilla mflux compiles `_predict` on every chip except base M1 and base M2. The 1.48× measurement is from M1 Max / FLUX.1-dev / 25 steps; speedup on M2 Pro and newer is plausible but untested locally. On M5, the GPU Neural Accelerators (Metal 4 TensorOps) are only reachable through the compiled path, so the eager wrapper can lose some or all of that advantage. Output stays correct either way. See `docs/m3-plus-tradeoff.md` for the per-chip recipe; PRs with measurements welcome.
 
-FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.99. The CFG-fallback path stays bit-exact. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on Klein 4B).
+FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.99 on both Klein 4B and Klein 9B at threshold 0. The CFG-fallback path is also numerical rather than bit-exact (the same Metal kernel-dispatch noise applies even when no gating happens). The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on Klein 4B and Klein 9B at the package default threshold).
 
 The mflux pin is strict at `>=0.17,<0.18`. Bumping it is a deliberate release.
 

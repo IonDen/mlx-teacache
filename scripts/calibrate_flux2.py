@@ -69,7 +69,10 @@ def _model_config_klein_9b() -> Any:
 
 def _not_wired(release: str) -> Any:
     def _raise() -> Any:
-        raise NotImplementedError(f"--variant wired in {release}; out of scope for v0.3.0")
+        raise NotImplementedError(
+            f"This variant will be wired in {release}; currently out of scope. "
+            f"Use --variant klein-4b or --variant klein-9b."
+        )
 
     return _raise
 

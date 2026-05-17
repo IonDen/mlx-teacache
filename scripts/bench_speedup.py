@@ -17,6 +17,7 @@ For each --variant:
 Run as:
   uv run python scripts/bench_speedup.py --variant klein-9b
   uv run python scripts/bench_speedup.py --variant klein-4b
+  uv run python scripts/bench_speedup.py --variant klein-base-4b   # 25-step, g=1.0
   uv run python scripts/bench_speedup.py --variant flux1-dev
 
 Output: prints summary to stdout, optionally writes JSON via --report.
@@ -53,6 +54,8 @@ def _load_flux2_klein(variant: str) -> Any:
         cfg = ModelConfig.flux2_klein_4b()
     elif variant == "klein-9b":
         cfg = ModelConfig.flux2_klein_9b()
+    elif variant == "klein-base-4b":
+        cfg = ModelConfig.flux2_klein_base_4b()
     else:
         raise ValueError(f"unsupported klein variant: {variant!r}")
     flux = Flux2Klein(quantize=4, model_config=cfg)
@@ -78,6 +81,14 @@ def _variant_config(variant: str) -> dict[str, Any]:
         return {
             "loader": _load_flux2_klein,
             "num_inference_steps": 8,
+            "guidance": 1.0,
+        }
+    if variant == "klein-base-4b":
+        # Non-distilled; calibrated at 25 steps. g=1.0 only — CFG falls
+        # back to vanilla mflux pending v0.4.1 (per-branch caching).
+        return {
+            "loader": _load_flux2_klein,
+            "num_inference_steps": 25,
             "guidance": 1.0,
         }
     if variant == "flux1-dev":
@@ -124,7 +135,7 @@ def main() -> None:
     parser.add_argument(
         "--variant",
         required=True,
-        choices=["klein-4b", "klein-9b", "flux1-dev", "flux1-schnell"],
+        choices=["klein-4b", "klein-9b", "klein-base-4b", "flux1-dev", "flux1-schnell"],
     )
     parser.add_argument("--reps", type=int, default=3, help="timed reps per condition")
     parser.add_argument(

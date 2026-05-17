@@ -196,3 +196,37 @@ def test_apply_teacache_accepts_flux2_klein_base_4b():
         assert handle.provenance.source == "builtin"
     finally:
         handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_uses_per_variant_default_for_klein_base_4b():
+    """When no rel_l1_thresh is passed, base-4b's per-variant default (0.17) is applied."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux)  # no rel_l1_thresh — should use variant default
+    try:
+        assert handle.rel_l1_thresh == 0.17
+    finally:
+        handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_explicit_thresh_overrides_per_variant_default():
+    """Explicit rel_l1_thresh wins over per-variant default."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux, rel_l1_thresh=0.05)
+    try:
+        assert handle.rel_l1_thresh == 0.05
+    finally:
+        handle.restore()

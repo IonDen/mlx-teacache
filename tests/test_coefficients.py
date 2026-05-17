@@ -65,6 +65,23 @@ def test_load_builtin_flux2_klein_base_4b_has_dataset_and_metric():
     assert prov.fit_metric_value is not None
     assert 0.0 < prov.fit_metric_value <= 1.0
     assert (prov.reference_url or "").endswith("calibrate_flux2.py")
+    assert prov.default_thresh == 0.17
+
+
+def test_klein_4b_9b_have_no_per_variant_default():
+    """Distilled Klein variants intentionally keep the package-wide 0.20 default."""
+    _, prov_4b = load_builtin("flux2-klein-4b")
+    _, prov_9b = load_builtin("flux2-klein-9b")
+    assert prov_4b.default_thresh is None
+    assert prov_9b.default_thresh is None
+
+
+def test_flux1_variants_have_no_per_variant_default():
+    """FLUX.1 variants intentionally keep the package-wide 0.20 default."""
+    _, prov_dev = load_builtin("flux1-dev")
+    _, prov_schnell = load_builtin("flux1-schnell")
+    assert prov_dev.default_thresh is None
+    assert prov_schnell.default_thresh is None
 
 
 @pytest.mark.parametrize(

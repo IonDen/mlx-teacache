@@ -22,6 +22,11 @@ from mlx_teacache.errors import (
 from mlx_teacache.integrations.mflux.detect import _SUPPORTED, VariantId
 from mlx_teacache.stats import TeaCacheStats
 
+# Sentinel that distinguishes "caller did not pass rel_l1_thresh" from
+# "caller explicitly passed 0.20". This lets us look up a per-variant default
+# before falling back to the package-wide 0.20.
+_UNSET: Any = object()
+
 
 @dataclass
 class _HandleState:
@@ -133,7 +138,7 @@ def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
 def apply_teacache(
     flux: Any,
     *,
-    rel_l1_thresh: float = 0.20,
+    rel_l1_thresh: float | Any = _UNSET,
     coefficients: Sequence[float] | None = None,
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,
@@ -150,11 +155,14 @@ def apply_teacache(
         the polynomial gate at guidance=1.0. CFG / guidance > 1.0 falls back
         to vanilla mflux pending v0.4.1.)
 
+    Threshold resolution priority:
+      1. Explicit caller value — ``apply_teacache(flux, rel_l1_thresh=X)`` always wins.
+      2. Per-variant default — ``Provenance.default_thresh`` in the built-in registry.
+         Currently set for flux2-klein-base-4b (0.17); all other variants leave this None.
+      3. Package-wide fallback of 0.20, used when neither of the above apply.
+
     See docs/superpowers/specs/2026-05-14-mlx-teacache-design.md §6.1 for the
     full docstring; this is the runtime entry point."""
-    # Eager static validation.
-    if not (0.0 <= rel_l1_thresh <= 1.0):
-        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
     if skip_first_n_steps < 0:
         raise ValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")
     if skip_last_n_steps < 0:
@@ -171,6 +179,15 @@ def apply_teacache(
     )
 
     variant_id = identify_variant(flux)
+
+    # Resolve effective threshold: explicit user value > per-variant default > package default 0.20
+    if rel_l1_thresh is _UNSET:
+        _, _prov = load_builtin(variant_id)
+        rel_l1_thresh = _prov.default_thresh if _prov.default_thresh is not None else 0.20
+
+    # Eager static validation (runs on the resolved value).
+    if not (0.0 <= rel_l1_thresh <= 1.0):
+        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
 
     # Coefficient resolution.
     if coefficients is not None:

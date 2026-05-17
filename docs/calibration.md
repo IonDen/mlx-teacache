@@ -31,9 +31,10 @@ uv run python scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin
 # Klein base-4B (origin-constrained polyfit; shipped since v0.4.0). Non-distilled
 # variant designed for 20-50 step generation; this calibration uses 25 steps.
 # The per-variant default rel_l1_thresh is shipped via Provenance.default_thresh
-# in coefficients.py — tune via the threshold-sweep recipe in /tmp/sweep_thresholds.py
-# if you re-calibrate.
+# in coefficients.py — if you re-calibrate, re-run scripts/sweep_threshold_klein_base_4b.py
+# afterwards to confirm or re-tune that default.
 uv run python scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin
+uv run python scripts/sweep_threshold_klein_base_4b.py   # tune the per-variant default
 
 # klein-base-9b is declared but raises NotImplementedError until v0.5.0.
 ```

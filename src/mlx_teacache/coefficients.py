@@ -171,14 +171,17 @@ _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]
             fit_metric="constrained-LSQ R^2 on consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
             fit_metric_value=0.10643408169124158,
             reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
-            # default_thresh=0.17: empirically tuned via /tmp/sweep_thresholds.py
-            # + /tmp/sweep_fine.py on the red-apple bench prompt. At the package
-            # default 0.20 the gate fires 19/25 skips (76% skip rate) and SSIM
-            # drops to ~0.76 vs vanilla — quality degrades visibly. At 0.17 the
-            # gate fires 3/25 skips (12%) for 1.30x speedup with SSIM=0.99
-            # (indistinguishable from vanilla). The cliff above 0.17 is sharp:
-            # 0.175 gives 14 skips and SSIM=0.78. R^2 of the polynomial fit on
-            # base-4b is 0.106 (low — see scripts/_calibration_flux2_klein_base_4b.json),
+            # default_thresh=0.17: empirically tuned via
+            # scripts/sweep_threshold_klein_base_4b.py on the red-apple bench
+            # prompt. At the package default 0.20 the gate fires 19/25 skips
+            # (76% skip rate) and SSIM drops to ~0.76 vs vanilla — quality
+            # degrades visibly. At 0.17 the gate fires 3/25 skips (12%) with
+            # SSIM=0.99 (indistinguishable from vanilla). The cliff above 0.17
+            # is sharp: 0.175 gives 14 skips and SSIM=0.78. Headline wall-clock
+            # at 0.17 is 1.41x on M1 Max (scripts/bench_speedup.py 3-rep
+            # median); both FLUX.2 mechanisms contribute (~12% from step-
+            # skipping plus mx.compile-path avoidance). R^2 of the polynomial
+            # fit on base-4b is 0.106 (low — see scripts/_calibration_flux2_klein_base_4b.json),
             # which is why this variant needs a lower threshold than the
             # FLUX.1-family default.
             default_thresh=0.17,

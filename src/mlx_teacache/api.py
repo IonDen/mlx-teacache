@@ -158,6 +158,9 @@ def apply_teacache(
     Threshold resolution priority:
       1. Explicit caller value — ``apply_teacache(flux, rel_l1_thresh=X)`` always wins.
       2. Per-variant default — ``Provenance.default_thresh`` in the built-in registry.
+         Only applied when the caller does NOT pass ``coefficients``. The per-variant
+         default was tuned against the bundled polynomial; user-supplied coefficients
+         get the package fallback so the threshold matches the polynomial they shipped.
          Currently set for flux2-klein-base-4b (0.17); all other variants leave this None.
       3. Package-wide fallback of 0.20, used when neither of the above apply.
 
@@ -180,21 +183,26 @@ def apply_teacache(
 
     variant_id = identify_variant(flux)
 
-    # Resolve effective threshold: explicit user value > per-variant default > package default 0.20
-    if rel_l1_thresh is _UNSET:
-        _, _prov = load_builtin(variant_id)
-        rel_l1_thresh = _prov.default_thresh if _prov.default_thresh is not None else 0.20
-
-    # Eager static validation (runs on the resolved value).
-    if not (0.0 <= rel_l1_thresh <= 1.0):
-        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
-
-    # Coefficient resolution.
+    # Coefficient resolution first — the per-variant default threshold is tied to the
+    # built-in polynomial, so user-supplied coefficients fall through to the package
+    # default 0.20 rather than inheriting a threshold tuned for a different polynomial.
     if coefficients is not None:
         coeffs = validate_custom(coefficients)
         prov = Provenance.for_user_supplied()
     else:
         coeffs, prov = load_builtin(variant_id)
+
+    # Resolve effective threshold: explicit user value > per-variant default (built-in
+    # coefficients only) > package default 0.20.
+    if rel_l1_thresh is _UNSET:
+        if coefficients is None and prov.default_thresh is not None:
+            rel_l1_thresh = prov.default_thresh
+        else:
+            rel_l1_thresh = 0.20
+
+    # Eager static validation (runs on the resolved value).
+    if not (0.0 <= rel_l1_thresh <= 1.0):
+        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
 
     # Already-patched sentinel check.
     existing = getattr(flux, "_teacache_handle", None)

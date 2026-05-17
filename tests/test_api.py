@@ -249,3 +249,33 @@ def test_apply_teacache_user_coefficients_skip_per_variant_default():
         assert handle.provenance.source == "user"
     finally:
         handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_cfg_records_cfg_was_active_klein_base_4b():
+    """v0.4.1: at guidance > 1.0, the gated CFG forward fires; the staging
+    buffer's cfg_was_active flag flips True. GenerationStats.cfg_was_active
+    then propagates from staging at finalize time."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux)
+    try:
+        flux.generate_image(
+            prompt="a red apple",
+            seed=42,
+            num_inference_steps=4,
+            height=512,
+            width=512,
+            guidance=4.0,
+        )
+        assert handle.stats.last_generation is not None
+        assert handle.stats.last_generation.cfg_was_active is True
+        kinds = {d.decision for d in handle.stats.last_generation.decisions}
+        assert "cfg-fallback" not in kinds
+    finally:
+        handle.restore()

@@ -7,9 +7,10 @@ our factory, which returns a per-generation predict closure. The closure
 runs eager Python — never wrapped in mx.compile — so step-level gating
 remains live (per spike F3/F4 findings).
 
-CFG fallback: when negative embeds are passed, we run vanilla mflux CFG
-(both transformer calls + manual combination) and record cfg-fallback
-StepDecisions. Skip-window validation runs lazily on first non-CFG call."""
+v0.4.1+: CFG steps are routed through flux2_cfg_forward_with_gate (gated,
+per-branch caching). Skip-window validation runs on the first gated call
+regardless of CFG, so an all-CFG generation with a bad window now raises
+InvalidStepWindowError (behavior change documented in CHANGELOG)."""
 
 from __future__ import annotations
 
@@ -19,8 +20,10 @@ from typing import Any
 import mlx.core as mx
 
 from mlx_teacache.errors import InvalidStepWindowError, MissingGenerationContextError
-from mlx_teacache.integrations.mflux.forward import flux2_forward_with_gate
-from mlx_teacache.stats import StepDecision
+from mlx_teacache.integrations.mflux.forward import (
+    flux2_cfg_forward_with_gate,
+    flux2_forward_with_gate,
+)
 
 PredictFn = Callable[
     [mx.array, mx.array, mx.array, mx.array, "mx.array | None", "mx.array | None", float, mx.array],
@@ -41,7 +44,11 @@ def _vanilla_flux2_cfg_predict(
     timestep: mx.array,
 ) -> Any:
     """Bit-exact mirror of mflux's Flux2Klein._predict closure CFG path
-    (flux2_klein.py:259-276). Used when TeaCache auto-falls-back."""
+    (flux2_klein.py:259-276). v0.4.1+: this function is a **test-only
+    diagnostic reference** used by tests/test_parity_flux2.py to verify
+    that flux2_cfg_forward_with_gate at rel_l1_thresh<=0 produces the
+    same output as vanilla CFG math. It is no longer called from the
+    production predict closure."""
     noise = transformer(
         hidden_states=latents,
         encoder_hidden_states=prompt_embeds,
@@ -86,50 +93,17 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
             ctx = handle._gen_ctx
 
             # 1. Consume context on the first call of THIS generation's closure.
-            #    Cache reset is now lifecycle-owned (see lifecycle.py
-            #    call_before_loop) — we still need the guard so a missing /
-            #    stale gen-ctx raises a clear error rather than silently using
-            #    stale cache state.
             if not context_consumed:
                 if ctx.active_num_steps is None or ctx.consumed_at_token == ctx.token:
                     raise MissingGenerationContextError()
                 ctx.consumed_at_token = ctx.token
                 context_consumed = True
 
-            timestep_val = float(timestep.flatten()[0]) if hasattr(timestep, "flatten") else float(timestep)
-
-            # 2. CFG fallback path (no skip-window validation here — all-CFG
-            #    generations should not raise InvalidStepWindowError).
-            cfg_active = negative_prompt_embeds is not None and negative_text_ids is not None
-            if cfg_active:
-                assert negative_prompt_embeds is not None  # narrowed by cfg_active
-                assert negative_text_ids is not None
-                noise = _vanilla_flux2_cfg_predict(
-                    transformer,
-                    latents,
-                    latent_ids,
-                    prompt_embeds,
-                    text_ids,
-                    negative_prompt_embeds,
-                    negative_text_ids,
-                    guidance,
-                    timestep,
-                )
-                handle._state.stats.record(
-                    StepDecision(
-                        step_idx=handle._state.cache.step_counter,
-                        timestep=timestep_val,
-                        rel_l1=None,
-                        accumulated_distance=handle._state.cache.accumulated_distance,
-                        decision="cfg-fallback",
-                    )
-                )
-                handle._state.cache.step_counter += 1
-                handle._state.cache.last_timestep = timestep_val
-                return noise
-
-            # 3. Gated non-CFG path. Validate skip-window lazily here (first
-            #    non-CFG call of the generation), per §5.6.
+            # 2. Lazy skip-window validation. v0.4.1: lifted up so it runs on
+            #    the first gated call regardless of CFG. In v0.4.0 the CFG
+            #    branch bypassed this; an all-CFG generation with a bad
+            #    window silently ran vanilla. This is now a behavior change
+            #    documented in CHANGELOG.
             if not handle._state.cache.skip_window_validated:
                 if handle.skip_first_n_steps + handle.skip_last_n_steps >= ctx.active_num_steps:
                     raise InvalidStepWindowError(
@@ -139,6 +113,26 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
                     )
                 handle._state.cache.skip_window_validated = True
 
+            # 3. CFG branch: gated per-branch caching.
+            cfg_active = negative_prompt_embeds is not None and negative_text_ids is not None
+            if cfg_active:
+                assert negative_prompt_embeds is not None
+                assert negative_text_ids is not None
+                handle._state.stats._staging.cfg_was_active = True
+                return flux2_cfg_forward_with_gate(
+                    transformer,
+                    handle,
+                    hidden_states=latents,
+                    prompt_embeds=prompt_embeds,
+                    text_ids=text_ids,
+                    negative_prompt_embeds=negative_prompt_embeds,
+                    negative_text_ids=negative_text_ids,
+                    guidance=guidance,
+                    timestep=timestep,
+                    img_ids=latent_ids,
+                )
+
+            # 4. Non-CFG branch: unchanged from v0.4.0.
             return flux2_forward_with_gate(
                 transformer,
                 handle,

@@ -1,5 +1,17 @@
 # src/mlx_teacache/cache.py
-"""Per-handle mutable cache state. Pure data; methods only for reset."""
+"""Per-handle mutable cache state. Pure data; methods only for reset.
+
+Fields
+------
+step_counter          : int
+previous_mod_input    : mx.array | None
+cached_residual       : mx.array | None  — positive branch residual
+cached_residual_neg   : mx.array | None  — negative branch residual (CFG)
+accumulated_distance  : float
+last_timestep         : float | None
+skip_window_validated : bool
+num_steps             : int | None
+"""
 
 from __future__ import annotations
 
@@ -13,6 +25,7 @@ class TeaCacheState:
     step_counter: int = 0
     previous_mod_input: mx.array | None = None
     cached_residual: mx.array | None = None
+    cached_residual_neg: mx.array | None = None
     accumulated_distance: float = 0.0
     last_timestep: float | None = None
     skip_window_validated: bool = False
@@ -27,10 +40,15 @@ class TeaCacheState:
           context_consumed:`); both call sites were removed when lifecycle took
           exclusive ownership so img2img generations (which start at `t > 0`)
           reset correctly.
+
+        Clears both ``cached_residual`` (positive branch) and
+        ``cached_residual_neg`` (negative branch) to prevent cross-generation
+        pollution under CFG (v0.4.1+).
         """
         self.step_counter = 0
         self.previous_mod_input = None
         self.cached_residual = None
+        self.cached_residual_neg = None
         self.accumulated_distance = 0.0
         self.last_timestep = None
         self.skip_window_validated = False

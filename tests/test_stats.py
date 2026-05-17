@@ -4,6 +4,7 @@ from mlx_teacache.stats import (
     StatsFrozenError,
     StepDecision,
     TeaCacheStats,
+    _Staging,
 )
 
 
@@ -145,3 +146,31 @@ def test_finalize_length_mismatch_raises_and_discards_staging():
     s.record(_make_decision(0, "computed"))
     s.finalize_last_generation(num_inference_steps=1, cfg_was_active=False)
     assert s.computed_count == 1
+
+
+def test_staging_cfg_was_active_defaults_false():
+    st = _Staging()
+    assert st.cfg_was_active is False
+
+
+def test_staging_cfg_was_active_clears_on_clear():
+    st = _Staging()
+    st.cfg_was_active = True
+    st.clear()
+    assert st.cfg_was_active is False
+
+
+def test_finalize_records_cfg_was_active_from_staging():
+    """finalize_last_generation must propagate _staging.cfg_was_active to
+    GenerationStats.cfg_was_active. Replaces the v0.4.0 derivation from
+    cfg_fallback_steps > 0 which is no longer correct in v0.4.1+."""
+    stats = TeaCacheStats()
+    stats._staging.cfg_was_active = True
+    stats.record(
+        StepDecision(step_idx=0, timestep=1.0, rel_l1=None, accumulated_distance=0.0, decision="computed")
+    )
+    stats.finalize_last_generation(num_inference_steps=1, cfg_was_active=True)
+    assert stats.last_generation is not None
+    assert stats.last_generation.cfg_was_active is True
+    # cfg_fallback_steps stays at 0 in v0.4.1+ — feature is gone.
+    assert stats.cfg_fallback_steps == 0

@@ -36,7 +36,7 @@ uv add "mlx-teacache[mflux]"
 Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17,<0.18`.
 
 ```bash
-pip install "mlx-teacache==0.4.0[mflux]"  # pin for reproducibility
+pip install "mlx-teacache==0.4.1[mflux]"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -101,7 +101,7 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 
 ¹ `flux2-klein-9b` coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See the [Benchmarks](#benchmarks) "How the speedup happens" subsection.
 
-² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps and the wrapper measures 1.41× wall-clock vs vanilla (~12% from step-skipping plus the FLUX.2 `mx.compile`-path avoidance contribution); SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) falls back to vanilla mflux pending v0.4.1 (per-branch caching). The upstream BFL model card recommends `guidance_scale=4.0, num_inference_steps=50`; that recipe runs vanilla in v0.4.0.
+² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps and the wrapper measures 1.41× wall-clock vs vanilla (~12% from step-skipping plus the FLUX.2 `mx.compile`-path avoidance contribution); SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) runs through a per-branch gated path as of v0.4.1: the canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) skips 9/50 steps for a 1.26× wall-clock speedup vs vanilla mflux on M1 Max.
 
 ## Combining with mlx-taef
 
@@ -143,7 +143,7 @@ mlx-teacache implements this for mflux on Apple Silicon. For FLUX.1 we replace `
 
 ## Benchmarks
 
-All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 26.x, mflux 0.17.5, bf16, quantize=4, 512×512, `seed=42`, red-apple prompt; one vanilla warmup + 3 timed reps per condition, median reported, default `rel_l1_thresh=0.20`. Measured 2026-05-16.
+All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 26.x, mflux 0.17.5, bf16, quantize=4, 512×512, `seed=42`, red-apple prompt; one vanilla warmup + 3 timed reps per condition, median reported, default `rel_l1_thresh=0.20` (per-variant default `0.17` on base-4b rows). Pre-v0.4.1 rows measured 2026-05-16; the base-4b CFG row measured 2026-05-17.
 
 | Variant | Steps | Vanilla | Wrapper | Speedup | Skipped | Mechanism |
 |---|---|---|---|---|---|---|
@@ -152,10 +152,13 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 | `flux2-klein-4b` | 8 | 28.1s | 22.3s | 1.26× | **0 / 8** | `mx.compile` avoidance only |
 | `flux2-klein-9b` | 8 | 119.0s | 61.8s | 1.93×† | **0 / 8** | `mx.compile` avoidance only |
 | `flux2-klein-base-4b`³ | 25 | 77.5s | 55.1s | **1.41×** | **3 / 25** | step-skipping + `mx.compile` avoidance |
+| `flux2-klein-base-4b` (CFG)⁴ | 50 | 254.0s | 201.2s | **1.26×** | **9 / 50** | step-skipping + `mx.compile` avoidance |
 
 † Klein 9B wall-clock has high variance from thermal throttling on M1 Max at quantize=4. The 1.93× median combined a thermally-throttled vanilla rep (227s) with a recovered wrapper rep (46s); the steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps.
 
-³ `flux2-klein-base-4b` at `guidance=1.0`, per-variant default `rel_l1_thresh=0.17`. The 1.41× combines both FLUX.2 speedup mechanisms — step-skipping (3/25 step skips save ~12% directly) and `mx.compile`-path avoidance (the same mechanism that gives distilled Klein its 1.2-1.9× wall-clock benefit on M1 Max at quantize=4). CFG (`guidance > 1.0`) falls back to vanilla mflux pending v0.4.1.
+³ `flux2-klein-base-4b` at `guidance=1.0`, per-variant default `rel_l1_thresh=0.17`. The 1.41× combines both FLUX.2 speedup mechanisms — step-skipping (3/25 step skips save ~12% directly) and `mx.compile`-path avoidance (the same mechanism that gives distilled Klein its 1.2-1.9× wall-clock benefit on M1 Max at quantize=4). CFG (`guidance > 1.0`) is gated end-to-end as of v0.4.1; see footnote ⁴.
+
+⁴ `flux2-klein-base-4b` under CFG at the canonical upstream BFL recipe (`guidance=4.0`, 50 steps), per-variant default `rel_l1_thresh=0.17`. The 1.26× combined ratio splits into 1.09× from `mx.compile`-path avoidance (vanilla mflux vs wrapped with the gate disabled, `rel_l1_thresh=0`) and 1.16× from step-skipping (wrapped-no-gate vs wrapped-gated). The gating contribution is lower than the v0.4.0 25-step row because CFG runs two transformer calls per step (positive + negative branch); a gated step still saves both calls in full, but each saved call is individually more expensive. Skip count is stable at 9/50 across three reps. Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b` (defaults to the CFG recipe in v0.4.1+).
 
 Reproduce any row:
 
@@ -163,7 +166,8 @@ Reproduce any row:
 uv run python scripts/bench_speedup.py --variant flux1-dev      # 25-step dev
 uv run python scripts/bench_speedup.py --variant klein-4b       # 8-step Klein 4B
 uv run python scripts/bench_speedup.py --variant klein-9b       # 8-step Klein 9B
-uv run python scripts/bench_speedup.py --variant klein-base-4b  # 25-step base-4B (g=1.0)
+uv run python scripts/bench_speedup.py --variant klein-base-4b  # 50-step base-4B under CFG (g=4.0, v0.4.1 default)
+uv run python scripts/bench_speedup.py --variant klein-base-4b --guidance 1.0 --num-inference-steps 25  # v0.4.0 row
 ```
 
 ### How the speedup happens
@@ -207,17 +211,17 @@ mflux 0.17.5 wraps `_predict` in `mx.compile` on every Apple Silicon chip *excep
 
 img2img reuses the txt2img calibration. A dedicated img2img calibration may follow in a future release if SSIM gates flag drift on specific schedules.
 
-FLUX.2 with CFG (`guidance > 1.0`) falls back to vanilla mflux automatically. Per-branch caching has no fixed release target.
+FLUX.2 with CFG (`guidance > 1.0`) runs through the gated path as of v0.4.1. The wrapper keeps two cached residuals (positive and negative branch) and shares one gate decision per step across both. The canonical base-4b recipe (`guidance_scale=4.0, num_inference_steps=50`) measures 1.26× on M1 Max.
 
 **Distilled schedules are out of scope for algorithmic step-skipping by design.** This includes FLUX.2 Klein 4B / 9B at their 4-8 step defaults and FLUX.1 schnell at its 4-step default. The polynomial gate's premise — that consecutive transformer outputs are similar enough that the residual can be reused — does not hold on distilled trajectories where each step does a much larger share of the denoising work. On the v0.3.0 bench (M1 Max, quantize=4) the gate signals "compute" on every Klein step at the package default `rel_l1_thresh=0.20` (0 skips across 3 reps on both Klein 4B and 9B); empirical adjacent-step body-output rel-L1 on Klein is ≥ 0.25. Klein still gets a real wall-clock improvement (~1.2-1.9×) from `mx.compile`-path avoidance, but the headline TeaCache step-skipping feature only fires on non-distilled schedules. See the postmortem at `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`.
 
-`flux2-klein-base-4b` (v0.4.0) runs TeaCache only at `guidance=1.0` — the wrapper's CFG fallback path in `flux2.py` doesn't yet engage the gate at `guidance > 1.0`. The upstream BFL base-4b model card recommends `guidance_scale=4.0`; that recipe runs vanilla mflux speed in v0.4.0. CFG per-branch caching is v0.4.1.
+`flux2-klein-base-4b` runs TeaCache at both `guidance=1.0` (single-branch path) and `guidance > 1.0` (per-branch path, v0.4.1+). The upstream BFL base-4b model card recommends `guidance_scale=4.0, num_inference_steps=50`; v0.4.1 measures 1.26× wall-clock vs vanilla on M1 Max at that recipe (9/50 skips, SSIM PR-gate passed).
 
 `flux2-klein-base-9b` is not yet supported. Planned for v0.5.0 (FLUX Non-Commercial license + BFL safety filter).
 
 The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exchange for live per-step gating. Vanilla mflux compiles `_predict` on every chip except base + Pro M1/M2 (the `is_m1_or_m2()` predicate only excludes Max + Ultra). The 1.48× measurement is from M1 Max / FLUX.1-dev / 25 steps; speedup on M3 and newer is plausible but untested locally. On M5, the GPU Neural Accelerators (Metal 4 TensorOps) are only reachable through the compiled path, so the eager wrapper can lose some or all of that advantage. Output stays correct either way. See `docs/m3-plus-tradeoff.md` for the per-chip recipe; PRs with measurements welcome.
 
-FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.99 on both Klein 4B and Klein 9B at threshold 0. The CFG-fallback path is also numerical rather than bit-exact (the same Metal kernel-dispatch noise applies even when no gating happens). The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on Klein 4B and Klein 9B at the package default threshold).
+FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
 The mflux pin is strict at `>=0.17,<0.18`. Bumping it is a deliberate release.
 

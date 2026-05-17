@@ -1,0 +1,43 @@
+{
+  "variant": "klein-base-4b",
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "reps": 3,
+  "vanilla_seconds": [
+    254.00949895801023,
+    262.7402849579812,
+    252.46993062499678
+  ],
+  "wrapper_seconds": [
+    194.04200124996714,
+    201.15202174999285,
+    201.23042649996933
+  ],
+  "vanilla_median": 254.00949895801023,
+  "wrapper_median": 201.15202174999285,
+  "speedup_median": 1.2627737804878376,
+  "skipped_counts": [
+    9,
+    9,
+    9
+  ],
+  "computed_counts": [
+    39,
+    39,
+    39
+  ],
+  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/klein-base-4b",
+  "nogate_seconds": [
+    244.24693841603585,
+    233.52801391697722,
+    232.94964679097757
+  ],
+  "nogate_median": 233.52801391697722,
+  "compile_avoidance_ratio": 1.0877046170928104,
+  "gating_ratio": 1.1609528548871546,
+  "combined_ratio": 1.2627737804878376
+}

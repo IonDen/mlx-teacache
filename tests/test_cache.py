@@ -33,6 +33,17 @@ def test_reset_for_new_generation_clears_all():
     assert s.num_steps == 10
 
 
+def test_reset_for_new_generation_clears_cached_residual_neg():
+    """cached_residual_neg must be cleared alongside cached_residual when a
+    generation starts. Prevents cross-generation pollution under CFG."""
+    state = TeaCacheState()
+    state.cached_residual = mx.zeros((1, 4))
+    state.cached_residual_neg = mx.zeros((1, 4))
+    state.reset_for_new_generation(num_steps=10)
+    assert state.cached_residual is None
+    assert state.cached_residual_neg is None
+
+
 def test_reset_is_bit_equal_to_constructor_for_array_fields():
     s = TeaCacheState()
     s.previous_mod_input = mx.ones((1, 4))

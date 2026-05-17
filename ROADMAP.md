@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
+- **v0.4.1** — CFG per-branch caching for FLUX.2. Canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) on `flux2-klein-base-4b` is now gate-engaged: 1.26× combined wall-clock on M1 Max (1.16× gating contribution, 1.09× `mx.compile`-path avoidance), 9/50 skips, SSIM ≥ 0.99 vs vanilla. `_vanilla_flux2_cfg_predict()` retired from production paths. Three-way bench protocol (`vanilla` / `no-gate` / `gated`) separates the v0.4 compile-avoidance effect from the v0.4.1 gating contribution. `cfg_fallback_steps` deprecated.
 - **v0.4.0** — `flux2-klein-base-4b` (Apache-2.0, non-distilled, 25-step calibration). First FLUX.2 variant where the polynomial gate engages at the package default. Per-variant `default_thresh=0.17` ships via `Provenance.default_thresh` (3/25 skips on M1 Max; wrapper measures 1.41× wall-clock — both FLUX.2 mechanisms contribute: ~12% from step-skipping plus `mx.compile`-path avoidance; SSIM > 0.99). CFG-engaged caching deferred to v0.4.1. Per-variant default-threshold mechanism added (was Approach B in original brainstorming; now permanent API).
 - **v0.3.0** — `flux2-klein-9b` support (in-repo calibration, origin-constrained polyfit). Calibration script parameterized via `--variant` so v0.4 / v0.5 are additive. `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed. Honest performance framing for FLUX.2 Klein: distilled schedules don't algorithmically step-skip; wall-clock improvement comes from `mx.compile`-path avoidance. `scripts/bench_speedup.py` committed as reproducible source of truth for all README benchmark numbers.
 - **v0.2.0** — img2img support for FLUX.1 dev/schnell + FLUX.2 Klein 4B (single bundled PR). `TeaCacheNoBenefitWarning` for distilled-schedule + skip-window misconfigurations. Per-chip `Performance by chip` section in README with M1 Pro / M2 Pro classification corrected (they're eager, not compiled). `docs/calibration.md` written. `docs/manual-verification.md` rewritten with a working recipe.
@@ -11,19 +12,9 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Active
 
-### v0.4.1: CFG per-branch caching for FLUX.2
-
-Replaces the current `_vanilla_flux2_cfg_predict()` fallback with a per-branch gated path. Each branch (positive + negative prompt embeddings) keeps its own cache state; one shared gate decision per step (FBCache-style) — when "skip" fires, both branches reuse their respective cached residuals.
-
-Lights up TeaCache on the canonical base-4b recipe (`guidance_scale=4.0`, 50-step generation per upstream model card). Also lets CFG users of distilled Klein 4B/9B benefit from whatever the gate produces on those variants (still 0 skips at default threshold by design, but the wrapper's compile-avoidance benefit becomes available under CFG).
-
-- **Effort:** medium — 4-6 days implementation + ~12 hours additional bench.
-- **Value:** unblocks v0.4.0's headline base-4b feature for the canonical upstream recipe; secondary win for distilled-Klein-with-CFG users.
-- **Risks:** new edge cases under CFG (skip-window validation, stats schema for two-branch decisions); polynomial calibrated at g=1.0 may need recalibration at g=4.0 if outputs diverge under CFG more than expected.
-
 ### v0.5.0: `flux2-klein-base-9b`
 
-Non-distilled 9B. FLUX Non-Commercial license + BFL safety filter (same constraints as Klein 9B today). Fresh calibration. Same approach as base-4B. Requires v0.4.1 (CFG caching) to deliver value on the canonical upstream recipe.
+Non-distilled 9B. FLUX Non-Commercial license + BFL safety filter (same constraints as Klein 9B today). Fresh calibration. Same approach as base-4B. Builds on v0.4.1's per-branch CFG caching so the canonical upstream recipe is accelerated end-to-end at ship time.
 
 ---
 
@@ -95,7 +86,7 @@ Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipe
 ## How to use this doc
 
 When picking up new work:
-1. **Active items first.** Items under `## Active` are committed. Finish v0.4.0 before starting v0.4.1, finish v0.4.1 before starting v0.5.0, etc.
+1. **Active items first.** Items under `## Active` are committed. Finish the current Active item before pulling the next one in.
 2. **Future improvements next.** Items under `## Future improvements` are pre-vetted improvement ideas with documented failure modes they address. Each can be lifted into an Active release when its time comes.
 3. **Future model coverage after that.** The model-coverage table is a menu, not a queue; pick from it based on community demand + license posture + bench cost.
 4. **Out of scope is durable.** Items under `## Out of scope (deliberate)` represent intentional non-goals, not deferred work. Re-opening one requires evidence that the original reasoning no longer holds.

@@ -7,7 +7,16 @@ generations. record() updates a staging buffer; finalize_last_generation()
 commits + snapshots; discard_current_generation() zeroes the staging buffer
 (called by the generate_image try/finally when a run does not complete naturally,
 per spec §4.5 v2.5). This makes "failed runs leave no trace in public stats"
-mechanical rather than aspirational."""
+mechanical rather than aspirational.
+
+v0.4.1 changes:
+- _Staging.cfg_was_active (bool): set directly by the predict closure on first
+  CFG branch entry. The lifecycle reads this flag at after_loop time to populate
+  GenerationStats.cfg_was_active. Replaces the old derivation from
+  cfg_fallback_steps > 0, which is no longer meaningful in v0.4.1+.
+- cfg_fallback_steps: deprecated since v0.4.1; always 0. The cfg-fallback
+  decision kind has been retired. Use GenerationStats.cfg_was_active instead.
+  Slated for removal in v1.0."""
 
 from __future__ import annotations
 
@@ -45,6 +54,7 @@ class _Staging:
     skipped: int = 0
     numerical_miss: int = 0
     cfg_fallback: int = 0
+    cfg_was_active: bool = False
     decisions: list[StepDecision] = field(default_factory=list)
 
     def clear(self) -> None:
@@ -53,6 +63,7 @@ class _Staging:
         self.skipped = 0
         self.numerical_miss = 0
         self.cfg_fallback = 0
+        self.cfg_was_active = False
         self.decisions.clear()
 
 
@@ -67,7 +78,7 @@ class TeaCacheStats:
     forced_count: int = 0
     skipped_count: int = 0
     numerical_miss_count: int = 0
-    cfg_fallback_steps: int = 0
+    cfg_fallback_steps: int = 0  # Deprecated since v0.4.1; always 0. Use GenerationStats.cfg_was_active. Slated for removal in v1.0.
     last_generation: GenerationStats | None = None
     _staging: _Staging = field(default_factory=_Staging)
     _frozen: bool = False

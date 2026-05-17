@@ -11,7 +11,15 @@
 
 Both signatures match mflux/callbacks/callback.py exactly. Extra **kwargs are
 accepted for forward-compat with future mflux releases that add new keyword
-arguments (e.g., kontext_image)."""
+arguments (e.g., kontext_image).
+
+v0.4.1 changes:
+- Dropped the flux2_cfg_fallback warning-suppression block in call_before_loop.
+  The CFG path is now gated (Task 4/5), so skipping is achievable even at
+  guidance > 1.0; the old suppression was masking legitimate no-benefit warnings.
+- call_after_loop now reads cfg_was_active from
+  _staging.cfg_was_active (set by the predict closure on first CFG branch entry)
+  instead of the obsolete cfg_fallback > 0 derivation."""
 
 from __future__ import annotations
 
@@ -89,17 +97,7 @@ class GenerationContextCallback:
         self._handle._state.cache.reset_for_new_generation(num_steps=active_num_steps)
 
         # --- Distilled-step / short-window no-benefit warning ---
-        # Suppression 1: FLUX.2 all-CFG path bypasses TeaCache gating entirely.
-        # mflux's Flux2Klein creates negative embeds when guidance > 1.0, which
-        # our predict closure routes to the vanilla CFG-fallback path with no
-        # skips possible. That's a different kind of no-benefit and gets its
-        # own warning category in a future release.
-        flux2_cfg_fallback = (
-            self._handle.variant_id.startswith("flux2-")
-            and float(getattr(config, "guidance", 1.0) or 1.0) > 1.0
-        )
-
-        # Suppression 2: the configuration is going to raise InvalidStepWindowError
+        # Suppression: the configuration is going to raise InvalidStepWindowError
         # at lazy validation time — the error covers the case; a duplicate
         # warning is noise.
         window_invalid = (
@@ -110,7 +108,7 @@ class GenerationContextCallback:
         if active_num_steps == 0:
             # image_strength=1.0 → mflux runs zero denoising calls. Valid no-op.
             return
-        if flux2_cfg_fallback or window_invalid:
+        if window_invalid:
             return
 
         eligible = active_num_steps - self._handle.skip_first_n_steps - self._handle.skip_last_n_steps
@@ -152,9 +150,12 @@ class GenerationContextCallback:
             # discard stats.
             active_num_steps = _active_step_count(config)
 
+        # v0.4.1+: cfg_was_active is set by the predict closure on first CFG branch entry.
+        # The old cfg_fallback>0 derivation is obsolete because production no longer
+        # records "cfg-fallback" decisions.
         self._handle._pending_finalize = PendingFinalize(
             num_inference_steps=active_num_steps,
-            cfg_was_active=self._handle._state.stats._staging.cfg_fallback > 0,
+            cfg_was_active=self._handle._state.stats._staging.cfg_was_active,
         )
         # Clear gen-ctx fields only after capture so a subsequent before_loop
         # sees None.

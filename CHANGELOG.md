@@ -7,6 +7,25 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-17
+
+CFG-engaged TeaCache for FLUX.2. The canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) on `flux2-klein-base-4b` now runs through a gated forward with one shared decision per step and a cached residual per branch. Measured 1.26× wall-clock vs vanilla mflux on M1 Max (1.16× from step-skipping, 1.09× from `mx.compile`-path avoidance; 9/50 skips stable across 3 reps). SSIM ≥ 0.85 PR-gate passed; cosine ≥ 0.97 parity vs real mflux at threshold=0.
+
+### Added
+- `flux2_cfg_forward_with_gate` in `src/mlx_teacache/integrations/mflux/forward.py`. One shared polynomial-gate decision per step (the `mod_in` signal is encoder-independent; see `forward.py:258-304`), two cached residuals (positive + negative branch). CFG combination math runs after the per-branch tail.
+- `TeaCacheState.cached_residual_neg` for the negative branch under CFG. Cleared alongside `cached_residual` in `reset_for_new_generation`.
+- `GenerationStats.cfg_was_active` now derives from a new `_Staging.cfg_was_active` flag set by the predict closure on first CFG branch entry. Replaces the obsolete `cfg_fallback > 0` derivation.
+- Three-way bench protocol on `scripts/bench_speedup.py --variant klein-base-4b`: vanilla mflux / wrapped-no-gate (`rel_l1_thresh=0`, compile-avoidance only) / wrapped-gated (full v0.4.1). Separates the v0.4 compile-avoidance effect from the v0.4.1 gating effect, so future regressions land on the right mechanism.
+- `scripts/calibrate_flux2.py` gains `--guidance`, `--num-inference-steps`, `--fit-branch-policy` CLI flags plus a CFG-aware capturing closure (computes both branches, returns CFG-combined noise to the scheduler, captures per-branch `body_out` plus the shared `mod_in`). Useful if a future variant's g=1.0 polynomial does not engage under CFG; v0.4.1 itself ships the existing polynomial unchanged.
+
+### Changed
+- `_vanilla_flux2_cfg_predict()` no longer runs in any production path. It stays in `src/mlx_teacache/integrations/mflux/flux2.py` with a docstring labeling it test-only and is used only by the diagnostic parity test in `tests/test_parity_flux2.py`.
+- Lifecycle's distilled-step "no benefit" warning no longer suppresses on `guidance > 1.0` for FLUX.2. The regular `possible_skips == 0` check is the single source of truth.
+- **Behavior change: skip-window validation under CFG.** An all-CFG generation with `skip_first_n_steps + skip_last_n_steps >= num_inference_steps` previously ran vanilla math silently. v0.4.1 raises `InvalidStepWindowError` via the lazy-validation path, which is now lifted up to fire on the first gated step regardless of CFG. Same validation as non-CFG v0.4.0.
+
+### Deprecated
+- `TeaCacheStats.cfg_fallback_steps`. Always `0` from v0.4.1+ because CFG no longer falls back. Use `GenerationStats.cfg_was_active` instead. Slated for removal in v1.0.
+
 ## [0.4.0] — 2026-05-17
 
 This release ships `flux2-klein-base-4b` (Apache-2.0, non-distilled FLUX.2 Klein 4B). It is the first FLUX.2 variant where TeaCache step-skipping engages at the package default. The polynomial gate fires 3/25 skips and the wrapper measures 1.41× wall-clock vs vanilla on M1 Max at 25 steps — both FLUX.2 speedup mechanisms contribute (step-skipping plus `mx.compile`-path avoidance). SSIM > 0.99 vs vanilla. CFG-engaged caching for FLUX.2 is deferred to v0.4.1.

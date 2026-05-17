@@ -499,3 +499,166 @@ def flux2_forward_with_gate(
     # 9. Bump step counter.
     state.step_counter += 1
     return out
+
+
+def flux2_cfg_forward_with_gate(
+    inner: Any,
+    handle: Any,
+    *,
+    hidden_states: mx.array,
+    prompt_embeds: mx.array,
+    text_ids: mx.array,
+    negative_prompt_embeds: mx.array,
+    negative_text_ids: mx.array,
+    guidance: float,
+    timestep: mx.array,
+    img_ids: mx.array,
+) -> Any:
+    """v0.4.1: gated CFG forward for FLUX.2.
+
+    One shared polynomial-gate decision per step (mod_in is encoder-
+    independent — see forward.py:258-304). Two cached residuals
+    (positive + negative). CFG combination math runs after the tail on
+    both branches.
+
+    Replaces _vanilla_flux2_cfg_predict in production. The vanilla helper
+    stays in flux2.py as a test-only diagnostic reference."""
+    from mflux.models.common.config.model_config import ModelConfig
+
+    state = handle._state.cache
+    stats = handle._state.stats
+
+    # 1. Shared prelude (mirrors flux2_forward_with_gate lines 367-394
+    #    minus encoder_hidden_states handling, which is per-branch).
+    if not isinstance(timestep, mx.array):
+        timestep = mx.array(timestep, dtype=hidden_states.dtype)
+    if timestep.ndim == 0:
+        timestep = mx.full((hidden_states.shape[0],), timestep, dtype=hidden_states.dtype)
+    timestep = timestep.astype(hidden_states.dtype)
+    timestep_scale = mx.where(mx.max(timestep) <= 1.0, 1000.0, 1.0).astype(hidden_states.dtype)
+    timestep = timestep * timestep_scale
+    temb = inner.time_guidance_embed(timestep, None)
+    temb = temb.astype(ModelConfig.precision)
+
+    body_in = inner.x_embedder(hidden_states)
+    if img_ids.ndim == 3:
+        img_ids = img_ids[0]
+    image_rotary_emb = inner.pos_embed(img_ids)
+    temb_mod_params_img = inner.double_stream_modulation_img(temb)
+    temb_mod_params_txt = inner.double_stream_modulation_txt(temb)
+
+    # 2. Per-branch encoder + text-rotary prep. These differ per branch.
+    enc_pos = inner.context_embedder(prompt_embeds)
+    txt_ids_pos = text_ids[0] if text_ids.ndim == 3 else text_ids
+    txt_rot_pos = inner.pos_embed(txt_ids_pos)
+    concat_rot_pos = (
+        mx.concatenate([txt_rot_pos[0], image_rotary_emb[0]], axis=0),
+        mx.concatenate([txt_rot_pos[1], image_rotary_emb[1]], axis=0),
+    )
+
+    enc_neg = inner.context_embedder(negative_prompt_embeds)
+    txt_ids_neg = negative_text_ids[0] if negative_text_ids.ndim == 3 else negative_text_ids
+    txt_rot_neg = inner.pos_embed(txt_ids_neg)
+    concat_rot_neg = (
+        mx.concatenate([txt_rot_neg[0], image_rotary_emb[0]], axis=0),
+        mx.concatenate([txt_rot_neg[1], image_rotary_emb[1]], axis=0),
+    )
+
+    timestep_val = float(timestep.flatten()[0])
+
+    # 3. Fast path (threshold <= 0): run both bodies, no caching.
+    if handle.rel_l1_thresh <= 0.0:
+        body_out_pos = _flux2_run_body(
+            inner, body_in, enc_pos, temb, temb_mod_params_img, temb_mod_params_txt, concat_rot_pos
+        )
+        body_out_neg = _flux2_run_body(
+            inner, body_in, enc_neg, temb, temb_mod_params_img, temb_mod_params_txt, concat_rot_neg
+        )
+        stats.record(
+            StepDecision(
+                step_idx=state.step_counter,
+                timestep=timestep_val,
+                rel_l1=None,
+                accumulated_distance=state.accumulated_distance,
+                decision="computed",
+            )
+        )
+        state.last_timestep = timestep_val
+        state.step_counter += 1
+        return _flux2_apply_tail_and_combine(
+            inner, body_out_pos, body_out_neg, enc_pos, enc_neg, temb, guidance
+        )
+
+    # 4. Slow path: build mod_in, run gate ONCE on shared signal.
+    mod_in = _flux2_extract_mod_input(inner, body_in, temb_mod_params_img)
+    if state.previous_mod_input is not None and mod_in.shape != state.previous_mod_input.shape:
+        raise TransformerShapeError(
+            step_idx=state.step_counter,
+            expected=state.previous_mod_input.shape,
+            actual=mod_in.shape,
+        )
+
+    decision = gate_step(
+        state,
+        rel_l1_thresh=handle.rel_l1_thresh,
+        coefficients=handle.coefficients,
+        skip_first=handle.skip_first_n_steps,
+        skip_last=handle.skip_last_n_steps,
+        num_steps=handle._gen_ctx.active_num_steps,
+        step_idx=state.step_counter,
+        mod_in=mod_in,
+    )
+    stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
+    state.last_timestep = timestep_val
+
+    # 5. Compute / skip — applied uniformly across both branches.
+    body_in_concat_pos = mx.concatenate([enc_pos, body_in], axis=1)
+    body_in_concat_neg = mx.concatenate([enc_neg, body_in], axis=1)
+    if decision.should_compute:
+        body_out_pos = _flux2_run_body(
+            inner, body_in, enc_pos, temb, temb_mod_params_img, temb_mod_params_txt, concat_rot_pos
+        )
+        body_out_neg = _flux2_run_body(
+            inner, body_in, enc_neg, temb, temb_mod_params_img, temb_mod_params_txt, concat_rot_neg
+        )
+        if decision.should_update_cache:
+            state.cached_residual = body_out_pos - body_in_concat_pos
+            state.cached_residual_neg = body_out_neg - body_in_concat_neg
+            state.previous_mod_input = mod_in
+    else:
+        if state.cached_residual is None or state.cached_residual_neg is None:
+            raise InternalStateError(
+                "cached_residual or cached_residual_neg is None on a skipped CFG step; "
+                "gate logic should guarantee seed-step caching before any skip."
+            )
+        body_out_pos = body_in_concat_pos + state.cached_residual
+        body_out_neg = body_in_concat_neg + state.cached_residual_neg
+
+    state.step_counter += 1
+    return _flux2_apply_tail_and_combine(inner, body_out_pos, body_out_neg, enc_pos, enc_neg, temb, guidance)
+
+
+def _flux2_apply_tail_and_combine(
+    inner: Any,
+    body_out_pos: mx.array,
+    body_out_neg: mx.array,
+    enc_pos: mx.array,
+    enc_neg: mx.array,
+    temb: mx.array,
+    guidance: float,
+) -> mx.array:
+    """Apply Flux2 norm_out + proj_out tail to each branch independently,
+    then combine via CFG math: negative + guidance * (positive - negative).
+
+    norm_out + proj_out are branch-independent ops parameterized by temb;
+    we apply them once per branch because the body_out per branch differs.
+    The CFG math is the same triplet mflux uses (flux2_klein.py:267-276)."""
+    noise_pos = body_out_pos[:, enc_pos.shape[1] :, ...]
+    noise_pos = inner.norm_out(noise_pos, temb)
+    noise_pos = inner.proj_out(noise_pos)
+
+    noise_neg = body_out_neg[:, enc_neg.shape[1] :, ...]
+    noise_neg = inner.norm_out(noise_neg, temb)
+    noise_neg = inner.proj_out(noise_neg)
+
+    return noise_neg + guidance * (noise_pos - noise_neg)

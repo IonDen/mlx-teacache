@@ -279,3 +279,30 @@ def test_apply_teacache_cfg_records_cfg_was_active_klein_base_4b():
         assert "cfg-fallback" not in kinds
     finally:
         handle.restore()
+
+
+@pytest.mark.parity
+def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
+    """v0.4.1 behavior change: an all-CFG generation with skip_first + skip_last
+    >= num_inference_steps used to silently run vanilla in v0.4.0. In v0.4.1 the
+    CFG path is gated, so the lazy skip-window validation fires and raises."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import InvalidStepWindowError, apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux, skip_first_n_steps=2, skip_last_n_steps=2)
+    try:
+        with pytest.raises(InvalidStepWindowError):
+            flux.generate_image(
+                prompt="a red apple",
+                seed=42,
+                num_inference_steps=4,
+                height=512,
+                width=512,
+                guidance=4.0,
+            )
+    finally:
+        handle.restore()

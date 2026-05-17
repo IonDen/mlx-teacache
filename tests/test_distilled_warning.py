@@ -3,8 +3,11 @@
 
 The warning fires once per handle when possible_skips == 0 — i.e., when the
 current configuration produces no opportunity to skip any step. Specifically
-suppressed for FLUX.2 all-CFG (different no-benefit mode, tracked separately)
-and when the configuration is about to raise InvalidStepWindowError.
+suppressed when the configuration is about to raise InvalidStepWindowError
+(duplicate noise) and for zero-denoising runs (image_strength=1.0).
+
+v0.4.1: the FLUX.2 all-CFG suppression was removed. The CFG path is now gated,
+so skipping is achievable even at guidance > 1.0; the warning fires normally.
 """
 
 import warnings
@@ -100,17 +103,14 @@ def test_does_not_fire_when_window_is_invalid():
     assert matched == [], "no-benefit warning should be suppressed when window is invalid"
 
 
-def test_does_not_fire_under_flux2_all_cfg():
-    """FLUX.2 with guidance > 1.0 routes every step through the CFG-fallback
-    path; the schedule-shape warning is out of scope for that case."""
+def test_fires_under_flux2_all_cfg():
+    """v0.4.1: FLUX.2 with guidance > 1.0 no longer suppresses the no-benefit
+    warning. The CFG path is gated, so skipping is achievable; eligible=1
+    → possible_skips=0 should emit TeaCacheNoBenefitWarning as usual."""
     handle = _FakeHandle(variant_id="flux2-klein-4b")
     cb = GenerationContextCallback(handle)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        # Eligible would be 1 (would normally fire), but variant + guidance trigger suppression.
+    with pytest.warns(TeaCacheNoBenefitWarning, match=r"eligible"):
         cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(3, guidance=3.5))
-    matched = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
-    assert matched == []
 
 
 def test_does_not_fire_for_active_zero():

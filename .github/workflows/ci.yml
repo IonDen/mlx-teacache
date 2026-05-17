@@ -50,7 +50,7 @@ jobs:
         run: uv sync --group test-core
       - name: Run pure-core tests (no coverage gate — collected by `coverage` job)
         run: uv run pytest -m "not parity and not slow and not benchmark and not network and not mflux" -v --cov=mlx_teacache --cov-branch --cov-report=xml:coverage-core.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-core
           path: coverage-core.xml
@@ -71,7 +71,7 @@ jobs:
         run: uv sync --group test-mflux
       - name: Run tests (no parity, no slow, no benchmark)
         run: uv run pytest -m "not parity and not slow and not benchmark and not network" -v --cov=mlx_teacache --cov-branch --cov-report=xml:coverage-mflux-${{ matrix.python-version }}.xml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-mflux-${{ matrix.python-version }}
           path: coverage-mflux-${{ matrix.python-version }}.xml
@@ -85,7 +85,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install coverage
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           merge-multiple: true

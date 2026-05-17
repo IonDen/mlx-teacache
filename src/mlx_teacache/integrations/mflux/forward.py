@@ -646,7 +646,7 @@ def _flux2_apply_tail_and_combine(
     enc_neg: mx.array,
     temb: mx.array,
     guidance: float,
-) -> mx.array:
+) -> Any:
     """Apply Flux2 norm_out + proj_out tail to each branch independently,
     then combine via CFG math: negative + guidance * (positive - negative).
 

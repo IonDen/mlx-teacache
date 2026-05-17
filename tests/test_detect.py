@@ -5,7 +5,8 @@ Uses (class name, model_config.aliases) so we can distinguish:
 - Flux1 + schnell ⇒ flux1-schnell
 - Flux2Klein + flux2_klein_4b ⇒ flux2-klein-4b
 - Flux2Klein + flux2_klein_9b ⇒ flux2-klein-9b
-Rejects everything else (Klein base-4b, base-9b, unknown Flux1 aliases,
+- Flux2Klein + flux2_klein_base_4b ⇒ flux2-klein-base-4b
+Rejects everything else (Klein base-9b until v0.5, unknown Flux1 aliases,
 non-Flux types) with IncompatibleModelError."""
 
 import pytest
@@ -65,9 +66,8 @@ def test_identify_flux2_klein_9b():
     assert identify_variant(_FakeFlux2Klein("flux2-klein-9b")) == "flux2-klein-9b"
 
 
-def test_flux2_klein_base_4b_rejected():
-    with pytest.raises(IncompatibleModelError):
-        identify_variant(_FakeFlux2Klein("flux2-klein-base-4b"))
+def test_identify_flux2_klein_base_4b():
+    assert identify_variant(_FakeFlux2Klein("flux2-klein-base-4b")) == "flux2-klein-base-4b"
 
 
 def test_flux2_klein_base_9b_rejected():

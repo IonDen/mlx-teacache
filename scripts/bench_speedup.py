@@ -17,8 +17,18 @@ For each --variant:
 Run as:
   uv run python scripts/bench_speedup.py --variant klein-9b
   uv run python scripts/bench_speedup.py --variant klein-4b
-  uv run python scripts/bench_speedup.py --variant klein-base-4b   # 25-step, g=1.0
+  uv run python scripts/bench_speedup.py --variant klein-base-4b   # 50-step, g=4.0 (v0.4.1+)
+  uv run python scripts/bench_speedup.py --variant klein-base-4b --guidance 1.0 --num-inference-steps 25  # v0.4.0 row
   uv run python scripts/bench_speedup.py --variant flux1-dev
+
+Three-way mode (--three-way, default on klein-base-4b) additionally runs a
+wrapped-no-gate condition (rel_l1_thresh=0.0) to separate the v0.4
+compile-avoidance effect from the v0.4.1 gating effect:
+  A = vanilla                (no wrapper)
+  B = wrapped, no gate       (rel_l1_thresh=0.0 — compile-avoidance only)
+  C = wrapped, gated         (default threshold — full TeaCache)
+  A/B = compile-avoidance contribution  [v0.4 effect]
+  B/C = gating contribution             [v0.4.1 effect]
 
 Output: prints summary to stdout, optionally writes JSON via --report.
 
@@ -84,12 +94,12 @@ def _variant_config(variant: str) -> dict[str, Any]:
             "guidance": 1.0,
         }
     if variant == "klein-base-4b":
-        # Non-distilled; calibrated at 25 steps. g=1.0 only — CFG falls
-        # back to vanilla mflux pending v0.4.1 (per-branch caching).
+        # Canonical upstream recipe (v0.4.1+). Override with
+        # --guidance 1.0 --num-inference-steps 25 to reproduce the v0.4.0 row.
         return {
             "loader": _load_flux2_klein,
-            "num_inference_steps": 25,
-            "guidance": 1.0,
+            "num_inference_steps": 50,
+            "guidance": 4.0,
         }
     if variant == "flux1-dev":
         return {
@@ -139,6 +149,24 @@ def main() -> None:
     )
     parser.add_argument("--reps", type=int, default=3, help="timed reps per condition")
     parser.add_argument(
+        "--guidance",
+        type=float,
+        default=None,
+        help="Override the variant's default guidance value.",
+    )
+    parser.add_argument(
+        "--num-inference-steps",
+        type=int,
+        default=None,
+        help="Override the variant's default step count.",
+    )
+    parser.add_argument(
+        "--three-way",
+        action="store_true",
+        default=None,
+        help="Run vanilla + wrapped-no-gate + wrapped-gated conditions. Default True on klein-base-4b.",
+    )
+    parser.add_argument(
         "--report",
         type=Path,
         default=None,
@@ -155,8 +183,11 @@ def main() -> None:
     cfg = _variant_config(args.variant)
     print(f"Loading {args.variant} (quantize=4)...")
     flux = cfg["loader"](args.variant)
-    num_inference_steps = cfg["num_inference_steps"]
-    guidance = cfg["guidance"]
+    guidance = args.guidance if args.guidance is not None else cfg["guidance"]
+    num_inference_steps = (
+        args.num_inference_steps if args.num_inference_steps is not None else cfg["num_inference_steps"]
+    )
+    three_way = args.three_way if args.three_way is not None else (args.variant == "klein-base-4b")
 
     bench_dir = args.images_dir / args.variant
 
@@ -178,12 +209,29 @@ def main() -> None:
         suffix = f"  (saved {save.name})" if save else ""
         print(f"  rep {i + 1}: {t:.2f}s{suffix}")
 
+    nogate_times: list[float] = []
+    if three_way:
+        print(f"\n== Wrapped (no gate, rel_l1_thresh=0) x{args.reps} ==")
+        for i in range(args.reps):
+            save = bench_dir / "wrapper_nogate.png" if i == 0 else None
+            with apply_teacache(flux, rel_l1_thresh=0.0) as h:
+                t, _ = _generate(
+                    flux,
+                    num_inference_steps=num_inference_steps,
+                    guidance=guidance,
+                    save_path=save,
+                )
+                nogate_times.append(t)
+            suffix = f"  (saved {save.name})" if save else ""
+            print(f"  rep {i + 1}: {t:.2f}s  (rel_l1_thresh=0, no skipping){suffix}")
+
     print(f"\n== TeaCache wrapper x{args.reps} ==")
     wrapper_times: list[float] = []
     skipped_counts: list[int] = []
     computed_counts: list[int] = []
     for i in range(args.reps):
-        save = bench_dir / "wrapper.png" if i == 0 else None
+        save_name = "wrapper_gated.png" if three_way else "wrapper.png"
+        save = bench_dir / save_name if i == 0 else None
         with apply_teacache(flux) as h:
             t, _ = _generate(
                 flux,
@@ -210,33 +258,52 @@ def main() -> None:
     print(f"  wrapper median:   {wrapper_med:.2f}s   (all: {[round(x, 2) for x in wrapper_times]})")
     print(f"  speedup (median): {speedup:.2f}x")
     print(f"  skipped/computed: {skipped_counts} / {computed_counts}")
-    print(f"  bench images:     {bench_dir}/{{vanilla,wrapper}}.png")
+    if three_way:
+        nogate_med = statistics.median(nogate_times)
+        compile_avoidance_ratio = vanilla_med / nogate_med
+        gating_ratio = nogate_med / wrapper_med
+        combined_ratio = vanilla_med / wrapper_med
+        print(
+            f"  three-way medians: vanilla {vanilla_med:.2f}s | no-gate {nogate_med:.2f}s | gated {wrapper_med:.2f}s"
+        )
+        print(f"  compile-avoidance (vanilla / no-gate): {compile_avoidance_ratio:.2f}x  [v0.4 effect]")
+        print(f"  gating          (no-gate / gated):    {gating_ratio:.2f}x  [v0.4.1 effect]")
+        print(f"  combined        (vanilla / gated):     {combined_ratio:.2f}x")
+        print(f"  bench images:     {bench_dir}/{{vanilla,wrapper_nogate,wrapper_gated}}.png")
+    else:
+        print(f"  bench images:     {bench_dir}/{{vanilla,wrapper}}.png")
 
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(
-            json.dumps(
-                {
-                    "variant": args.variant,
-                    "num_inference_steps": num_inference_steps,
-                    "guidance": guidance,
-                    "prompt": PROMPT,
-                    "seed": SEED,
-                    "height": HEIGHT,
-                    "width": WIDTH,
-                    "reps": args.reps,
-                    "vanilla_seconds": vanilla_times,
-                    "wrapper_seconds": wrapper_times,
-                    "vanilla_median": vanilla_med,
-                    "wrapper_median": wrapper_med,
-                    "speedup_median": speedup,
-                    "skipped_counts": skipped_counts,
-                    "computed_counts": computed_counts,
-                    "bench_images_dir": str(bench_dir),
-                },
-                indent=2,
-            )
-        )
+        report_data: dict[str, Any] = {
+            "variant": args.variant,
+            "num_inference_steps": num_inference_steps,
+            "guidance": guidance,
+            "prompt": PROMPT,
+            "seed": SEED,
+            "height": HEIGHT,
+            "width": WIDTH,
+            "reps": args.reps,
+            "vanilla_seconds": vanilla_times,
+            "wrapper_seconds": wrapper_times,
+            "vanilla_median": vanilla_med,
+            "wrapper_median": wrapper_med,
+            "speedup_median": speedup,
+            "skipped_counts": skipped_counts,
+            "computed_counts": computed_counts,
+            "bench_images_dir": str(bench_dir),
+        }
+        if three_way:
+            nogate_med = statistics.median(nogate_times)
+            compile_avoidance_ratio = vanilla_med / nogate_med
+            gating_ratio = nogate_med / wrapper_med
+            combined_ratio = vanilla_med / wrapper_med
+            report_data["nogate_seconds"] = nogate_times
+            report_data["nogate_median"] = nogate_med
+            report_data["compile_avoidance_ratio"] = compile_avoidance_ratio
+            report_data["gating_ratio"] = gating_ratio
+            report_data["combined_ratio"] = combined_ratio
+        args.report.write_text(json.dumps(report_data, indent=2))
         print(f"  report:           {args.report}")
 
 

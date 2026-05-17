@@ -101,7 +101,7 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 
 ¹ `flux2-klein-9b` coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See the [Benchmarks](#benchmarks) "How the speedup happens" subsection.
 
-² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17` (set automatically; no user action required). At 25 steps the gate skips 3/25 steps for a measured 1.41× wall-clock speedup with SSIM > 0.99 vs vanilla — output quality essentially indistinguishable from a full-step generation. CFG (`guidance > 1.0`) falls back to vanilla mflux pending v0.4.1 (per-branch caching). The upstream BFL model card recommends `guidance_scale=4.0, num_inference_steps=50`; that recipe runs vanilla in v0.4.0.
+² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps for a measured 1.41× wall-clock speedup; SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) falls back to vanilla mflux pending v0.4.1 (per-branch caching). The upstream BFL model card recommends `guidance_scale=4.0, num_inference_steps=50`; that recipe runs vanilla in v0.4.0.
 
 ## Combining with mlx-taef
 

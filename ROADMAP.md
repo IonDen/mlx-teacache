@@ -35,10 +35,6 @@ Concrete improvement ideas with a clear failure mode they address. Each is a can
 
 FLUX.2 calibration produces consistently lower R² than FLUX.1 (klein-9b origin fit: R² = 0.471; klein-4b free fit: R² = 0.653). The polynomial form may be a bad fit for the FLUX.2 mod_in → body_out mapping. Worth investigating: (a) higher polynomial degree, (b) piecewise fit by step-index range, (c) different signal entirely (first-block residual delta — see "Alternative gate signals" below). If the fit improves, default-threshold engagement on FLUX.2 may become more reliable.
 
-### Per-variant default thresholds
-
-Today `apply_teacache(flux, rel_l1_thresh=0.20)` is one default for all variants. The polynomial output range differs significantly per variant (FLUX.1-dev's calibration produces values that dip below 0.20 regularly; FLUX.2 Klein 9B's never does). A `default_thresh` field on the `Provenance` dataclass + lookup in `apply_teacache` would let each variant ship its calibration-tuned default. Held as a contingency for v0.4.0's 0-skip outcome; otherwise a candidate for a small follow-up release.
-
 ### SSIM-vs-threshold sweep tooling
 
 A `scripts/sweep_threshold.py` that captures (threshold, skip_count, SSIM) triplets at calibration time for a given variant. Produces an evidence-backed threshold recommendation per variant. ~3 hours of additional bench cost on top of calibration. Approach C from the v0.4 brainstorming; held for a future release where threshold characterization matters more than time-to-ship.

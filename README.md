@@ -97,8 +97,11 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 | `flux1-schnell` | `Flux1(model_config=ModelConfig.schnell())` | upstream (shared with dev) |
 | `flux2-klein-4b` | `Flux2Klein(model_config=ModelConfig.flux2_klein_4b())` | in-repo (see `docs/calibration.md`) |
 | `flux2-klein-9b`¹ | `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` | in-repo (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
+| `flux2-klein-base-4b`² | `Flux2Klein(model_config=ModelConfig.flux2_klein_base_4b())` | in-repo (25-step calibration, origin-constrained; see [`docs/calibration.md`](docs/calibration.md)) |
 
 ¹ `flux2-klein-9b` coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See the [Benchmarks](#benchmarks) "How the speedup happens" subsection.
+
+² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17` (set automatically; no user action required). At 25 steps the gate skips 3/25 steps for a measured 1.41× wall-clock speedup with SSIM > 0.99 vs vanilla — output quality essentially indistinguishable from a full-step generation. CFG (`guidance > 1.0`) falls back to vanilla mflux pending v0.4.1 (per-branch caching). The upstream BFL model card recommends `guidance_scale=4.0, num_inference_steps=50`; that recipe runs vanilla in v0.4.0.
 
 ## Combining with mlx-taef
 
@@ -148,15 +151,19 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 | `flux1-schnell` | — | — | — | — | — | shares dev's coefficients; gate behaves like dev at long schedules, like Klein at the 4-step distilled default (no benefit) |
 | `flux2-klein-4b` | 8 | 28.1s | 22.3s | 1.26× | **0 / 8** | `mx.compile` avoidance only |
 | `flux2-klein-9b` | 8 | 119.0s | 61.8s | 1.93×† | **0 / 8** | `mx.compile` avoidance only |
+| `flux2-klein-base-4b`³ | 25 | 77.5s | 55.1s | **1.41×** | **3 / 25** | TeaCache step-skipping |
 
 † Klein 9B wall-clock has high variance from thermal throttling on M1 Max at quantize=4. The 1.93× median combined a thermally-throttled vanilla rep (227s) with a recovered wrapper rep (46s); the steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps.
+
+³ `flux2-klein-base-4b` at `guidance=1.0`, per-variant default `rel_l1_thresh=0.17`. CFG (`guidance > 1.0`) falls back to vanilla mflux pending v0.4.1.
 
 Reproduce any row:
 
 ```bash
-uv run python scripts/bench_speedup.py --variant flux1-dev   # 25-step dev
-uv run python scripts/bench_speedup.py --variant klein-4b    # 8-step Klein 4B
-uv run python scripts/bench_speedup.py --variant klein-9b    # 8-step Klein 9B
+uv run python scripts/bench_speedup.py --variant flux1-dev      # 25-step dev
+uv run python scripts/bench_speedup.py --variant klein-4b       # 8-step Klein 4B
+uv run python scripts/bench_speedup.py --variant klein-9b       # 8-step Klein 9B
+uv run python scripts/bench_speedup.py --variant klein-base-4b  # 25-step base-4B (g=1.0)
 ```
 
 ### How the speedup happens
@@ -169,7 +176,7 @@ The wall-clock improvement above comes from two distinct mechanisms; they fire i
 
 On FLUX.2 Klein 4B and 9B at the distilled 4-8 step defaults, mechanism (1) does not engage: the empirical adjacent-step rel-L1 between consecutive transformer outputs is ≥ 0.25, so every step's predicted change exceeds the default 0.20 threshold and the gate signals "compute" every time. This is expected — distilled schedules collapse the entire denoising trajectory into a handful of consequential steps, so adjacent steps are not similar enough to skip. Klein's wall-clock improvement on these variants is real and reproducible, but it comes entirely from mechanism (2). See [`docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`](docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md) for the investigation.
 
-If you want algorithmic step-skipping on FLUX.2, the non-distilled `flux2-klein-base-4b` variant (Apache-2.0, runs at 20-50 steps) is the v0.4 target — see [`ROADMAP.md`](ROADMAP.md). Pushing the threshold higher on distilled Klein is not recommended: the gate's prediction quality at thresholds > 0.25 is uncalibrated on a 4-8 step trajectory and image quality is not characterized there.
+For algorithmic step-skipping on FLUX.2, use the non-distilled `flux2-klein-base-4b` variant (Apache-2.0, runs at 20-50 steps) — shipped in v0.4.0 with a per-variant default `rel_l1_thresh=0.17` that skips 3/25 steps for a 1.41× speedup. Pushing the threshold higher on distilled Klein is not recommended: the gate's prediction quality at thresholds > 0.25 is uncalibrated on a 4-8 step trajectory and image quality is not characterized there.
 
 ### SSIM suite
 
@@ -204,7 +211,9 @@ FLUX.2 with CFG (`guidance > 1.0`) falls back to vanilla mflux automatically. Pe
 
 **Distilled schedules are out of scope for algorithmic step-skipping by design.** This includes FLUX.2 Klein 4B / 9B at their 4-8 step defaults and FLUX.1 schnell at its 4-step default. The polynomial gate's premise — that consecutive transformer outputs are similar enough that the residual can be reused — does not hold on distilled trajectories where each step does a much larger share of the denoising work. On the v0.3.0 bench (M1 Max, quantize=4) the gate signals "compute" on every Klein step at the package default `rel_l1_thresh=0.20` (0 skips across 3 reps on both Klein 4B and 9B); empirical adjacent-step body-output rel-L1 on Klein is ≥ 0.25. Klein still gets a real wall-clock improvement (~1.2-1.9×) from `mx.compile`-path avoidance, but the headline TeaCache step-skipping feature only fires on non-distilled schedules. See the postmortem at `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`.
 
-`flux2-klein-base-4b` (Apache-2.0, non-distilled, recommended 20-50 step generation) is the v0.4 target — it's the first FLUX.2 variant where the polynomial gate is expected to engage on its own. `flux2-klein-base-9b` (non-distilled, FLUX Non-Commercial) is planned for v0.5.0.
+`flux2-klein-base-4b` (v0.4.0) runs TeaCache only at `guidance=1.0` — the wrapper's CFG fallback path in `flux2.py` doesn't yet engage the gate at `guidance > 1.0`. The upstream BFL base-4b model card recommends `guidance_scale=4.0`; that recipe runs vanilla mflux speed in v0.4.0. CFG per-branch caching is v0.4.1.
+
+`flux2-klein-base-9b` is not yet supported. Planned for v0.5.0 (FLUX Non-Commercial license + BFL safety filter).
 
 The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exchange for live per-step gating. Vanilla mflux compiles `_predict` on every chip except base + Pro M1/M2 (the `is_m1_or_m2()` predicate only excludes Max + Ultra). The 1.48× measurement is from M1 Max / FLUX.1-dev / 25 steps; speedup on M3 and newer is plausible but untested locally. On M5, the GPU Neural Accelerators (Metal 4 TensorOps) are only reachable through the compiled path, so the eager wrapper can lose some or all of that advantage. Output stays correct either way. See `docs/m3-plus-tradeoff.md` for the per-chip recipe; PRs with measurements welcome.
 

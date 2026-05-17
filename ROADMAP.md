@@ -4,30 +4,12 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
+- **v0.4.0** — `flux2-klein-base-4b` (Apache-2.0, non-distilled, 25-step calibration). First FLUX.2 variant where the polynomial gate engages at the package default. Per-variant `default_thresh=0.17` ships via `Provenance.default_thresh` (3/25 skips, 1.41× measured speedup on M1 Max, SSIM > 0.99). CFG-engaged caching deferred to v0.4.1. Per-variant default-threshold mechanism added (was Approach B in original brainstorming; now permanent API).
 - **v0.3.0** — `flux2-klein-9b` support (in-repo calibration, origin-constrained polyfit). Calibration script parameterized via `--variant` so v0.4 / v0.5 are additive. `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed. Honest performance framing for FLUX.2 Klein: distilled schedules don't algorithmically step-skip; wall-clock improvement comes from `mx.compile`-path avoidance. `scripts/bench_speedup.py` committed as reproducible source of truth for all README benchmark numbers.
 - **v0.2.0** — img2img support for FLUX.1 dev/schnell + FLUX.2 Klein 4B (single bundled PR). `TeaCacheNoBenefitWarning` for distilled-schedule + skip-window misconfigurations. Per-chip `Performance by chip` section in README with M1 Pro / M2 Pro classification corrected (they're eager, not compiled). `docs/calibration.md` written. `docs/manual-verification.md` rewritten with a working recipe.
 - **v0.1.0 / v0.1.1** — Initial public release. FLUX.1 dev/schnell, FLUX.2 Klein 4B. Calibrated coefficients. Five-tier test pyramid. Trusted-Publishing pipeline.
 
 ## Active
-
-### v0.4.0: `flux2-klein-base-4b` (at `guidance=1.0`)
-
-The first FLUX.2 variant where the polynomial gate is expected to engage on its own. Same `Flux2Klein` class as the distilled Klein 4B that v0.2.0 shipped — only the model weights and the schedule differ. Apache-2.0 license (same posture as distilled Klein 4B). Non-distilled, designed for 20-50 step generation, which is exactly the regime TeaCache's polynomial gate is calibrated for.
-
-**Scope: `guidance=1.0` only.** The current FLUX.2 wrapper falls back to vanilla mflux at `guidance > 1.0` (CFG). Upstream BFL's base-4B model card recommends `guidance_scale=4.0`; that recipe lands in v0.4.1 (see below) with per-branch CFG caching.
-
-Direct precedent: NVIDIA's FLUX.2-dev blog reports ~32% steps skipped at `teacache_thresh=0.05` on a 50-step schedule. FLUX.2-dev shares the broader architecture family with klein-base-4b, so the same gate signal is expected to be predictive — only the calibration constants differ.
-
-Scope:
-- Fresh calibration via `scripts/calibrate_flux2.py --variant klein-base-4b` (origin-constrained polyfit). Target schedule: 25 steps. 10 prompts × 25 steps × seed=42 on M1 Max, ~8 hours bench.
-- Wire `flux2-klein-base-4b` into the detector, the api surface, and the coefficient registry.
-- New bench row in `scripts/bench_speedup.py --variant klein-base-4b`. Expected: nonzero skip count + algorithmic speedup distinct from compile-avoidance.
-- README + CHANGELOG + `docs/calibration.md` updates.
-- ~15 GB disk for weights.
-
-- **Effort:** small-to-medium — the integration is mostly additive (mflux already exposes the variant), calibration is the long pole.
-- **Value:** the first FLUX.2 variant where mlx-teacache delivers its headline feature (real step-skipping), and the first with Apache-2.0 license.
-- **Risks:** low. Polynomial gate on a non-distilled FLUX.2 schedule is the documented use case. Worst case is "polynomial fit converges, skips engage, speedup is real but smaller than FLUX.1-dev" — still a positive result.
 
 ### v0.4.1: CFG per-branch caching for FLUX.2
 
@@ -91,7 +73,7 @@ Pick A or C after measuring vanilla compile-loss on representative M3/M4/M5 hard
 
 ## Future model coverage (no fixed release)
 
-Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` and `FLUX.2-klein-base-9B` are NOT in this table — they're committed to v0.4.0 and v0.5.0 respectively (see "Active" above). Don't pick from this table while Active items are in flight.
+Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` shipped in v0.4.0 (see "Released"). `FLUX.2-klein-base-9B` is committed to v0.5.0 (see "Active"). Don't pick from this table while Active items are in flight.
 
 | # | Model | Effort | License | Why it matters | Risks |
 |---|---|---|---|---|---|

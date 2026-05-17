@@ -156,3 +156,23 @@ def test_transactional_apply_rollback_on_failure(monkeypatch):
     assert flux.generate_image is original_generate
     assert len(flux.callbacks.before_loop_callbacks) == original_callback_count
     assert getattr(flux, "_teacache_handle", None) is None
+
+
+@pytest.mark.parity
+def test_apply_teacache_accepts_flux2_klein_9b():
+    """Smoke: apply_teacache returns a handle with the right variant_id on Klein 9B.
+    Catches api.py regressions in the variant_id Literal or the FLUX.2 _predict guard."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_9b())
+    flux.freeze()
+    handle = apply_teacache(flux)
+    try:
+        assert handle.variant_id == "flux2-klein-9b"
+        assert len(handle.coefficients) == 5
+        assert handle.provenance.source == "builtin"
+    finally:
+        handle.restore()

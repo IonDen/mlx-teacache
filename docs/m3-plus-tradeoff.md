@@ -7,19 +7,20 @@ Silicon chips. The exact gate (`mflux/utils/apple_silicon.py` +
 `mflux/models/flux2/variants/txt2img/flux2_klein.py:278-281`):
 
 ```python
-if AppleSiliconUtil.is_m1_or_m2():   # base M1 / base M2 only
+if AppleSiliconUtil.is_m1_or_m2():   # base + Pro M1/M2 (not Max/Ultra)
     return predict                    # eager
 return mx.compile(predict)            # compiled
 ```
 
-`is_m1_or_m2()` returns True only when the chip brand-string is "Apple M1" or
-"Apple M2" with neither "Max" nor "Ultra". So:
+`is_m1_or_m2()` returns True when the chip brand-string is "Apple M1" or
+"Apple M2" *and* contains neither "Max" nor "Ultra". So M1 Pro and M2 Pro
+both fall on the eager side:
 
 | Chip | Vanilla mflux `_predict` |
 |---|---|
 | Apple M1 (base), Apple M2 (base) | **eager** |
-| M1 Pro / Max / Ultra | compiled |
-| M2 Pro / Max / Ultra | compiled |
+| M1 Pro, M2 Pro | **eager** |
+| M1 Max / Ultra, M2 Max / Ultra | compiled |
 | All M3* / M4* / M5* | compiled |
 
 `mx.compile` traces the Python function once; subsequent calls reuse the compiled
@@ -28,10 +29,18 @@ after step 1.
 
 To keep TeaCache's gating live on every chip where mflux compiles, `mlx-teacache`
 replaces `flux._predict` with an **uncompiled** eager-Python closure. Users on
-those chips lose mflux's compile gain on this code path. The tradeoff: we skip
-~25% of steps, which more than compensates on M1 Max / M1 Pro / M2 Max / M2 Pro
-(measured 1.48× on FLUX.1-dev / 25 steps / M1 Max), but the magnitude of the
-compile-loss tax grows on newer hardware.
+those chips lose mflux's compile gain on this code path. The tradeoff: when the
+gate actually engages we skip ~25% of steps, which more than compensates on
+M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.44× on FLUX.1-dev / 25 steps
+on M1 Max, 2026-05-16). The magnitude of the compile-loss tax grows on newer
+hardware.
+
+On chips that mflux already runs eager (base + Pro M1/M2), the wrapper does
+not gain anything from compile avoidance — it only helps when the gate fires.
+For FLUX.2 Klein at the distilled 4-8 step defaults the gate does not fire at
+all (see the v0.3.0 postmortem in `docs/superpowers/notes/`), so Klein on
+M1/M2 base + Pro with mlx-teacache is approximately neutral or slightly slower
+than vanilla.
 
 ## M5 specifically: Neural Accelerators
 

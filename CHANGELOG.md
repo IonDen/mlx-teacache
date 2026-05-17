@@ -7,6 +7,74 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-16
+
+This release ships `flux2-klein-9b` support and corrects misleading performance framing from v0.2.0. The polynomial gate works as advertised on FLUX.1-dev at long schedules; on FLUX.2 Klein at distilled 4-8 step defaults it does not engage, and the README + benchmarks now say so explicitly.
+
+### Added
+- **`flux2-klein-9b` support.** Apply TeaCache to mflux's `Flux2Klein` with
+  `ModelConfig.flux2_klein_9b()`. Coefficients calibrated in-repo on M1 Max
+  (10 prompts × 8 steps, origin-constrained polyfit). Output quality
+  preserved (SSIM ≥ 0.85 PR-gate). The polynomial gate produces 0 skips at
+  the package default threshold on Klein 9B's 8-step schedule; wall-clock
+  improvement (~1.5-2.0× measured) comes from `mx.compile`-path avoidance
+  rather than caching. See README "Benchmarks → How the speedup happens"
+  and the postmortem at
+  `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`.
+- **`scripts/bench_speedup.py`** — committed reproducer for all benchmark
+  numbers in the README. Pins seed, prompt, image dimensions, step count;
+  warmup + 3 timed reps; reports median wall-clock and per-rep skip
+  telemetry. README's Benchmarks rows now all carry a one-line `uv run`
+  command users can rerun on their hardware.
+- **`--fit-mode {free, origin}`** flag on `scripts/calibrate_flux2.py`.
+  `origin` constrains the polynomial through (0, 0) so the predicted
+  output rel-L1 is 0 when the input rel-L1 is 0. Added during the v0.3.0
+  diagnosis when the unconstrained Klein 9B fit produced `poly(0) ≈ 5.36`
+  (physically nonsensical). The Klein 9B registry entry uses `origin`.
+  Calibration JSON also now carries the raw `(x, y)` arrays so future
+  refits can run offline.
+- README `## License obligations` section flagging the FLUX.2 Klein
+  non-commercial terms and BFL safety-filter requirements for 9B.
+
+### Changed
+- **README benchmarks rewritten** with measured numbers from
+  `scripts/bench_speedup.py` on M1 Max 32GB. The table now reports skip
+  counts alongside wall-clock so users can see which rows are TeaCache
+  step-skipping (FLUX.1-dev: 6/25 skipped, 1.44×) and which are
+  `mx.compile`-path avoidance only (Klein 4B + 9B at 8 steps: 0/8 skipped,
+  1.26-1.93×).
+- **README "How the speedup happens" subsection added** explaining the two
+  mechanisms (step-skipping vs compile-path avoidance) and which fires on
+  which variant + schedule.
+- `scripts/calibrate_flux2_klein.py` renamed to `scripts/calibrate_flux2.py`
+  with a `--variant` flag (klein-4b, klein-9b wired; klein-base-4b and
+  klein-base-9b declared but raise `NotImplementedError`, wired in v0.4.0
+  and v0.5.0).
+- `scripts/_calibration_flux2_klein.json` renamed to
+  `_calibration_flux2_klein_4b.json` (4B coefficients themselves unchanged).
+- `TeaCacheHandle.variant_id` now reuses `detect.VariantId`; the
+  `IncompatibleModelError` `supported` list in `api.py` has a single source
+  of truth (`detect._SUPPORTED`).
+- FLUX.2 `_predict` defensive guard broadened from
+  `variant_id == "flux2-klein-4b"` to `variant_id.startswith("flux2-")`.
+
+### Removed
+- **`Img2ImgNotSupportedError`** (deprecated in v0.2.0 with explicit
+  removal-in-v0.3.0 intent). Migration: catch the underlying
+  `IncompatibleModelError` or `InvalidStepWindowError` instead.
+
+### Correction of v0.2.0 framing
+- The v0.2.0 README presented the "~1.2× Klein 4B speedup" as a TeaCache
+  step-skipping outcome. Today's bench (`bench_speedup.py`) shows that
+  Klein 4B at the 8-step default produces 0 cache-skipped steps across 3
+  reps; the 1.26× wall-clock improvement comes entirely from
+  `mx.compile`-path avoidance. v0.2.0 was correct on quality (output is
+  preserved) and on the wall-clock measurement, but wrong on the
+  mechanism. v0.3.0 corrects the README + CHANGELOG framing. The v0.4
+  research track (see ROADMAP) investigates whether a different caching
+  approach (FirstBlockCache, per-step-index lookup) can actually engage
+  on FLUX.2 Klein.
+
 ## [0.2.0] — 2026-05-16
 
 ### Added

@@ -10,21 +10,32 @@ are stored per variant in `src/mlx_teacache/coefficients.py`.
 | Variant | Source | Provenance |
 |---|---|---|
 | `flux1-dev`, `flux1-schnell` | Vendored from ali-vilab/TeaCache (`TeaCache4FLUX/teacache_flux.py`); Apache-2.0. | `_UPSTREAM_FLUX_COEFFS` in `coefficients.py`. The FLUX dev/schnell architecture is shared, so both reuse the same set. |
-| `flux2-klein-4b` | Derived in-repo on 2026-05-15 from 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.65. | `_FLUX2_KLEIN_4B_COEFFS` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2_klein.py`. Full report: `scripts/_calibration_flux2_klein.json`. |
+| `flux2-klein-4b` | Derived in-repo on 2026-05-15 from 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.65. | `_REGISTRY["flux2-klein-4b"]` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-4b`. Full report: `scripts/_calibration_flux2_klein_4b.json`. |
+| `flux2-klein-9b` | Derived in-repo on 2026-05-16 from 10 prompts × **8 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`) on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.4710. At the package default `rel_l1_thresh=0.20` these coefficients trigger **0 step-skips** on Klein 9B's 8-step schedule — empirical `y_min = 0.25` exceeds the threshold. Wall-clock benefit on Klein comes from `mx.compile`-path avoidance, not from caching. See [`docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`](superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md) for the investigation and the v0.4 research direction. | `_REGISTRY["flux2-klein-9b"]` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_9b.json`. |
 
 ## Producing new coefficients
 
 Run the calibration script with the model loaded locally:
 
 ```bash
-uv run python scripts/calibrate_flux2_klein.py
+# Klein 4B (free polyfit; shipped since v0.2.0)
+uv run python scripts/calibrate_flux2.py --variant klein-4b
+
+# Klein 9B (origin-constrained polyfit; shipped since v0.3.0).
+# IMPORTANT: do not omit --fit-mode origin — the default (free) fit gives
+# a polynomial with poly(0) ≈ 5.36, which is physically nonsensical and
+# was rejected during the v0.3.0 calibration audit.
+uv run python scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin
+
+# klein-base-4b and klein-base-9b are declared but raise
+# NotImplementedError until v0.4.0 and v0.5.0 respectively.
 ```
 
 The script monkeypatches `flux._predict` with a capturing factory that
 mirrors the vanilla math while recording `(mod_in, body_out_concat)` per
 step. It runs 10 prompts × 8 steps at seed=42, computes per-step
 `rel_l1(t, t-1)` for both signals, fits a degree-4 polynomial, and writes
-`scripts/_calibration_flux2_klein.json` with the full report.
+`scripts/_calibration_flux2_<variant>.json` with the full report.
 
 To bake the result back into `coefficients.py`, replace the tuple value
 under the appropriate variant id and update the Provenance dataclass with

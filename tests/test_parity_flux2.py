@@ -146,12 +146,19 @@ def _paired_parity(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def flux2_klein() -> Any:
+@pytest.fixture(scope="module", params=["flux2-klein-4b", "flux2-klein-9b"])
+def flux2_klein(request) -> Any:
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
-    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
+    variant_id = request.param
+    if variant_id == "flux2-klein-4b":
+        cfg = ModelConfig.flux2_klein_4b()
+    elif variant_id == "flux2-klein-9b":
+        cfg = ModelConfig.flux2_klein_9b()
+    else:
+        pytest.fail(f"unhandled variant_id={variant_id!r}")
+    flux = Flux2Klein(quantize=4, model_config=cfg)
     flux.freeze()
     return flux
 

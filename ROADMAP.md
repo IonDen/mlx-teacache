@@ -4,9 +4,40 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
+- **v0.3.0** — `flux2-klein-9b` support (in-repo calibration). Calibration
+  script parameterized via `--variant` so v0.4 / v0.5 are additive.
+  `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed.
 - **v0.1.0 / v0.1.1** — Initial public release. FLUX.1 dev/schnell, FLUX.2 Klein 4B. Calibrated coefficients. Five-tier test pyramid. Trusted-Publishing pipeline.
 
-## Active (next release: v0.2.0)
+## Active
+
+### v0.4.0: FLUX.2 caching research (postmortem-driven)
+
+Discovered during v0.3.0 release that on FLUX.2 Klein 4B and Klein 9B at their distilled 8-step schedules the polynomial gate produces zero step skips at the package default `rel_l1_thresh=0.20`. The wrapper's wall-clock improvement comes from `mx.compile` avoidance, not from caching. Full writeup at `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`.
+
+v0.4.0 investigates whether a different caching approach can engage on Klein:
+
+- **FirstBlockCache (FBCache)** port to mflux on Apple Silicon. Already in diffusers mainline; no polynomial calibration, gates on first-transformer-block residual absmean. Promising because it sidesteps the broken continuous gate.
+- **Per-step-index lookup table.** Offline profile of Klein 8-step trajectories to identify reliably skippable step indices; bake those into a hardcoded per-step decision.
+- **TaylorSeer / DiCache adaptation.** Fixed-interval and online-probe alternatives to polynomial-fit gating.
+
+The research postmortem includes 10 specific references (ali-vilab/TeaCache, NVIDIA's FLUX.2-dev blog with `thresh=0.05`, diffusers CacheMixin, SeaCache + DiCache papers, FBCache implementation). v0.4 plan starts from those.
+
+- **Effort:** large — at least one new caching strategy ported + benchmarked + calibrated; bench numbers measured by `scripts/bench_speedup.py`.
+- **Value:** unblocks real step-skipping benefit on FLUX.2 Klein variants. Compile-avoidance wall-clock is a real win but should not be the only mechanism the library offers on FLUX.2.
+- **Risks:** the consensus across published work is that no caching technique demonstrably engages on 4-8 step distilled FLUX-class models. Research may conclude TeaCache-class caching is fundamentally incompatible with distilled schedules and the library should declare "no step-skipping on distilled FLUX.2" and ship a different mechanism (e.g. a clean `mx.compile`-avoidance wrapper without a polynomial gate at all).
+
+### v0.4.0 also: `flux2-klein-base-4b`
+
+Apache-2.0 commercial-friendly variant. Same Flux2Klein class; non-distilled schedule (25-50 steps). Fresh calibration via `scripts/calibrate_flux2.py --variant klein-base-4b`. With longer schedules, the polynomial gate is much more likely to engage, so base-4B may be the first FLUX.2 variant where TeaCache step-skipping actually works.
+
+### v0.5.0: `flux2-klein-base-9b`
+
+Non-distilled 9B. FLUX Non-Commercial license + BFL safety filter. Fresh calibration. Same approach as base-4B.
+
+---
+
+Below this line: historical v0.2.0 / v0.3.0 plan content kept for reference.
 
 Two feature tracks plus a doc track ship together as v0.2.0.
 
@@ -111,8 +142,6 @@ Ranked by value-per-effort. None of these are committed; they're a menu for pick
 ## Deferred work (no current release target)
 
 These items are real and tracked, but not in the current release window. No 0.3.0 plan is committed yet.
-
-- **FLUX.2 Klein 9B variant support** — structural code, fresh coefficient calibration, 32 GB on-disk weights post-prune (see MODELS.md). FLUX Non-Commercial License + BFL safety-filter obligations need explicit support-matrix call-out before shipping.
 
 ## How to use this doc
 

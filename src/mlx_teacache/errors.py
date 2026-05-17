@@ -100,30 +100,6 @@ class MissingGenerationContextError(TeaCacheError):
         super().__init__(msg)
 
 
-class Img2ImgNotSupportedError(TeaCacheError):
-    """DEPRECATED — kept for v0.2 import compatibility only.
-
-    img2img is supported as of v0.2.0; this error is no longer raised
-    internally. Constructing it emits DeprecationWarning. Will be removed in v0.3.0.
-    """
-
-    def __init__(self, *, variant: str) -> None:
-        import warnings
-
-        warnings.warn(
-            "Img2ImgNotSupportedError is deprecated and no longer raised "
-            "internally; img2img is supported as of mlx-teacache 0.2.0. "
-            "This class will be removed in v0.3.0.",
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(
-            f"Image-to-image generation is not supported "
-            f"(variant={variant!r}). [Deprecated — see DeprecationWarning above.]"
-        )
-        self.variant = variant
-
-
 class InternalStateError(TeaCacheError):
     """Raised when an internal cache/state invariant is violated. Indicates
     a bug in mlx-teacache itself or a defensive guard tripping. Distinct

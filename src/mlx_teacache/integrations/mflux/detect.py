@@ -12,9 +12,14 @@ from typing import Literal
 
 from mlx_teacache.errors import IncompatibleModelError
 
-VariantId = Literal["flux1-dev", "flux1-schnell", "flux2-klein-4b"]
+VariantId = Literal["flux1-dev", "flux1-schnell", "flux2-klein-4b", "flux2-klein-9b"]
 
-_SUPPORTED: tuple[str, ...] = ("flux1-dev", "flux1-schnell", "flux2-klein-4b")
+_SUPPORTED: tuple[str, ...] = (
+    "flux1-dev",
+    "flux1-schnell",
+    "flux2-klein-4b",
+    "flux2-klein-9b",
+)
 
 
 def _import_mflux_types() -> tuple[type, type]:
@@ -42,7 +47,7 @@ def identify_variant(flux: object) -> VariantId:
     """Return the variant_id for a supported mflux Flux1 / Flux2Klein instance.
 
     Raises IncompatibleModelError for unsupported model_name, unsupported
-    Flux2Klein configuration (9b, base variants), or any non-Flux type."""
+    Flux2Klein configuration (base-4b, base-9b variants), or any non-Flux type."""
     global _Flux1Type, _Flux2KleinType
     if _Flux1Type is None or _Flux2KleinType is None:
         _Flux1Type, _Flux2KleinType = _import_mflux_types()
@@ -70,6 +75,8 @@ def identify_variant(flux: object) -> VariantId:
     if isinstance(flux, _Flux2KleinType):
         if "flux2-klein-4b" in aliases:
             return "flux2-klein-4b"
+        if "flux2-klein-9b" in aliases:
+            return "flux2-klein-9b"
         raise IncompatibleModelError(
             actual_type=actual_type,
             actual_model_name=model_name,

@@ -8,7 +8,6 @@ import pytest
 from mlx_teacache.errors import (
     AlreadyPatchedError,
     CalibrationError,
-    Img2ImgNotSupportedError,
     IncompatibleModelError,
     InternalStateError,
     InvalidStepWindowError,
@@ -26,7 +25,6 @@ def test_all_subclass_teacache_error():
         TransformerShapeError,
         InvalidStepWindowError,
         MissingGenerationContextError,
-        Img2ImgNotSupportedError,
         InternalStateError,
     ]:
         assert issubclass(cls, TeaCacheError)
@@ -104,8 +102,12 @@ def test_missing_generation_context_has_remediation():
     assert "apply_teacache" in msg
 
 
-def test_img2img_not_supported_error_deprecated():
-    with pytest.warns(DeprecationWarning, match="deprecated"):
-        err = Img2ImgNotSupportedError(variant="flux1-dev")
-    assert err.variant == "flux1-dev"
-    assert "flux1-dev" in str(err)
+def test_img2img_not_supported_error_removed_from_errors_module():
+    """v0.3.0 removed the class deprecated in v0.2.0."""
+    with pytest.raises(ImportError):
+        from mlx_teacache.errors import Img2ImgNotSupportedError  # noqa: F401
+
+
+def test_img2img_not_supported_error_removed_from_top_level():
+    with pytest.raises(ImportError):
+        from mlx_teacache import Img2ImgNotSupportedError  # noqa: F401

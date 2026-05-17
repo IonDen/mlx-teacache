@@ -13,5 +13,10 @@ build/
 .coverage
 htmlcov/
 tests/converted/*.safetensors
+# Bench / sweep test fixtures, regenerated on every run.
 tests/_artifacts/
+
+# NOTE: the repo-root _artifacts/ is INTENTIONALLY NOT ignored — it holds
+# committed comparison images for COMPARISON.md and the recoverable
+# comparison_report.json. Keep them tracked.
 src/mlx_teacache/_version.py

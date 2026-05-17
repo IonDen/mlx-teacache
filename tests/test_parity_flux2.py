@@ -234,6 +234,70 @@ def test_paired_parity_at_threshold_zero_klein_pr_gate(
     )
 
 
+@pytest.mark.parity
+def test_paired_cfg_parity_at_threshold_zero_klein_base_4b_pr_gate() -> None:
+    """v0.4.1 release blocker: at rel_l1_thresh=0, the gated CFG path must
+    produce the same latent (within Metal noise) as real mflux generation
+    at guidance=4.0, num_inference_steps=50 on flux2-klein-base-4b. Per
+    audit Finding 4, the in-repo _vanilla_flux2_cfg_predict helper is too
+    weak as the release oracle because it shares assumptions with the
+    gated function; this test uses real mflux.
+
+    Pattern: same as test_paired_parity_klein_pr_gate — _capture latents
+    via mflux callback, compare with _cosine >= _FLUX2_COSINE_GATE.
+    """
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+
+    kw = {
+        "prompt": PR_TIME_PROMPT,
+        "seed": 42,
+        "num_inference_steps": 50,
+        "height": 512,
+        "width": 512,
+        "guidance": 4.0,
+    }
+
+    # 1. Vanilla mflux latent (no wrapper).
+    vanilla_latent = _capture(flux, **kw)
+
+    # 2. Wrapped at threshold=0 (no skips). Same process, same flux instance.
+    handle = apply_teacache(flux, rel_l1_thresh=0.0)
+    try:
+        wrapper_latent = _capture(flux, **kw)
+        skipped = handle.stats.skipped_count
+    finally:
+        handle.restore()
+
+    cos = _cosine(vanilla_latent, wrapper_latent)
+    assert cos >= _FLUX2_COSINE_GATE, (
+        f"CFG wrapper at rel_l1_thresh=0, guidance=4.0 cosine vs same-process vanilla "
+        f"= {cos:.6f} < {_FLUX2_COSINE_GATE}; max_abs_diff="
+        f"{float(mx.max(mx.abs(vanilla_latent - wrapper_latent))):.4e}"
+    )
+    assert skipped == 0, f"threshold=0 should never skip; got skipped={skipped}"
+
+
+@pytest.mark.parity
+def test_diagnostic_cfg_gated_matches_in_repo_vanilla_helper() -> None:
+    """v0.4.1 diagnostic: gated CFG forward at rel_l1_thresh=0 must match
+    the in-repo _vanilla_flux2_cfg_predict reference (cosine >= 0.99). This
+    isolates 'gated function vs our helper' from 'helper vs real mflux'.
+    Useful when the release-blocker test fails — tells us whether the bug
+    is in the new function or in the helper that approximates mflux.
+
+    The full implementation is deferred to the release-gate run: if Task 11's
+    paired test passes, this diagnostic stays as a skipped placeholder. If
+    it fails, the diagnostic is fleshed out following the same paired-parity
+    pattern as the release-blocker test but with a tighter cosine bound."""
+    pytest.skip(
+        "Diagnostic scaffolding; fleshed out only if the release-blocker paired CFG parity test fails."
+    )
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("prompt", REFERENCE_PROMPTS)
 def test_paired_parity_klein_full(flux2_klein: tuple[Any, str], prompt: str) -> None:

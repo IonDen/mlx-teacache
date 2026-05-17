@@ -12,6 +12,7 @@ are stored per variant in `src/mlx_teacache/coefficients.py`.
 | `flux1-dev`, `flux1-schnell` | Vendored from ali-vilab/TeaCache (`TeaCache4FLUX/teacache_flux.py`); Apache-2.0. | `_UPSTREAM_FLUX_COEFFS` in `coefficients.py`. The FLUX dev/schnell architecture is shared, so both reuse the same set. |
 | `flux2-klein-4b` | Derived in-repo on 2026-05-15 from 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.65. | `_REGISTRY["flux2-klein-4b"]` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-4b`. Full report: `scripts/_calibration_flux2_klein_4b.json`. |
 | `flux2-klein-9b` | Derived in-repo on 2026-05-16 from 10 prompts × **8 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`) on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.4710. At the package default `rel_l1_thresh=0.20` these coefficients trigger **0 step-skips** on Klein 9B's 8-step schedule — empirical `y_min = 0.25` exceeds the threshold. Wall-clock benefit on Klein comes from `mx.compile`-path avoidance, not from caching. See [`docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`](superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md) for the investigation and the v0.4 research direction. | `_REGISTRY["flux2-klein-9b"]` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_9b.json`. |
+| `flux2-klein-base-4b` | Derived in-repo on 2026-05-17 from 10 prompts × **25 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`); R² = 0.106. Low R² for the polynomial form — FLUX.2-family polynomials are noisier than FLUX.1-family. To compensate, this variant ships a per-variant default `rel_l1_thresh=0.17` via `Provenance.default_thresh` (set automatically). At that threshold the gate fires 3/25 skips for 1.41× speedup with SSIM ≥ 0.99 vs vanilla. At the package-wide default 0.20 the gate over-fires (19/25 skips, SSIM=0.76); the per-variant default is the recommended setting. | `_REGISTRY["flux2-klein-base-4b"]` in `coefficients.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_base_4b.json`. |
 
 ## Producing new coefficients
 
@@ -27,8 +28,15 @@ uv run python scripts/calibrate_flux2.py --variant klein-4b
 # was rejected during the v0.3.0 calibration audit.
 uv run python scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin
 
-# klein-base-4b and klein-base-9b are declared but raise
-# NotImplementedError until v0.4.0 and v0.5.0 respectively.
+# Klein base-4B (origin-constrained polyfit; shipped since v0.4.0). Non-distilled
+# variant designed for 20-50 step generation; this calibration uses 25 steps.
+# The per-variant default rel_l1_thresh is shipped via Provenance.default_thresh
+# in coefficients.py — if you re-calibrate, re-run scripts/sweep_threshold_klein_base_4b.py
+# afterwards to confirm or re-tune that default.
+uv run python scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin
+uv run python scripts/sweep_threshold_klein_base_4b.py   # tune the per-variant default
+
+# klein-base-9b is declared but raises NotImplementedError until v0.5.0.
 ```
 
 The script monkeypatches `flux._predict` with a capturing factory that

@@ -176,3 +176,76 @@ def test_apply_teacache_accepts_flux2_klein_9b():
         assert handle.provenance.source == "builtin"
     finally:
         handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_accepts_flux2_klein_base_4b():
+    """Smoke: apply_teacache returns a handle with the right variant_id on Klein base-4B.
+    Catches api.py regressions in the variant_id Literal or the FLUX.2 _predict guard."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux)
+    try:
+        assert handle.variant_id == "flux2-klein-base-4b"
+        assert len(handle.coefficients) == 5
+        assert handle.provenance.source == "builtin"
+    finally:
+        handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_uses_per_variant_default_for_klein_base_4b():
+    """When no rel_l1_thresh is passed, base-4b's per-variant default (0.17) is applied."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux)  # no rel_l1_thresh — should use variant default
+    try:
+        assert handle.rel_l1_thresh == 0.17
+    finally:
+        handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_explicit_thresh_overrides_per_variant_default():
+    """Explicit rel_l1_thresh wins over per-variant default."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux, rel_l1_thresh=0.05)
+    try:
+        assert handle.rel_l1_thresh == 0.05
+    finally:
+        handle.restore()
+
+
+def test_apply_teacache_user_coefficients_skip_per_variant_default():
+    """User-supplied coefficients on base-4b fall back to the package default 0.20,
+    NOT the per-variant 0.17 (which was tuned for the bundled polynomial)."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
+    handle = apply_teacache(flux, coefficients=custom_coeffs)
+    try:
+        assert handle.rel_l1_thresh == 0.20
+        assert handle.provenance.source == "user"
+    finally:
+        handle.restore()

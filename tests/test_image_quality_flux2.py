@@ -77,11 +77,25 @@ def _capture(flux: Any, **gen_kwargs: Any) -> mx.array:
     return cap.latent
 
 
-def _gen_kwargs_klein(prompt: str, *, guidance: float = 1.0) -> dict[str, Any]:
+def _gen_kwargs_klein(
+    prompt: str, *, variant_id: str = "flux2-klein-4b", guidance: float = 1.0
+) -> dict[str, Any]:
+    """Generation kwargs for FLUX.2 Klein variants.
+
+    Distilled Klein 4B / 9B use the 8-step default schedule (matches their
+    runtime usage). base-4b uses the calibration-time 25-step schedule.
+    Callers that need a different step count should override after this
+    returns."""
+    if variant_id in ("flux2-klein-4b", "flux2-klein-9b"):
+        num_inference_steps = 8
+    elif variant_id == "flux2-klein-base-4b":
+        num_inference_steps = 25
+    else:
+        raise ValueError(f"unsupported variant_id for _gen_kwargs_klein: {variant_id!r}")
     return {
         "prompt": prompt,
         "seed": 42,
-        "num_inference_steps": 8,
+        "num_inference_steps": num_inference_steps,
         "height": 512,
         "width": 512,
         "guidance": guidance,
@@ -114,8 +128,9 @@ def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: 
     return img_np
 
 
-@pytest.fixture(scope="module", params=["flux2-klein-4b", "flux2-klein-9b"])
-def flux2_klein(request) -> Any:
+@pytest.fixture(scope="module", params=["flux2-klein-4b", "flux2-klein-9b", "flux2-klein-base-4b"])
+def flux2_klein(request) -> tuple[Any, str]:
+    """Returns (flux instance, variant_id) so tests can pass variant_id to _gen_kwargs_klein."""
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
@@ -124,11 +139,13 @@ def flux2_klein(request) -> Any:
         cfg = ModelConfig.flux2_klein_4b()
     elif variant_id == "flux2-klein-9b":
         cfg = ModelConfig.flux2_klein_9b()
+    elif variant_id == "flux2-klein-base-4b":
+        cfg = ModelConfig.flux2_klein_base_4b()
     else:
         pytest.fail(f"unhandled variant_id={variant_id!r}")
     flux = Flux2Klein(quantize=4, model_config=cfg)
     flux.freeze()
-    return flux
+    return flux, variant_id
 
 
 # ---------------------------------------------------------------------------
@@ -144,18 +161,19 @@ def flux2_klein(request) -> Any:
     ],
 )
 def test_default_threshold_ssim_klein_pr_gate(
-    flux2_klein: Any, image_strength: float, init_image_name: str | None
+    flux2_klein: tuple[Any, str], image_strength: float, init_image_name: str | None
 ) -> None:
     """PR-time gate: wrapper at the package-default rel_l1_thresh must
     produce a decoded image whose SSIM vs same-process vanilla is >= the gate."""
-    kw = _gen_kwargs_klein(PR_TIME_PROMPT)
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
     if init_image_name is not None:
         kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / init_image_name)
         kw["image_strength"] = image_strength
 
-    vanilla_latent = _capture(flux2_klein, **kw)
-    with apply_teacache(flux2_klein) as h:  # uses package default rel_l1_thresh
-        wrapper_latent = _capture(flux2_klein, **kw)
+    vanilla_latent = _capture(flux, **kw)
+    with apply_teacache(flux) as h:  # uses package default rel_l1_thresh
+        wrapper_latent = _capture(flux, **kw)
         skipped = h.stats.skipped_count
     # Note: at num_inference_steps=8 with default skip windows there may be
     # very few eligible steps; skipped_count > 0 is not guaranteed. Don't
@@ -163,13 +181,13 @@ def test_default_threshold_ssim_klein_pr_gate(
     del skipped  # explicitly unused
 
     vanilla_img = _decode_to_uint8(
-        flux2_klein,
+        flux,
         vanilla_latent,
         height=kw["height"],
         width=kw["width"],
     )
     wrapper_img = _decode_to_uint8(
-        flux2_klein,
+        flux,
         wrapper_latent,
         height=kw["height"],
         width=kw["width"],
@@ -184,14 +202,15 @@ def test_default_threshold_ssim_klein_pr_gate(
 
 @pytest.mark.slow
 @pytest.mark.parametrize("prompt", REFERENCE_PROMPTS)
-def test_default_threshold_ssim_klein_full(flux2_klein: Any, prompt: str) -> None:
+def test_default_threshold_ssim_klein_full(flux2_klein: tuple[Any, str], prompt: str) -> None:
     """Nightly image-quality gate: all 5 reference prompts."""
-    kw = _gen_kwargs_klein(prompt)
-    vanilla_latent = _capture(flux2_klein, **kw)
-    with apply_teacache(flux2_klein):  # uses package default rel_l1_thresh
-        wrapper_latent = _capture(flux2_klein, **kw)
-    vanilla_img = _decode_to_uint8(flux2_klein, vanilla_latent, height=kw["height"], width=kw["width"])
-    wrapper_img = _decode_to_uint8(flux2_klein, wrapper_latent, height=kw["height"], width=kw["width"])
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(prompt, variant_id=variant_id)
+    vanilla_latent = _capture(flux, **kw)
+    with apply_teacache(flux):  # uses package default rel_l1_thresh
+        wrapper_latent = _capture(flux, **kw)
+    vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
+    wrapper_img = _decode_to_uint8(flux, wrapper_latent, height=kw["height"], width=kw["width"])
     score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
     assert score >= _DEFAULT_THRESHOLD_SSIM, (
         f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM} on prompt {prompt!r}"

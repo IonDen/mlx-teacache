@@ -2,9 +2,9 @@
 
 Run as: `uv run python scripts/calibrate_flux2.py --variant klein-4b`
         `uv run python scripts/calibrate_flux2.py --variant klein-9b`
+        `uv run python scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin`
 
-klein-base-4b and klein-base-9b are declared but raise NotImplementedError
-(wired in v0.4.0 and v0.5.0 respectively).
+klein-base-9b is declared but raises NotImplementedError (wired in v0.5.0).
 
 For each calibration prompt:
 - Patch `flux._predict` with a capturing wrapper that runs the full vanilla
@@ -67,6 +67,12 @@ def _model_config_klein_9b() -> Any:
     return ModelConfig.flux2_klein_9b()
 
 
+def _model_config_klein_base_4b() -> Any:
+    from mflux.models.common.config.model_config import ModelConfig
+
+    return ModelConfig.flux2_klein_base_4b()
+
+
 def _not_wired(release: str) -> Any:
     def _raise() -> Any:
         raise NotImplementedError(
@@ -92,9 +98,9 @@ _VARIANTS: dict[str, dict[str, Any]] = {
     },
     "klein-base-4b": {
         "variant_id": "flux2-klein-base-4b",
-        "model_config_factory": _not_wired("v0.4.0"),
-        "num_inference_steps": None,
-        "output_json": None,
+        "model_config_factory": _model_config_klein_base_4b,
+        "num_inference_steps": 25,
+        "output_json": "_calibration_flux2_klein_base_4b.json",
     },
     "klein-base-9b": {
         "variant_id": "flux2-klein-base-9b",

@@ -22,6 +22,11 @@ from mlx_teacache.errors import (
 from mlx_teacache.integrations.mflux.detect import _SUPPORTED, VariantId
 from mlx_teacache.stats import TeaCacheStats
 
+# Sentinel that distinguishes "caller did not pass rel_l1_thresh" from
+# "caller explicitly passed 0.20". This lets us look up a per-variant default
+# before falling back to the package-wide 0.20.
+_UNSET: Any = object()
+
 
 @dataclass
 class _HandleState:
@@ -133,7 +138,7 @@ def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
 def apply_teacache(
     flux: Any,
     *,
-    rel_l1_thresh: float = 0.20,
+    rel_l1_thresh: float | Any = _UNSET,
     coefficients: Sequence[float] | None = None,
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,
@@ -142,13 +147,25 @@ def apply_teacache(
 
     Supported variants (detected via flux.model_config.aliases):
       - flux1-dev, flux1-schnell
-      - flux2-klein-4b, flux2-klein-9b
+      - flux2-klein-4b, flux2-klein-9b (both distilled; gate does not engage
+        at default threshold on the 4-8 step schedule — wall-clock benefit
+        comes from mx.compile-path avoidance, see README "How the speedup
+        happens")
+      - flux2-klein-base-4b (non-distilled; calibrated at 25 steps; engages
+        the polynomial gate at guidance=1.0. CFG / guidance > 1.0 falls back
+        to vanilla mflux pending v0.4.1.)
+
+    Threshold resolution priority:
+      1. Explicit caller value — ``apply_teacache(flux, rel_l1_thresh=X)`` always wins.
+      2. Per-variant default — ``Provenance.default_thresh`` in the built-in registry.
+         Only applied when the caller does NOT pass ``coefficients``. The per-variant
+         default was tuned against the bundled polynomial; user-supplied coefficients
+         get the package fallback so the threshold matches the polynomial they shipped.
+         Currently set for flux2-klein-base-4b (0.17); all other variants leave this None.
+      3. Package-wide fallback of 0.20, used when neither of the above apply.
 
     See docs/superpowers/specs/2026-05-14-mlx-teacache-design.md §6.1 for the
     full docstring; this is the runtime entry point."""
-    # Eager static validation.
-    if not (0.0 <= rel_l1_thresh <= 1.0):
-        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
     if skip_first_n_steps < 0:
         raise ValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")
     if skip_last_n_steps < 0:
@@ -166,12 +183,26 @@ def apply_teacache(
 
     variant_id = identify_variant(flux)
 
-    # Coefficient resolution.
+    # Coefficient resolution first — the per-variant default threshold is tied to the
+    # built-in polynomial, so user-supplied coefficients fall through to the package
+    # default 0.20 rather than inheriting a threshold tuned for a different polynomial.
     if coefficients is not None:
         coeffs = validate_custom(coefficients)
         prov = Provenance.for_user_supplied()
     else:
         coeffs, prov = load_builtin(variant_id)
+
+    # Resolve effective threshold: explicit user value > per-variant default (built-in
+    # coefficients only) > package default 0.20.
+    if rel_l1_thresh is _UNSET:
+        if coefficients is None and prov.default_thresh is not None:
+            rel_l1_thresh = prov.default_thresh
+        else:
+            rel_l1_thresh = 0.20
+
+    # Eager static validation (runs on the resolved value).
+    if not (0.0 <= rel_l1_thresh <= 1.0):
+        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
 
     # Already-patched sentinel check.
     existing = getattr(flux, "_teacache_handle", None)

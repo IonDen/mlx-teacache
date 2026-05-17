@@ -7,6 +7,27 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-17
+
+This release ships `flux2-klein-base-4b` (Apache-2.0, non-distilled FLUX.2 Klein 4B). It is the first FLUX.2 variant where TeaCache step-skipping engages at the package default. The polynomial gate fires 3/25 skips and the wrapper measures 1.41× wall-clock vs vanilla on M1 Max at 25 steps — both FLUX.2 speedup mechanisms contribute (step-skipping plus `mx.compile`-path avoidance). SSIM > 0.99 vs vanilla. CFG-engaged caching for FLUX.2 is deferred to v0.4.1.
+
+### Added
+- **`flux2-klein-base-4b` support.** Apply TeaCache to mflux's `Flux2Klein` with `ModelConfig.flux2_klein_base_4b()`. Coefficients calibrated in-repo on M1 Max (10 prompts × 25 steps, origin-constrained polyfit, R² = 0.106). At the per-variant default `rel_l1_thresh=0.17` the gate skips 3/25 steps. Measured 1.41× wall-clock vs vanilla on M1 Max — ~12% from step-skipping alone (`25/(25-3) - 1`), the rest from `mx.compile`-path avoidance, same mechanism that drives the wall-clock benefit on distilled Klein 4B / 9B at 8 steps. SSIM ≥ 0.99 vs vanilla on the red-apple bench prompt (≥ 0.85 PR-gate). Cosine parity ≥ 0.97 at threshold 0.
+- **Per-variant default `rel_l1_thresh` mechanism.** `Provenance` gains a `default_thresh: float | None = None` field. When a caller of `apply_teacache(flux)` does not pass `rel_l1_thresh` explicitly, the per-variant default is consulted; if `None` (the default for FLUX.1 and distilled Klein), the package-wide 0.20 fallback applies — preserving existing behavior for those variants. `flux2-klein-base-4b` ships with `default_thresh=0.17`. Resolution priority: explicit kwarg > per-variant default > 0.20 fallback.
+- New `--variant klein-base-4b` argument on `scripts/bench_speedup.py` (25 steps, g=1.0).
+- New `--variant klein-base-4b` argument on `scripts/calibrate_flux2.py` (replaces the v0.3 `_not_wired("v0.4.0")` placeholder).
+- New `scripts/_calibration_flux2_klein_base_4b.json` calibration report.
+
+### Changed
+- `apply_teacache()`'s `rel_l1_thresh` parameter accepts a sentinel default (`_UNSET`) so the function can distinguish "user did not pass anything" from "user explicitly passed 0.20" and route through the per-variant default lookup correctly. The public-facing signature documentation is updated. `TeaCacheHandle.rel_l1_thresh` still exposes the resolved `float` value.
+- Test parametrization for FLUX.2 image-quality + parity tests extended with `klein-base-4b`; `_gen_kwargs_klein()` is now variant-aware (distilled Klein at 8 steps, base-4b at 25 steps). Resolves the audit finding that base-4b would otherwise have been validated at the distilled 8-step schedule, evaluating the calibrated polynomial outside its fit range.
+- `detect.identify_variant()` returns `"flux2-klein-base-4b"` for the new variant id; `VariantId` Literal + `_SUPPORTED` tuple extended accordingly.
+
+### Scope notes
+- TeaCache on base-4b is engaged at `guidance=1.0` only. At `guidance > 1.0`, the wrapper records a `cfg-fallback` decision and runs vanilla mflux per the v0.1 design. The upstream BFL model card recommends `guidance_scale=4.0`; that recipe runs at vanilla mflux speed in v0.4.0 and gets caching in v0.4.1 (per-branch caching for FLUX.2).
+- Distilled FLUX.2 Klein 4B + 9B remain out of scope for algorithmic step-skipping by design (already documented in v0.3.0). Their `Provenance.default_thresh` stays `None`, so callers see no behavior change.
+- The polynomial fit on base-4b has R² = 0.106 — much lower than FLUX.1-family (~0.8+) or Klein 9B (0.47). At the FLUX.1-tuned package default 0.20 the gate over-fires (19/25 skips, SSIM 0.76). The 0.17 per-variant default was tuned empirically against a threshold sweep — reproducer at `scripts/sweep_threshold_klein_base_4b.py`; the cliff above 0.17 is sharp (at 0.175, 14 skips fire and SSIM collapses to 0.78). Better fit methods are open research for a future release.
+
 ## [0.3.0] — 2026-05-16
 
 This release ships `flux2-klein-9b` support and corrects misleading performance framing from v0.2.0. The polynomial gate works as advertised on FLUX.1-dev at long schedules; on FLUX.2 Klein at distilled 4-8 step defaults it does not engage, and the README + benchmarks now say so explicitly.
@@ -70,10 +91,11 @@ This release ships `flux2-klein-9b` support and corrects misleading performance 
   reps; the 1.26× wall-clock improvement comes entirely from
   `mx.compile`-path avoidance. v0.2.0 was correct on quality (output is
   preserved) and on the wall-clock measurement, but wrong on the
-  mechanism. v0.3.0 corrects the README + CHANGELOG framing. The v0.4
-  research track (see ROADMAP) investigates whether a different caching
-  approach (FirstBlockCache, per-step-index lookup) can actually engage
-  on FLUX.2 Klein.
+  mechanism. v0.3.0 corrects the README + CHANGELOG framing. Distilled
+  schedules are now declared out of scope for algorithmic step-skipping
+  (see `Limitations`). v0.4.0 targets `flux2-klein-base-4b` (non-distilled,
+  Apache-2.0) — the first FLUX.2 variant where the polynomial gate is
+  expected to engage on its own.
 
 ## [0.2.0] — 2026-05-16
 

@@ -81,6 +81,26 @@ _FLUX2_KLEIN_9B_COEFFS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
+# Origin-constrained polyfit, derived in-repo on 2026-05-17 from
+# flux2-klein-base-4B at 25-step schedule (non-distilled). The trailing
+# 0.0 reflects the origin constraint (poly(0) = 0). Coefficient values
+# read from scripts/_calibration_flux2_klein_base_4b.json's
+# coefficients_c4_to_c0 field. R^2 is low (0.106) — much lower than
+# FLUX.1-family or Klein 9B. The polynomial output range [0.144, 0.233]
+# straddles the package default rel_l1_thresh=0.20, so the gate is
+# structurally capable of engaging (unlike distilled Klein 4B/9B where
+# the polynomial never dips below 0.20). The bench in v0.4.0's release
+# gate confirms engagement empirically.
+#
+# Stored verbatim; do not hand-edit. New calibrations bump revision.
+_FLUX2_KLEIN_BASE_4B_COEFFS: tuple[float, float, float, float, float] = (
+    -1841.022165607874,
+    848.4417137572868,
+    -131.3554469956159,
+    8.179509586828413,
+    0.0,
+)
+
 
 @dataclass(frozen=True)
 class Provenance:
@@ -90,6 +110,7 @@ class Provenance:
     fit_metric: str | None = None
     fit_metric_value: float | None = None
     reference_url: str | None = None
+    default_thresh: float | None = None
 
     @classmethod
     def for_user_supplied(cls) -> Provenance:
@@ -139,6 +160,31 @@ _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]
             fit_metric="constrained-LSQ R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
             fit_metric_value=0.4710289350635284,
             reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
+        ),
+    ),
+    "flux2-klein-base-4b": (
+        _FLUX2_KLEIN_BASE_4B_COEFFS,
+        Provenance(
+            source="builtin",
+            revision="in-repo-2026-05-17-origin",
+            calibration_dataset="10 prompts × 25 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0, origin-constrained polyfit",
+            fit_metric="constrained-LSQ R^2 on consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
+            fit_metric_value=0.10643408169124158,
+            reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
+            # default_thresh=0.17: empirically tuned via
+            # scripts/sweep_threshold_klein_base_4b.py on the red-apple bench
+            # prompt. At the package default 0.20 the gate fires 19/25 skips
+            # (76% skip rate) and SSIM drops to ~0.76 vs vanilla — quality
+            # degrades visibly. At 0.17 the gate fires 3/25 skips (12%) with
+            # SSIM=0.99 (indistinguishable from vanilla). The cliff above 0.17
+            # is sharp: 0.175 gives 14 skips and SSIM=0.78. Headline wall-clock
+            # at 0.17 is 1.41x on M1 Max (scripts/bench_speedup.py 3-rep
+            # median); both FLUX.2 mechanisms contribute (~12% from step-
+            # skipping plus mx.compile-path avoidance). R^2 of the polynomial
+            # fit on base-4b is 0.106 (low — see scripts/_calibration_flux2_klein_base_4b.json),
+            # which is why this variant needs a lower threshold than the
+            # FLUX.1-family default.
+            default_thresh=0.17,
         ),
     ),
 }

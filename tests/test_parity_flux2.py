@@ -109,13 +109,26 @@ def _capture(flux: Any, **gen_kwargs: Any) -> mx.array:
     return cap.latent
 
 
-def _gen_kwargs_klein(prompt: str, *, guidance: float = 1.0) -> dict[str, Any]:
-    """guidance=1.0 → no CFG fallback (our gate is exercised every step).
-    guidance>1.0 → CFG fallback path bypasses our gate entirely."""
+def _gen_kwargs_klein(
+    prompt: str, *, variant_id: str = "flux2-klein-4b", guidance: float = 1.0
+) -> dict[str, Any]:
+    """Generation kwargs for FLUX.2 Klein variants.
+
+    guidance=1.0 → no CFG fallback (our gate is exercised every step).
+    guidance>1.0 → CFG fallback path bypasses our gate entirely.
+
+    Distilled Klein 4B / 9B use the 8-step default schedule (matches their
+    runtime usage). base-4b uses the calibration-time 25-step schedule."""
+    if variant_id in ("flux2-klein-4b", "flux2-klein-9b"):
+        num_inference_steps = 8
+    elif variant_id == "flux2-klein-base-4b":
+        num_inference_steps = 25
+    else:
+        raise ValueError(f"unsupported variant_id for _gen_kwargs_klein: {variant_id!r}")
     return {
         "prompt": prompt,
         "seed": 42,
-        "num_inference_steps": 8,
+        "num_inference_steps": num_inference_steps,
         "height": 512,
         "width": 512,
         "guidance": guidance,
@@ -146,8 +159,9 @@ def _paired_parity(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module", params=["flux2-klein-4b", "flux2-klein-9b"])
-def flux2_klein(request) -> Any:
+@pytest.fixture(scope="module", params=["flux2-klein-4b", "flux2-klein-9b", "flux2-klein-base-4b"])
+def flux2_klein(request) -> tuple[Any, str]:
+    """Returns (flux instance, variant_id) so tests can pass variant_id to _gen_kwargs_klein."""
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
@@ -156,11 +170,13 @@ def flux2_klein(request) -> Any:
         cfg = ModelConfig.flux2_klein_4b()
     elif variant_id == "flux2-klein-9b":
         cfg = ModelConfig.flux2_klein_9b()
+    elif variant_id == "flux2-klein-base-4b":
+        cfg = ModelConfig.flux2_klein_base_4b()
     else:
         pytest.fail(f"unhandled variant_id={variant_id!r}")
     flux = Flux2Klein(quantize=4, model_config=cfg)
     flux.freeze()
-    return flux
+    return flux, variant_id
 
 
 # ---------------------------------------------------------------------------
@@ -174,12 +190,13 @@ def _cosine(a: mx.array, b: mx.array) -> float:
     return float(mx.sum(af * bf) / (mx.linalg.norm(af) * mx.linalg.norm(bf)))
 
 
-def test_paired_parity_klein_pr_gate(flux2_klein: Any) -> None:
+def test_paired_parity_klein_pr_gate(flux2_klein: tuple[Any, str]) -> None:
     """PR-time correctness gate for FLUX.2 Klein 4b. guidance=1.0 means
     every step exercises our gate (no CFG fallback). Uses cosine
     similarity, not bit-exact — see module docstring."""
-    kw = _gen_kwargs_klein(PR_TIME_PROMPT)
-    vb, w, va, skipped = _paired_parity(flux2_klein, kw)
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
+    vb, w, va, skipped = _paired_parity(flux, kw)
     cos = _cosine(vb, w)
     assert cos >= _FLUX2_COSINE_GATE, (
         f"wrapper at rel_l1_thresh=0 cosine vs same-process vanilla "
@@ -193,19 +210,22 @@ def test_paired_parity_klein_pr_gate(flux2_klein: Any) -> None:
 
 
 @pytest.mark.parametrize("image_strength", [0.0, 0.5, 0.7])
-def test_paired_parity_at_threshold_zero_klein_pr_gate(flux2_klein: Any, image_strength: float) -> None:
+def test_paired_parity_at_threshold_zero_klein_pr_gate(
+    flux2_klein: tuple[Any, str], image_strength: float
+) -> None:
     """Same-process paired parity at rel_l1_thresh=0 for FLUX.2 Klein 4B.
     Cosine >= 0.97 (not bit-exact) because the wrapper is eager-Python and
     vanilla _predict is compiled — dispatch noise compounds ~1 ULP/element
     across steps. Covers txt2img + img2img schedule slices."""
-    kw = _gen_kwargs_klein("a red apple on a wooden table")
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein("a red apple on a wooden table", variant_id=variant_id)
     if image_strength > 0.0:
         kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png")
         kw["image_strength"] = image_strength
 
-    vanilla_latent = _capture(flux2_klein, **kw)
-    with apply_teacache(flux2_klein, rel_l1_thresh=0.0):
-        wrapper_latent = _capture(flux2_klein, **kw)
+    vanilla_latent = _capture(flux, **kw)
+    with apply_teacache(flux, rel_l1_thresh=0.0):
+        wrapper_latent = _capture(flux, **kw)
 
     score = _cosine(vanilla_latent, wrapper_latent)
     assert score >= 0.97, (
@@ -216,22 +236,24 @@ def test_paired_parity_at_threshold_zero_klein_pr_gate(flux2_klein: Any, image_s
 
 @pytest.mark.slow
 @pytest.mark.parametrize("prompt", REFERENCE_PROMPTS)
-def test_paired_parity_klein_full(flux2_klein: Any, prompt: str) -> None:
+def test_paired_parity_klein_full(flux2_klein: tuple[Any, str], prompt: str) -> None:
     """Nightly correctness gate. All 5 reference prompts."""
-    kw = _gen_kwargs_klein(prompt)
-    vb, w, va, skipped = _paired_parity(flux2_klein, kw)
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(prompt, variant_id=variant_id)
+    vb, w, va, skipped = _paired_parity(flux, kw)
     cos = _cosine(vb, w)
     assert cos >= _FLUX2_COSINE_GATE, f"prompt={prompt!r} cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
     assert mx.array_equal(vb, va)
     assert skipped == 0
 
 
-def test_paired_parity_reverse_order_klein(flux2_klein: Any) -> None:
+def test_paired_parity_reverse_order_klein(flux2_klein: tuple[Any, str]) -> None:
     """Reverse-order control: wrapper → restore → vanilla."""
-    kw = _gen_kwargs_klein(PR_TIME_PROMPT)
-    with apply_teacache(flux2_klein, rel_l1_thresh=0.0):
-        wrapper = _capture(flux2_klein, **kw)
-    vanilla = _capture(flux2_klein, **kw)
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
+    with apply_teacache(flux, rel_l1_thresh=0.0):
+        wrapper = _capture(flux, **kw)
+    vanilla = _capture(flux, **kw)
     cos = _cosine(wrapper, vanilla)
     assert cos >= _FLUX2_COSINE_GATE, f"reverse-order parity cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
 
@@ -241,13 +263,14 @@ def test_paired_parity_reverse_order_klein(flux2_klein: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cfg_fallback_matches_vanilla(flux2_klein: Any) -> None:
+def test_cfg_fallback_matches_vanilla(flux2_klein: tuple[Any, str]) -> None:
     """At guidance > 1.0 the FLUX.2 wrapper bypasses gating entirely and
     delegates to vanilla mflux's compiled _predict. Paired parity is
     bit-exact (not just allclose) because both sides go through the same
     compiled kernel. Every StepDecision is `cfg-fallback`."""
-    kw = _gen_kwargs_klein(PR_TIME_PROMPT, guidance=3.5)
-    vb, w, va, _ = _paired_parity(flux2_klein, kw)
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id, guidance=3.5)
+    vb, w, va, _ = _paired_parity(flux, kw)
     assert mx.array_equal(vb, w), (
         "CFG fallback should be byte-identical to vanilla in-process "
         "(both sides go through the same compiled _predict)"
@@ -260,18 +283,19 @@ def test_cfg_fallback_matches_vanilla(flux2_klein: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: Any) -> None:
+def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: tuple[Any, str]) -> None:
     """rel_l1_thresh <= 0 short-circuits regardless of coefficients.
     Cosine gate per module docstring (compile-vs-eager dispatch noise)."""
-    kw = _gen_kwargs_klein(PR_TIME_PROMPT)
+    flux, variant_id = flux2_klein
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
     pathological = (0.0, 0.0, 0.0, -1000.0, 0.0)
-    vanilla = _capture(flux2_klein, **kw)
+    vanilla = _capture(flux, **kw)
     with apply_teacache(
-        flux2_klein,
+        flux,
         rel_l1_thresh=0.0,
         coefficients=pathological,
     ) as h:
-        wrapper = _capture(flux2_klein, **kw)
+        wrapper = _capture(flux, **kw)
         skipped = h.stats.skipped_count
     assert _cosine(vanilla, wrapper) >= _FLUX2_COSINE_GATE
     assert skipped == 0
@@ -282,37 +306,39 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: Any) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_idempotency_raises_already_patched(flux2_klein: Any) -> None:
-    h = apply_teacache(flux2_klein, rel_l1_thresh=0.25)
+def test_idempotency_raises_already_patched(flux2_klein: tuple[Any, str]) -> None:
+    flux, variant_id = flux2_klein
+    h = apply_teacache(flux, rel_l1_thresh=0.25)
     try:
         with pytest.raises(AlreadyPatchedError):
-            apply_teacache(flux2_klein, rel_l1_thresh=0.4)
+            apply_teacache(flux, rel_l1_thresh=0.4)
     finally:
         h.restore()
 
 
-def test_restore_completeness(flux2_klein: Any) -> None:
+def test_restore_completeness(flux2_klein: tuple[Any, str]) -> None:
     """Restore postconditions for the FLUX.2 path. FLUX.2 patches via
     instance-attribute `_predict` replacement, not transformer proxy."""
-    original_predict_was_instance_attr = "_predict" in vars(flux2_klein)
-    original_predict = flux2_klein._predict if original_predict_was_instance_attr else None
-    original_generate = flux2_klein.generate_image if "generate_image" in vars(flux2_klein) else None
+    flux, variant_id = flux2_klein
+    original_predict_was_instance_attr = "_predict" in vars(flux)
+    original_predict = flux._predict if original_predict_was_instance_attr else None
+    original_generate = flux.generate_image if "generate_image" in vars(flux) else None
 
-    h = apply_teacache(flux2_klein, rel_l1_thresh=0.25)
+    h = apply_teacache(flux, rel_l1_thresh=0.25)
     cb = h._callback_instance
     h.restore()
 
     if original_predict_was_instance_attr:
-        assert flux2_klein._predict is original_predict
+        assert flux._predict is original_predict
     else:
-        assert "_predict" not in vars(flux2_klein)
+        assert "_predict" not in vars(flux)
     if original_generate is not None:
-        assert flux2_klein.generate_image is original_generate
+        assert flux.generate_image is original_generate
     else:
-        assert "generate_image" not in vars(flux2_klein)
-        assert callable(flux2_klein.generate_image)
-    assert cb not in flux2_klein.callbacks.before_loop
-    assert getattr(flux2_klein, "_teacache_handle", None) is None
+        assert "generate_image" not in vars(flux)
+        assert callable(flux.generate_image)
+    assert cb not in flux.callbacks.before_loop
+    assert getattr(flux, "_teacache_handle", None) is None
     # Re-apply succeeds.
-    h2 = apply_teacache(flux2_klein)
+    h2 = apply_teacache(flux)
     h2.restore()

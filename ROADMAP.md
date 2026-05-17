@@ -4,95 +4,74 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
-- **v0.3.0** — `flux2-klein-9b` support (in-repo calibration). Calibration
-  script parameterized via `--variant` so v0.4 / v0.5 are additive.
-  `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed.
+- **v0.3.0** — `flux2-klein-9b` support (in-repo calibration, origin-constrained polyfit). Calibration script parameterized via `--variant` so v0.4 / v0.5 are additive. `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed. Honest performance framing for FLUX.2 Klein: distilled schedules don't algorithmically step-skip; wall-clock improvement comes from `mx.compile`-path avoidance. `scripts/bench_speedup.py` committed as reproducible source of truth for all README benchmark numbers.
+- **v0.2.0** — img2img support for FLUX.1 dev/schnell + FLUX.2 Klein 4B (single bundled PR). `TeaCacheNoBenefitWarning` for distilled-schedule + skip-window misconfigurations. Per-chip `Performance by chip` section in README with M1 Pro / M2 Pro classification corrected (they're eager, not compiled). `docs/calibration.md` written. `docs/manual-verification.md` rewritten with a working recipe.
 - **v0.1.0 / v0.1.1** — Initial public release. FLUX.1 dev/schnell, FLUX.2 Klein 4B. Calibrated coefficients. Five-tier test pyramid. Trusted-Publishing pipeline.
 
 ## Active
 
-### v0.4.0: FLUX.2 caching research (postmortem-driven)
+### v0.4.0: `flux2-klein-base-4b` (at `guidance=1.0`)
 
-Discovered during v0.3.0 release that on FLUX.2 Klein 4B and Klein 9B at their distilled 8-step schedules the polynomial gate produces zero step skips at the package default `rel_l1_thresh=0.20`. The wrapper's wall-clock improvement comes from `mx.compile` avoidance, not from caching. Full writeup at `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`.
+The first FLUX.2 variant where the polynomial gate is expected to engage on its own. Same `Flux2Klein` class as the distilled Klein 4B that v0.2.0 shipped — only the model weights and the schedule differ. Apache-2.0 license (same posture as distilled Klein 4B). Non-distilled, designed for 20-50 step generation, which is exactly the regime TeaCache's polynomial gate is calibrated for.
 
-v0.4.0 investigates whether a different caching approach can engage on Klein:
+**Scope: `guidance=1.0` only.** The current FLUX.2 wrapper falls back to vanilla mflux at `guidance > 1.0` (CFG). Upstream BFL's base-4B model card recommends `guidance_scale=4.0`; that recipe lands in v0.4.1 (see below) with per-branch CFG caching.
 
-- **FirstBlockCache (FBCache)** port to mflux on Apple Silicon. Already in diffusers mainline; no polynomial calibration, gates on first-transformer-block residual absmean. Promising because it sidesteps the broken continuous gate.
-- **Per-step-index lookup table.** Offline profile of Klein 8-step trajectories to identify reliably skippable step indices; bake those into a hardcoded per-step decision.
-- **TaylorSeer / DiCache adaptation.** Fixed-interval and online-probe alternatives to polynomial-fit gating.
+Direct precedent: NVIDIA's FLUX.2-dev blog reports ~32% steps skipped at `teacache_thresh=0.05` on a 50-step schedule. FLUX.2-dev shares the broader architecture family with klein-base-4b, so the same gate signal is expected to be predictive — only the calibration constants differ.
 
-The research postmortem includes 10 specific references (ali-vilab/TeaCache, NVIDIA's FLUX.2-dev blog with `thresh=0.05`, diffusers CacheMixin, SeaCache + DiCache papers, FBCache implementation). v0.4 plan starts from those.
+Scope:
+- Fresh calibration via `scripts/calibrate_flux2.py --variant klein-base-4b` (origin-constrained polyfit). Target schedule: 25 steps. 10 prompts × 25 steps × seed=42 on M1 Max, ~8 hours bench.
+- Wire `flux2-klein-base-4b` into the detector, the api surface, and the coefficient registry.
+- New bench row in `scripts/bench_speedup.py --variant klein-base-4b`. Expected: nonzero skip count + algorithmic speedup distinct from compile-avoidance.
+- README + CHANGELOG + `docs/calibration.md` updates.
+- ~15 GB disk for weights.
 
-- **Effort:** large — at least one new caching strategy ported + benchmarked + calibrated; bench numbers measured by `scripts/bench_speedup.py`.
-- **Value:** unblocks real step-skipping benefit on FLUX.2 Klein variants. Compile-avoidance wall-clock is a real win but should not be the only mechanism the library offers on FLUX.2.
-- **Risks:** the consensus across published work is that no caching technique demonstrably engages on 4-8 step distilled FLUX-class models. Research may conclude TeaCache-class caching is fundamentally incompatible with distilled schedules and the library should declare "no step-skipping on distilled FLUX.2" and ship a different mechanism (e.g. a clean `mx.compile`-avoidance wrapper without a polynomial gate at all).
+- **Effort:** small-to-medium — the integration is mostly additive (mflux already exposes the variant), calibration is the long pole.
+- **Value:** the first FLUX.2 variant where mlx-teacache delivers its headline feature (real step-skipping), and the first with Apache-2.0 license.
+- **Risks:** low. Polynomial gate on a non-distilled FLUX.2 schedule is the documented use case. Worst case is "polynomial fit converges, skips engage, speedup is real but smaller than FLUX.1-dev" — still a positive result.
 
-### v0.4.0 also: `flux2-klein-base-4b`
+### v0.4.1: CFG per-branch caching for FLUX.2
 
-Apache-2.0 commercial-friendly variant. Same Flux2Klein class; non-distilled schedule (25-50 steps). Fresh calibration via `scripts/calibrate_flux2.py --variant klein-base-4b`. With longer schedules, the polynomial gate is much more likely to engage, so base-4B may be the first FLUX.2 variant where TeaCache step-skipping actually works.
+Replaces the current `_vanilla_flux2_cfg_predict()` fallback with a per-branch gated path. Each branch (positive + negative prompt embeddings) keeps its own cache state; one shared gate decision per step (FBCache-style) — when "skip" fires, both branches reuse their respective cached residuals.
+
+Lights up TeaCache on the canonical base-4b recipe (`guidance_scale=4.0`, 50-step generation per upstream model card). Also lets CFG users of distilled Klein 4B/9B benefit from whatever the gate produces on those variants (still 0 skips at default threshold by design, but the wrapper's compile-avoidance benefit becomes available under CFG).
+
+- **Effort:** medium — 4-6 days implementation + ~12 hours additional bench.
+- **Value:** unblocks v0.4.0's headline base-4b feature for the canonical upstream recipe; secondary win for distilled-Klein-with-CFG users.
+- **Risks:** new edge cases under CFG (skip-window validation, stats schema for two-branch decisions); polynomial calibrated at g=1.0 may need recalibration at g=4.0 if outputs diverge under CFG more than expected.
 
 ### v0.5.0: `flux2-klein-base-9b`
 
-Non-distilled 9B. FLUX Non-Commercial license + BFL safety filter. Fresh calibration. Same approach as base-4B.
+Non-distilled 9B. FLUX Non-Commercial license + BFL safety filter (same constraints as Klein 9B today). Fresh calibration. Same approach as base-4B. Requires v0.4.1 (CFG caching) to deliver value on the canonical upstream recipe.
 
 ---
 
-Below this line: historical v0.2.0 / v0.3.0 plan content kept for reference.
+## Future improvements (no fixed release target)
 
-Two feature tracks plus a doc track ship together as v0.2.0.
+Concrete improvement ideas with a clear failure mode they address. Each is a candidate for a future minor release; none are committed.
 
-### 1. img2img support (spec: 2026-05-15-img2img-and-distilled-notification-design.md)
+### Calibration fit-quality on FLUX.2-family architectures
 
-Lift v0.1's blanket img2img rejection. The three currently-supported variants (FLUX.1 dev/schnell, FLUX.2 Klein 4B) accept `image_path` + `image_strength > 0` with TeaCache engaged on the active denoising window (`config.num_inference_steps - config.init_time_step`, per mflux's `Config` semantics).
+FLUX.2 calibration produces consistently lower R² than FLUX.1 (klein-9b origin fit: R² = 0.471; klein-4b free fit: R² = 0.653). The polynomial form may be a bad fit for the FLUX.2 mod_in → body_out mapping. Worth investigating: (a) higher polynomial degree, (b) piecewise fit by step-index range, (c) different signal entirely (first-block residual delta — see "Alternative gate signals" below). If the fit improves, default-threshold engagement on FLUX.2 may become more reliable.
 
-- **Effort:** medium — delete one rejection block, wire active-step-count through lifecycle + stats finalization, fix FLUX.1 forward's absolute-timestep step indexing, add SSIM gates for img2img
-- **Value:** the single biggest user-visible gap closed
-- **Risks:** existing coefficients are reused (calibrated on txt2img); v0.2.0 ships with this as a documented approximation, recalibration possible in v0.2.1 if SSIM gates show drift
-- **Compatibility note:** `Img2ImgNotSupportedError` stays exported (deprecated) for one release; removal in v0.3.0
+### Per-variant default thresholds
 
-### 2. Distilled-step notification (spec: 2026-05-15-img2img-and-distilled-notification-design.md)
+Today `apply_teacache(flux, rel_l1_thresh=0.20)` is one default for all variants. The polynomial output range differs significantly per variant (FLUX.1-dev's calibration produces values that dip below 0.20 regularly; FLUX.2 Klein 9B's never does). A `default_thresh` field on the `Provenance` dataclass + lookup in `apply_teacache` would let each variant ship its calibration-tuned default. Held as a contingency for v0.4.0's 0-skip outcome; otherwise a candidate for a small follow-up release.
 
-`TeaCacheNoBenefitWarning` (subclass of `UserWarning`) emitted once per handle when the current configuration cannot produce any possible skip — i.e., when `eligible - 1 <= 0` (need ≥1 seed step + ≥1 skip candidate). Catches schnell-at-4-steps and aggressive skip-window configs. Scoped to schedule-shape issues; CFG-fallback no-benefit is a separate concern tracked elsewhere.
+### SSIM-vs-threshold sweep tooling
 
-- **Effort:** small — one warning class, one branch in `GenerationContextCallback.call_before_loop`
-- **Value:** removes a foot-gun for first-time users at distilled defaults
-- **Risks:** none material
+A `scripts/sweep_threshold.py` that captures (threshold, skip_count, SSIM) triplets at calibration time for a given variant. Produces an evidence-backed threshold recommendation per variant. ~3 hours of additional bench cost on top of calibration. Approach C from the v0.4 brainstorming; held for a future release where threshold characterization matters more than time-to-ship.
 
-### Doc track (folds in alongside the code tracks, Task #64)
+### Alternative gate signals (non-distilled only)
 
-Audit findings from `docs/superpowers/notes/2026-05-15-roadmap-docs-research-audit.md`:
+FBCache (first-block residual delta), DiCache (shallow-layer probe), TaylorSeer (fixed-interval extrapolation). These were considered as v0.4 directions for distilled Klein and dropped (the distilled regime is fundamentally hostile to any caching mechanism — see "Out of scope" below). On *non-distilled* schedules where the polynomial gate works but has low R² (i.e. FLUX.2 family), they may give better engagement / quality than the polynomial. Worth a research spike if v0.4.0's polynomial-on-base-4b engagement is unsatisfying.
 
-- Fix M1 Pro / M2 Pro classification in the chip table (they're eager, not compiled — `is_m1_or_m2()` returns True for Pro variants because the predicate only excludes Max + Ultra)
-- Write `docs/calibration.md` (the README link points to it but it doesn't exist)
-- Remove or repoint the broken spike-notes link in the README
-- Rewrite `docs/manual-verification.md` — current recipe uses a non-existent `.latents` attribute and asserts byte-exact parity on FLUX.2 (which is cosine-only by design)
-- Soften M5 wording from "only available via the compiled path" to "may lose some or all of the M5 TensorOps advantage"
-- README quick-start: switch Klein example from 25 steps to 8 steps (Klein is distilled; 25 steps degrades quality and slows down generation)
+### img2img calibration
 
-### Performance-by-chip section (Task #54, lands in v0.2.0 README)
+v0.2.0 reuses txt2img coefficients for img2img generation. The polynomial captures an architectural property so this should generalize, but a dedicated img2img calibration may follow if SSIM gates on real img2img workloads show drift. Not a frequent user request yet.
 
-Add a `Performance by chip` section to the README showing per-generation speedup expectations and inviting community measurements for chips we don't have access to.
+### Compile-friendly gating
 
-**Draft language to include in 0.2.0:**
-
-> ### Performance by chip
->
-> mlx-teacache replaces mflux's compiled `_predict` with an eager Python wrapper so step-skipping decisions can run per step. The wrapper is correct on every Apple Silicon chip, but the speedup magnitude depends on how much mflux's compile pass would have helped you. Mflux's compile gate (in 0.17.5) uses `is_m1_or_m2()` which excludes only Max and Ultra variants — so M1/M2 base **and Pro** all run eager, while Max/Ultra and every M3/M4/M5 chip get compiled `_predict`.
->
-> | Chip | Vanilla `_predict` in mflux 0.17.5 | Expected speedup |
-> |---|---|---|
-> | Apple M1 / M2 (base) | eager | ≈ pure skip fraction (~1.5–1.6×) |
-> | M1 Pro / M2 Pro | eager | ≈ pure skip fraction — same as base |
-> | M1 Max / Ultra, M2 Max / Ultra | compiled | **1.48× measured** on M1 Max FLUX.1-dev / 25 steps |
-> | M3 / M3 Pro / M3 Max / Ultra | compiled | Likely 1.1–1.3× — untested |
-> | M4 / M4 Pro / M4 Max | compiled | Likely 1.1–1.3× — untested |
-> | M5+ (Neural Accelerators / TensorOps) | compiled + accelerator | May approach 1.0× — eager wrapper may lose some or all of the M5 TensorOps advantage. Confirm with profiler before treating as fact. |
->
-> Output correctness is preserved on every chip. If you can measure speedup on M2+, please open an issue with your chip + numbers — we'll fold them into this table.
-
-### Compile-friendly gating (deferred from v0.2.0)
-
-Investigate keeping `_predict` compiled while gating runs in eager Python. Three sketches:
+Keep mflux's `mx.compile` on `_predict` while running TeaCache gating in eager Python. Three sketches:
 
 - **A — Compile body, eager wrapper:** isolate the pure-tensor computation (`transformer(...)`) into a separately compiled function. The wrapper calls the compiled body or returns the cached residual. Skip decisions stay in Python. Most invasive — requires extracting an mflux internal as a standalone compileable callable.
 - **B — Branch inside the graph:** use `mx.where(should_run, full_path, cached_path)` so both paths compute, but only one is selected. Trades all skip savings for keeping the compile fast path. Net-negative whenever caching actually engages (we paid for both paths). Useful only as a correctness experiment, not a speed path.
@@ -110,22 +89,18 @@ Investigate keeping `_predict` compiled while gating runs in eager Python. Three
 
 Pick A or C after measuring vanilla compile-loss on representative M3/M4/M5 hardware via community benchmarks.
 
-## Future (no fixed release)
+## Future model coverage (no fixed release)
 
-### Other Apple-Silicon models worth covering
-
-Ranked by value-per-effort. None of these are committed; they're a menu for picking up after v0.2.0.
+Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` and `FLUX.2-klein-base-9B` are NOT in this table — they're committed to v0.4.0 and v0.5.0 respectively (see "Active" above). Don't pick from this table while Active items are in flight.
 
 | # | Model | Effort | License | Why it matters | Risks |
 |---|---|---|---|---|---|
 | 1 | **Z-Image base** (Tongyi-MAI, full step schedule) | 3–5 days | Apache-2.0 | Already in mflux 0.17.5 as `ZImage` with a compile-gated `_predict`. Apache-2.0 license. Recommended 28–50 steps → high skip ceiling. Popular on Apple Silicon. | Different architecture from FLUX (single-stream DiT with cross-attention) — needs a fresh polynomial fit, not coefficient reuse. Integration is short; calibration is the long pole. |
-| 2 | **FLUX.2-klein-base-4B** (non-distilled) | 1–2 days | Apache-2.0 | Runs 25–50 steps vs Klein-4B's 8 → larger absolute skip savings. Same `Flux2Klein` class. Apache-2.0 unlocks commercial use. | Fresh calibration; ~15 GB disk. |
-| 3 | **FLUX.2-klein-base-9B** (non-distilled) | 1–2 days | FLUX Non-Commercial | Same as base-4B with more capacity. | Same license obligations as Klein 9B (safety filter, non-commercial). ~30 GB disk. |
-| 4 | **Chroma1-HD** (lodestones community FLUX-schnell fine-tune) | Week | Apache-2.0 | Popular community model; FLUX-architecture-compatible in spirit. | **Not in mflux 0.17.5** — exposed upstream as `ChromaPipeline` in Diffusers. Requires either a mflux integration request or a custom weight-loading path that maps Chroma's safetensors onto mflux's `Flux1` mapping. Prove loadability first; if mflux's `Flux1` accepts Chroma weights with no custom mapping, drops to 1–2 days. |
-| 5 | **SD3.5 medium** (Stability AI, 2.5B DiT) | Week+ | Stability AI Community License | DiT-family, runs on `mlx-stable-diffusion` rather than mflux. Different upstream. | Less actively maintained upstream; may require upstream patches. |
-| 6 | **SDXL** | Week+ | OpenRAIL-M | Largest installed base on Apple Silicon, but standard step counts (30–40) are lower than FLUX — speedup ceiling is lower. | Same upstream issue as SD3.5. |
-| 7 | **AuraFlow** (~6B DiT) | 1–2 weeks | Apache-2.0 | Open license, FLUX-like, room for community uptake. | Not in mflux — needs a new mflux variant first. |
-| 8 | **HunyuanVideo / Mochi / CogVideoX** | — | varies (see below) | Video diffusion: TeaCache concept is even more valuable (30+ steps, very expensive per step). | Doesn't fit 32 GB unified memory on this machine — needs a 64 GB+ M-series chip to develop and test. License notes: Mochi 1 preview Apache-2.0 (42 GB VRAM Diffusers / 60 GB reference); CogVideoX-2B Apache-2.0; CogVideoX-5B "other"; HunyuanVideo / HunyuanVideo 1.5 "other". |
+| 2 | **Chroma1-HD** (lodestones community FLUX-schnell fine-tune) | Week | Apache-2.0 | Popular community model; FLUX-architecture-compatible in spirit. | **Not in mflux 0.17.5** — exposed upstream as `ChromaPipeline` in Diffusers. Requires either a mflux integration request or a custom weight-loading path that maps Chroma's safetensors onto mflux's `Flux1` mapping. Prove loadability first; if mflux's `Flux1` accepts Chroma weights with no custom mapping, drops to 1–2 days. |
+| 3 | **SD3.5 medium** (Stability AI, 2.5B DiT) | Week+ | Stability AI Community License | DiT-family, runs on `mlx-stable-diffusion` rather than mflux. Different upstream. | Less actively maintained upstream; may require upstream patches. |
+| 4 | **SDXL** | Week+ | OpenRAIL-M | Largest installed base on Apple Silicon, but standard step counts (30–40) are lower than FLUX — speedup ceiling is lower. | Same upstream issue as SD3.5. |
+| 5 | **AuraFlow** (~6B DiT) | 1–2 weeks | Apache-2.0 | Open license, FLUX-like, room for community uptake. | Not in mflux — needs a new mflux variant first. |
+| 6 | **HunyuanVideo / Mochi / CogVideoX** | — | varies (see below) | Video diffusion: TeaCache concept is even more valuable (30+ steps, very expensive per step). | Doesn't fit 32 GB unified memory on this machine — needs a 64 GB+ M-series chip to develop and test. License notes: Mochi 1 preview Apache-2.0 (42 GB VRAM Diffusers / 60 GB reference); CogVideoX-2B Apache-2.0; CogVideoX-5B "other"; HunyuanVideo / HunyuanVideo 1.5 "other". |
 
 ### Process / infra items
 
@@ -135,14 +110,16 @@ Ranked by value-per-effort. None of these are committed; they're a menu for pick
 
 ## Out of scope (deliberate)
 
-- **Z-Image-Turbo** and **FLUX.1-schnell at 4 steps** — distilled schedules have nothing to skip; the new `TeaCacheNoBenefitWarning` (v0.2.0) is the signal we give users for these
-- **Server / API layer** — mlx-teacache is a library, not an inference service
-- **PyTorch backend** — TeaCache for PyTorch already exists upstream (ali-vilab); mlx-teacache stays MLX-native
-
-## Deferred work (no current release target)
-
-These items are real and tracked, but not in the current release window. No 0.3.0 plan is committed yet.
+- **Algorithmic step-skipping on distilled schedules.** This includes FLUX.2 Klein 4B + 9B at their 4-8 step defaults, FLUX.1 schnell at 4 steps, and Z-Image-Turbo. The polynomial gate's premise (adjacent steps are similar enough that the residual can be reused) does not hold on distilled trajectories where each step does a much larger share of the work. v0.3.0 documented this for Klein 4B + 9B explicitly; the v0.2.0 `TeaCacheNoBenefitWarning` is the runtime signal for users hitting this regime. Note: research efforts proposed in the 2026-05-16 postmortem (FirstBlockCache port, per-step-index lookup, fixed-interval caching as alternatives for distilled Klein) were considered and dropped in favor of shipping `flux2-klein-base-4b` (non-distilled) in v0.4.0. The structural wall-clock benefit on distilled Klein from sidestepping mflux's `mx.compile`-wrapped `_predict` is preserved (~1.2-1.9× measured on M1 Max), so the variants remain supported — they just don't get algorithmic step-skipping by design.
+- **Server / API layer** — mlx-teacache is a library, not an inference service.
+- **PyTorch backend** — TeaCache for PyTorch already exists upstream (ali-vilab); mlx-teacache stays MLX-native.
 
 ## How to use this doc
 
-When picking up new work, find the matching row above, copy the effort/value/risk line into the implementation plan header, and link back here. When closing v0.2.0, move the two Active tracks into "Released" and pull whichever "Future" row is next.
+When picking up new work:
+1. **Active items first.** Items under `## Active` are committed. Finish v0.4.0 before starting v0.4.1, finish v0.4.1 before starting v0.5.0, etc.
+2. **Future improvements next.** Items under `## Future improvements` are pre-vetted improvement ideas with documented failure modes they address. Each can be lifted into an Active release when its time comes.
+3. **Future model coverage after that.** The model-coverage table is a menu, not a queue; pick from it based on community demand + license posture + bench cost.
+4. **Out of scope is durable.** Items under `## Out of scope (deliberate)` represent intentional non-goals, not deferred work. Re-opening one requires evidence that the original reasoning no longer holds.
+
+When closing a release, move its Active entry to Released with a one-line summary and pull the next Active item into the top slot.

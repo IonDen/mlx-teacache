@@ -3,7 +3,9 @@
 **Date:** 2026-05-16
 **Surface:** v0.3.0 PR #2 (Klein 9B support)
 **Severity:** Misleading user-facing performance claims in shipped v0.2.0 + about-to-ship v0.3.0; no correctness regression.
-**Status:** Findings final; remediation in flight (v0.3.0 honesty rewrite; v0.4 research task to fix it properly).
+**Status:** Findings final; v0.3.0 honesty rewrite shipped.
+
+> **Coda — 2026-05-17:** The "v0.4 research task to fix it properly" track described below (FirstBlockCache port, per-step-index lookup, TaylorSeer / DiCache adaptations) is **no longer planned**. After consideration, distilled-schedule algorithmic step-skipping has been declared an explicit non-goal — the ROADMAP "Out of scope" section documents the decision. v0.4 instead targets `flux2-klein-base-4b` (non-distilled, Apache-2.0, designed for 20-50 step generation), which is the first FLUX.2 variant where the existing polynomial gate is expected to engage on its own. The research references in this postmortem are retained for the historical record and for anyone who wants to pick up that thread; the library itself will not. The wall-clock benefit on distilled Klein from `mx.compile`-path avoidance remains documented and supported.
 
 ## What happened
 

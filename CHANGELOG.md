@@ -70,10 +70,11 @@ This release ships `flux2-klein-9b` support and corrects misleading performance 
   reps; the 1.26× wall-clock improvement comes entirely from
   `mx.compile`-path avoidance. v0.2.0 was correct on quality (output is
   preserved) and on the wall-clock measurement, but wrong on the
-  mechanism. v0.3.0 corrects the README + CHANGELOG framing. The v0.4
-  research track (see ROADMAP) investigates whether a different caching
-  approach (FirstBlockCache, per-step-index lookup) can actually engage
-  on FLUX.2 Klein.
+  mechanism. v0.3.0 corrects the README + CHANGELOG framing. Distilled
+  schedules are now declared out of scope for algorithmic step-skipping
+  (see `Limitations`). v0.4.0 targets `flux2-klein-base-4b` (non-distilled,
+  Apache-2.0) — the first FLUX.2 variant where the polynomial gate is
+  expected to engage on its own.
 
 ## [0.2.0] — 2026-05-16
 

@@ -176,3 +176,23 @@ def test_apply_teacache_accepts_flux2_klein_9b():
         assert handle.provenance.source == "builtin"
     finally:
         handle.restore()
+
+
+@pytest.mark.parity
+def test_apply_teacache_accepts_flux2_klein_base_4b():
+    """Smoke: apply_teacache returns a handle with the right variant_id on Klein base-4B.
+    Catches api.py regressions in the variant_id Literal or the FLUX.2 _predict guard."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    from mlx_teacache import apply_teacache
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    handle = apply_teacache(flux)
+    try:
+        assert handle.variant_id == "flux2-klein-base-4b"
+        assert len(handle.coefficients) == 5
+        assert handle.provenance.source == "builtin"
+    finally:
+        handle.restore()

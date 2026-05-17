@@ -142,7 +142,13 @@ def apply_teacache(
 
     Supported variants (detected via flux.model_config.aliases):
       - flux1-dev, flux1-schnell
-      - flux2-klein-4b, flux2-klein-9b
+      - flux2-klein-4b, flux2-klein-9b (both distilled; gate does not engage
+        at default threshold on the 4-8 step schedule — wall-clock benefit
+        comes from mx.compile-path avoidance, see README "How the speedup
+        happens")
+      - flux2-klein-base-4b (non-distilled; calibrated at 25 steps; engages
+        the polynomial gate at guidance=1.0. CFG / guidance > 1.0 falls back
+        to vanilla mflux pending v0.4.1.)
 
     See docs/superpowers/specs/2026-05-14-mlx-teacache-design.md §6.1 for the
     full docstring; this is the runtime entry point."""

@@ -12,10 +12,12 @@ While preparing v0.3.0 release of mlx-teacache (FLUX.2 Klein 9B support), the im
 | Variant | num_steps | Vanilla median | Wrapper median | Speedup | Skipped | Computed |
 |---|---|---|---|---|---|---|
 | FLUX.1-dev | 25 | 103.67 s | 71.79 s | **1.44×** | **6 / 25** | 17 / 25 |
-| FLUX.2 Klein 4B | 8 | 28.07 s | 22.34 s | 1.26× | **0 / 8** | 6 / 8 |
-| FLUX.2 Klein 9B | 8 | 98.52 s | 58.36 s | 1.69× | **0 / 8** | 8 / 8 |
+| FLUX.2 Klein 4B | 8 | 28.1 s | 22.3 s | 1.26× | **0 / 8** | 6 / 8 |
+| FLUX.2 Klein 9B | 8 | 119.0 s | 61.8 s | 1.93×† | **0 / 8** | 8 / 8 |
 
-(All measured on M1 Max 32GB, mflux 0.17.5, quantize=4, 512×512, seed=42, red-apple prompt; 3 timed reps + warmup; median reported.)
+(All measured on M1 Max 32GB, mflux 0.17.5, quantize=4, 512×512, seed=42, red-apple prompt; 3 timed reps + warmup; median reported. Numbers match the v0.3.0 README "Benchmarks" table — single source of truth, produced by `scripts/bench_speedup.py` with the v2 origin-constrained 9B coefficients.)
+
+† Klein 9B wall-clock has high variance from thermal throttling on M1 Max at quantize=4 — the bench runs all vanilla reps before all wrapper reps (`scripts/bench_speedup.py:152-188`), so a thermally-throttled vanilla rep paired with a recovered wrapper rep inflates the median. The steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps and is the load-bearing finding of this postmortem; the exact speedup ratio is not. An earlier free-fit calibration run on the same hardware recorded 98.52 s → 58.36 s (1.69×); the conclusion (0 skips, compile-avoidance only) was identical.
 
 **FLUX.1-dev is genuinely doing what TeaCache is designed to do.** 6 of 25 steps reused the cached residual; the 1.44× speedup matches the v0.2.0 README's 1.48× claim within Metal kernel-dispatch noise.
 
@@ -37,11 +39,11 @@ For the Klein 9B calibration data (10 prompts × 8 steps × seed=42), the empiri
 
 We refit the polynomial twice during diagnosis:
 
-1. **`fit-mode=free`** (the original v0.3.0 calibration): unconstrained `numpy.polyfit`. R² = 0.5421, `poly(0) = 5.36`. The polynomial passed through (0, 5.36), which is physically nonsensical (no input change should never predict a 5.36 rel-L1 output change). The polynomial output ranged `[0.29, 0.81]` over the fit range — always above the threshold.
+1. **`fit-mode=free`** (the original v0.3.0 calibration): unconstrained `numpy.polyfit`. R² = 0.5421, `poly(0) = 5.36`. The polynomial passed through (0, 5.36), which is physically nonsensical (no input change should never predict a 5.36 rel-L1 output change). Its output was always above the threshold over the fit range.
 
-2. **`fit-mode=origin`** (recalibration during this incident): constrained least-squares with `poly(0) = 0`. R² = 0.4710, coefficients `(-523.84, 530.25, -177.64, 20.89, 0.0)`. Slightly worse R² as expected when adding a constraint, but physically sensible. The polynomial output ranged `[0.27, 0.79]` over the fit range — still always above the threshold.
+2. **`fit-mode=origin`** (recalibration during this incident, shipped in v0.3.0): constrained least-squares with `poly(0) = 0`. R² = 0.4710, coefficients `(-523.84, 530.25, -177.64, 20.89, 0.0)`. Slightly worse R² as expected when adding a constraint, but physically sensible. Evaluated over the fit-range `x ∈ [0.1316, 0.4498]` the polynomial output spans `[0.269, 0.724]` — still always above the 0.20 default threshold. (Empirical `y` over the same data: `[0.250, 0.880]`.)
 
-Either polynomial faithfully reflects the data: **the data itself says no skips are possible at the threshold.** The Klein 4B polynomial behaves similarly — its outputs over `[0.13, 0.45]` fall in `[0.43, 0.69]`, all above the default threshold.
+Either polynomial faithfully reflects the data: **the data itself says no skips are possible at the threshold.** The Klein 4B polynomial behaves similarly — evaluated over its fit-range `x ∈ [0.2001, 0.4253]` (empirical `y ∈ [0.261, 1.008]`), the polynomial output spans `[0.424, 0.882]`, all above the default threshold.
 
 This is consistent with Klein being distilled to do significant work per step. The whole denoising trajectory collapses into 4 or 8 steps; each step is consequential. TeaCache's premise — adjacent steps are similar enough that we can skip some — does not hold for heavily-distilled short schedules.
 
@@ -84,7 +86,7 @@ A research subagent surveyed `ali-vilab/TeaCache`, `diffusers`, NVIDIA's FLUX.2 
 - **No FLUX.2 path exists in `ali-vilab/TeaCache`.** The repo has only `TeaCache4FLUX/teacache_flux.py` (FLUX.1-dev, polynomial fit at `num_inference_steps=28`). Issue #83 shows a user tried TeaCache on FLUX.1-schnell at 4 steps and got a floating-point exception with no maintainer fix. Closest upstream acknowledgment that short/distilled schedules break the stock implementation.
 - **The TeaCache paper (arXiv:2411.19108) calibrates only on T ≥ 30 schedules.** It does not discuss distilled models. The implicit assumption is trajectory smoothness across many steps — accumulated rel-L1 needs multiple steps to cross a threshold. That mechanism is exactly what breaks at 4-8 steps.
 - **NVIDIA's FLUX.2-dev blog uses `teacache_thresh=0.05`** — four times lower than our 0.20 default — for ~32% skips at 50 steps. But this is FLUX.2-**dev** (non-distilled), not Klein. They publish no Klein numbers.
-- **No source publishes a threshold for Klein/distilled 4-8 step schedules.** Runware's API documentation lists TeaCache as an option for Klein 4B but does not publish a Klein-specific threshold or skip-rate measurement. Likely also compile/kernel-warmup gain rather than caching.
+- **No source publishes a Klein skip-rate / quality calibration.** Runware's FLUX.2 Klein 4B and 9B docs expose `teaCache`, `fbCache`, and `dbCache` accelerator knobs with default values (`teaCacheDistance=0.5`, `dbCacheThreshold=0.25`) and document 4-step default inference for Klein 9B. They do not publish skip-rate, image-quality deltas, or the underlying calibration data, so the mechanism behind those defaults cannot be inferred from the docs — only that the knobs are exposed at values four times higher than our 0.20 default.
 - **Community consensus:** "Distilled models are faster because they use fewer steps. TeaCache is for quality-preserving speedup on the same number of steps." (paraphrased from the TeaCache paper and multiple ComfyUI guides). Klein's 4-8 steps IS the speedup; layering TeaCache on top is uncharted territory.
 
 ### Alternatives worth chasing in v0.4
@@ -106,7 +108,7 @@ At Klein 9B's measured `y_min = 0.25`, every adjacent-step output change already
 4. TeaCache paper, arXiv:2411.19108 (CVPR 2025) — establishes polynomial rescaling; calibration on T ≥ 30 only. `https://arxiv.org/abs/2411.19108`
 5. SeaCache, arXiv:2602.18993 — spectral filter on distance metric; FLUX.1-dev 50-step, PSNR 26.3 vs TeaCache's 20.8. `https://arxiv.org/html/2602.18993v2`
 6. DiCache, arXiv:2508.17356 — online probe profiling, no offline calibration; 3.22× on FLUX.1-dev. `https://arxiv.org/html/2508.17356v1`
-7. Runware FLUX.2 Klein 4B docs — lists TeaCache for Klein but no published skip-rate / threshold. `https://runware.ai/docs/models/bfl-flux-2-klein-4b`
+7. Runware FLUX.2 Klein docs — expose `teaCache` / `fbCache` / `dbCache` knobs with default values (`teaCacheDistance=0.5`, `dbCacheThreshold=0.25`), no published skip-rate / quality calibration. `https://runware.ai/docs/models/bfl-flux-2-klein-4b` and `https://runware.ai/docs/models/bfl-flux-2-klein-9b`
 8. HuggingFace FLUX.2-klein-9b-fp8 community discussion — reports anatomy artifacts at 4 steps, recommends 8 steps. `https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/discussions/2`
 9. `capitan01R/ComfyUI-Flux2Klein-Enhancer` — community node for Klein post-processing; possible signal for community caching experiments. `https://github.com/capitan01R/ComfyUI-Flux2Klein-Enhancer`
 10. `ali-vilab/TeaCache` issue #83 — FLUX.1-schnell 4-step floating-point exception, no upstream fix. The closest direct confirmation that distilled 4-step is unsupported in the reference implementation. `https://github.com/ali-vilab/TeaCache/issues/83`

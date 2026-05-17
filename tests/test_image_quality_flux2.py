@@ -78,15 +78,18 @@ def _capture(flux: Any, **gen_kwargs: Any) -> mx.array:
 
 
 def _gen_kwargs_klein(
-    prompt: str, *, variant_id: str = "flux2-klein-4b", guidance: float = 1.0
+    prompt: str, *, variant_id: str = "flux2-klein-4b", guidance: float = 1.0, cfg: bool = False
 ) -> dict[str, Any]:
     """Generation kwargs for FLUX.2 Klein variants.
 
     Distilled Klein 4B / 9B use the 8-step default schedule (matches their
     runtime usage). base-4b uses the calibration-time 25-step schedule.
-    Callers that need a different step count should override after this
-    returns."""
-    if variant_id in ("flux2-klein-4b", "flux2-klein-9b"):
+    cfg=True selects the upstream CFG recipe on base-4b: guidance=4.0 at
+    the calibrated 50-step schedule. All other variants are unchanged."""
+    if variant_id == "flux2-klein-base-4b" and cfg:
+        num_inference_steps = 50
+        guidance = 4.0
+    elif variant_id in ("flux2-klein-4b", "flux2-klein-9b"):
         num_inference_steps = 8
     elif variant_id == "flux2-klein-base-4b":
         num_inference_steps = 25
@@ -197,6 +200,37 @@ def test_default_threshold_ssim_klein_pr_gate(
         f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM}; wrapper image "
         f"diverged from same-process vanilla baseline at default threshold "
         f"(image_strength={image_strength})"
+    )
+
+
+def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
+    """v0.4.1 release blocker: at default rel_l1_thresh (0.17), CFG-engaged
+    generation on flux2-klein-base-4b at g=4.0/50 steps must produce SSIM
+    >= 0.85 vs vanilla AND fire >= 1 skip. Skip-count assertion locks in
+    the v0.4.1 engagement claim — without it the test would pass with 0
+    skips and the feature would be dormant (v0.3 postmortem lesson)."""
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    flux.freeze()
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id="flux2-klein-base-4b", cfg=True)
+    vanilla_latent = _capture(flux, **kw)
+    with apply_teacache(flux) as h:  # uses per-variant default rel_l1_thresh=0.17
+        wrapped_latent = _capture(flux, **kw)
+        assert h.stats.skipped_count >= 1, (
+            f"Expected >=1 skip under CFG; got {h.stats.skipped_count}. "
+            f"If this fires reliably, fall into the 0-skip contingency: "
+            f"run CFG-aware calibration via scripts/calibrate_flux2.py "
+            f"--guidance 4.0 --num-inference-steps 50."
+        )
+    vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
+    wrapped_img = _decode_to_uint8(flux, wrapped_latent, height=kw["height"], width=kw["width"])
+    score = ssim(vanilla_img, wrapped_img, channel_axis=-1, data_range=255)
+    assert score >= _DEFAULT_THRESHOLD_SSIM, (
+        f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM}; wrapper image "
+        f"diverged from same-process vanilla baseline under CFG "
+        f"(guidance=4.0, num_inference_steps=50)"
     )
 
 

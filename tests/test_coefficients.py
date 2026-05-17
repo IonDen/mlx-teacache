@@ -51,9 +51,25 @@ def test_load_builtin_flux2_klein_9b_has_dataset_and_metric():
     assert (prov.reference_url or "").endswith("calibrate_flux2.py")
 
 
+def test_load_builtin_flux2_klein_base_4b_has_dataset_and_metric():
+    coeffs, prov = load_builtin("flux2-klein-base-4b")
+    assert len(coeffs) == 5
+    assert all(math.isfinite(c) for c in coeffs)
+    assert coeffs[-1] == 0.0  # origin-constrained: poly(0) = 0
+    assert prov.source == "builtin"
+    assert prov.revision is not None and prov.revision.startswith("in-repo-2026-05-")
+    assert prov.calibration_dataset is not None
+    assert "25 steps" in prov.calibration_dataset
+    assert "guidance=1.0" in prov.calibration_dataset
+    assert prov.fit_metric is not None
+    assert prov.fit_metric_value is not None
+    assert 0.0 < prov.fit_metric_value <= 1.0
+    assert (prov.reference_url or "").endswith("calibrate_flux2.py")
+
+
 @pytest.mark.parametrize(
     "variant_id",
-    ["flux1-dev", "flux1-schnell", "flux2-klein-4b", "flux2-klein-9b"],
+    ["flux1-dev", "flux1-schnell", "flux2-klein-4b", "flux2-klein-9b", "flux2-klein-base-4b"],
 )
 def test_every_supported_variant_has_builtin_coefficients(variant_id):
     coeffs, prov = load_builtin(variant_id)

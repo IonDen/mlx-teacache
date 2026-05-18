@@ -76,6 +76,24 @@ def test_klein_4b_9b_have_no_per_variant_default():
     assert prov_9b.default_thresh is None
 
 
+def test_klein_base_9b_reuses_base_4b_polynomial():
+    """v0.5.0 ships klein-base-9b with base-4b's coefficients verbatim.
+
+    The reuse is intentional. If this test fails, either the 9B entry was
+    edited (and the change should be deliberate, not silent) or the 4B
+    entry drifted.
+    """
+    coeffs_4b, _ = load_builtin("flux2-klein-base-4b")
+    coeffs_9b, _ = load_builtin("flux2-klein-base-9b")
+    assert coeffs_9b == coeffs_4b
+
+
+def test_klein_base_9b_default_thresh_017():
+    """klein-base-9b ships with the same default threshold as base-4b."""
+    _, prov = load_builtin("flux2-klein-base-9b")
+    assert prov.default_thresh == 0.17
+
+
 def test_flux1_variants_have_no_per_variant_default():
     """FLUX.1 variants intentionally keep the package-wide 0.20 default."""
     _, prov_dev = load_builtin("flux1-dev")
@@ -86,7 +104,14 @@ def test_flux1_variants_have_no_per_variant_default():
 
 @pytest.mark.parametrize(
     "variant_id",
-    ["flux1-dev", "flux1-schnell", "flux2-klein-4b", "flux2-klein-9b", "flux2-klein-base-4b"],
+    [
+        "flux1-dev",
+        "flux1-schnell",
+        "flux2-klein-4b",
+        "flux2-klein-9b",
+        "flux2-klein-base-4b",
+        "flux2-klein-base-9b",
+    ],
 )
 def test_every_supported_variant_has_builtin_coefficients(variant_id):
     coeffs, prov = load_builtin(variant_id)

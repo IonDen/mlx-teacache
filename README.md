@@ -98,10 +98,13 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 | `flux2-klein-4b` | `Flux2Klein(model_config=ModelConfig.flux2_klein_4b())` | in-repo (see `docs/calibration.md`) |
 | `flux2-klein-9b`¹ | `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` | in-repo (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
 | `flux2-klein-base-4b`² | `Flux2Klein(model_config=ModelConfig.flux2_klein_base_4b())` | in-repo (25-step calibration, origin-constrained; see [`docs/calibration.md`](docs/calibration.md)) |
+| `flux2-klein-base-9b`³ | `Flux2Klein(model_config=ModelConfig.flux2_klein_base_9b())` | reused from base-4b; validated empirically (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
 
 ¹ `flux2-klein-9b` coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See the [Benchmarks](#benchmarks) "How the speedup happens" subsection.
 
 ² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps and the wrapper measures 1.41× wall-clock vs vanilla (~12% from step-skipping plus the FLUX.2 `mx.compile`-path avoidance contribution); SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) runs through a per-branch gated path as of v0.4.1: the canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) skips 9/50 steps for a 1.26× wall-clock speedup vs vanilla mflux on M1 Max.
+
+³ `flux2-klein-base-9b` is the non-distilled FLUX.2 Klein 9B variant (FLUX Non-Commercial license — see [License obligations](#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). Ships in v0.5.0 reusing base-4b's polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared FLUX.2-Klein architecture family and identical non-distilled 25-step / g=1.0 calibration recipe. Validated empirically at the canonical 50-step CFG recipe; see `_artifacts/validation_klein_base_9b.json` for SSIM, skip count, and three-way wall-clock attribution. Headline numbers from the canonical recipe (`guidance_scale=4.0, num_inference_steps=50`): _TBD: validation pass on 2026-05-19_.
 
 ## When to use mlx-teacache
 
@@ -109,7 +112,7 @@ The wrapper helps when the underlying schedule actually has cacheable redundancy
 
 In practice, that means:
 
-- Use mlx-teacache for **`flux1-dev`** at 20-50 steps and **`flux2-klein-base-4b`** at 20-50 steps, with or without CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
+- Use mlx-teacache for **`flux1-dev`** at 20-50 steps and the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps, with or without CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
 - Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux.
 
 There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.

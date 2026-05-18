@@ -1,4 +1,4 @@
-"""Generate COMPARISON.md content: vanilla mflux vs mlx-teacache on three
+"""Generate COMPARISON.md content: vanilla mflux vs mlx-teacache on the
 non-distilled FLUX variants. Produces per-variant webp images + a complete
 recoverable JSON report under _artifacts/.
 
@@ -10,8 +10,8 @@ Architecture
 
 Each (variant, condition) pair runs in a SEPARATE subprocess so the rep-1
 timing is genuinely "cold" — no prior mflux generation in the same Python
-process, no warm MLX kernel state. The main script orchestrates 6
-subprocesses (3 variants x {vanilla, wrapper}), reads their stdout JSON,
+process, no warm MLX kernel state. The main script orchestrates 4
+subprocesses (2 variants x {vanilla, wrapper}), reads their stdout JSON,
 and aggregates into _artifacts/comparison_report.json.
 
 The same script file is the orchestrator AND the per-condition worker —
@@ -19,10 +19,14 @@ selected by --condition / --variant flags. Workers print one JSON line at
 the end of stdout (their bench result); the orchestrator parses that line
 to assemble the final report.
 
-Three entries (non-distilled only):
+Two entries (non-distilled only, recommended-upstream settings):
   - flux1-dev at 25 steps, guidance=3.5
-  - flux2-klein-base-4b at 25 steps, guidance=1.0
   - flux2-klein-base-4b at 50 steps, guidance=4.0 (canonical upstream CFG)
+
+The g=1.0 row was dropped: klein-base-4b is NOT guidance-distilled, so
+running it at guidance=1.0 produces washed-out output and the wrapper
+skips zero steps (no CFG → no caching engagement). The CFG row is the
+only meaningful klein-base-4b configuration for this comparison.
 """
 
 from __future__ import annotations
@@ -73,13 +77,6 @@ VARIANTS: tuple[VariantConfig, ...] = (
         num_inference_steps=25,
         guidance=3.5,
         loader="flux1-dev",
-    ),
-    VariantConfig(
-        slug="klein-base-4b-g1",
-        variant_id="flux2-klein-base-4b",
-        num_inference_steps=25,
-        guidance=1.0,
-        loader="klein-base-4b",
     ),
     VariantConfig(
         slug="klein-base-4b-cfg",
@@ -382,6 +379,12 @@ def main() -> None:
         default=None,
         help="Override the RAM-GB field. Defaults to round(hw.memsize / 1 GiB) on macOS.",
     )
+    parser.add_argument(
+        "--only",
+        default=None,
+        help="Restrict orchestration to a single variant slug (e.g. 'klein-base-4b-cfg'). "
+        "Useful for resuming after a partial run.",
+    )
     args = parser.parse_args()
 
     if args.worker:
@@ -407,7 +410,15 @@ def main() -> None:
         "variants": {},
     }
 
-    for cfg in VARIANTS:
+    variants_to_run = tuple(v for v in VARIANTS if v.slug == args.only) if args.only else VARIANTS
+    if args.only and not variants_to_run:
+        raise SystemExit(f"--only {args.only!r} did not match any variant slug")
+
+    if args.only and report_path.exists():
+        report = json.loads(report_path.read_text())
+        print(f"Resuming from existing report at {report_path}")
+
+    for cfg in variants_to_run:
         print(
             f"\n=== {cfg.variant_id} (slug={cfg.slug}) — "
             f"{cfg.num_inference_steps} steps, guidance={cfg.guidance} ==="

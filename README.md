@@ -103,6 +103,19 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 
 ² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps and the wrapper measures 1.41× wall-clock vs vanilla (~12% from step-skipping plus the FLUX.2 `mx.compile`-path avoidance contribution); SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) runs through a per-branch gated path as of v0.4.1: the canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) skips 9/50 steps for a 1.26× wall-clock speedup vs vanilla mflux on M1 Max.
 
+## When to use mlx-teacache
+
+The wrapper helps when the underlying schedule actually has cacheable redundancy. That is the case for non-distilled FLUX schedules with enough denoising steps for adjacent transformer outputs to look similar, which is what TeaCache's gate exploits.
+
+In practice, that means:
+
+- Use mlx-teacache for **`flux1-dev`** at 20-50 steps and **`flux2-klein-base-4b`** at 20-50 steps, with or without CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
+- Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux.
+
+There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.
+
+See [COMPARISON.md](COMPARISON.md) for side-by-side images and warm-median wall-clock numbers on an M1 Max.
+
 ## Combining with mlx-taef
 
 ```python

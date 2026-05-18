@@ -3,8 +3,12 @@
 Run as: `uv run python scripts/calibrate_flux2.py --variant klein-4b`
         `uv run python scripts/calibrate_flux2.py --variant klein-9b`
         `uv run python scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin`
+        `uv run python scripts/calibrate_flux2.py --variant klein-base-9b --fit-mode origin`
 
-klein-base-9b is declared but raises NotImplementedError (wired in v0.5.0).
+klein-base-9b ships in v0.5.0 reusing klein-base-4b's polynomial verbatim.
+Run this script for klein-base-9b only if you want to override the reused
+coefficients with a fresh fit — see docs/calibration.md for when that's
+warranted.
 
 For each calibration prompt:
 - Patch `flux._predict` with a capturing wrapper that runs the full vanilla
@@ -73,14 +77,10 @@ def _model_config_klein_base_4b() -> Any:
     return ModelConfig.flux2_klein_base_4b()
 
 
-def _not_wired(release: str) -> Any:
-    def _raise() -> Any:
-        raise NotImplementedError(
-            f"This variant will be wired in {release}; currently out of scope. "
-            f"Use --variant klein-4b or --variant klein-9b."
-        )
+def _model_config_klein_base_9b() -> Any:
+    from mflux.models.common.config.model_config import ModelConfig
 
-    return _raise
+    return ModelConfig.flux2_klein_base_9b()
 
 
 _VARIANTS: dict[str, dict[str, Any]] = {
@@ -104,9 +104,13 @@ _VARIANTS: dict[str, dict[str, Any]] = {
     },
     "klein-base-9b": {
         "variant_id": "flux2-klein-base-9b",
-        "model_config_factory": _not_wired("v0.5.0"),
-        "num_inference_steps": None,
-        "output_json": None,
+        "model_config_factory": _model_config_klein_base_9b,
+        # v0.5.0 ships klein-base-9b reusing klein-base-4b's polynomial verbatim
+        # (see src/mlx_teacache/coefficients.py). Running this script is only
+        # needed if you want to override the reused coefficients with a fresh
+        # fit — see docs/calibration.md for when that's warranted.
+        "num_inference_steps": 25,
+        "output_json": "_calibration_flux2_klein_base_9b.json",
     },
 }
 

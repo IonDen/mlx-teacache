@@ -151,9 +151,11 @@ def apply_teacache(
         at default threshold on the 4-8 step schedule — wall-clock benefit
         comes from mx.compile-path avoidance, see README "How the speedup
         happens")
-      - flux2-klein-base-4b (non-distilled; calibrated at 25 steps; engages
-        the polynomial gate at guidance=1.0. CFG / guidance > 1.0 falls back
-        to vanilla mflux pending v0.4.1.)
+      - flux2-klein-base-4b, flux2-klein-base-9b (both non-distilled FLUX.2
+        Klein. Polynomial gate engages at guidance=1.0 and, per v0.4.1's
+        per-branch CFG caching, at guidance>1.0 as well. klein-base-9b
+        reuses base-4b's coefficients verbatim, validated empirically — see
+        _artifacts/validation_klein_base_9b.json.)
 
     Threshold resolution priority:
       1. Explicit caller value — ``apply_teacache(flux, rel_l1_thresh=X)`` always wins.
@@ -161,7 +163,8 @@ def apply_teacache(
          Only applied when the caller does NOT pass ``coefficients``. The per-variant
          default was tuned against the bundled polynomial; user-supplied coefficients
          get the package fallback so the threshold matches the polynomial they shipped.
-         Currently set for flux2-klein-base-4b (0.17); all other variants leave this None.
+         Currently set for flux2-klein-base-4b and flux2-klein-base-9b (both 0.17);
+         all other variants leave this None.
       3. Package-wide fallback of 0.20, used when neither of the above apply.
 
     See docs/superpowers/specs/2026-05-14-mlx-teacache-design.md §6.1 for the

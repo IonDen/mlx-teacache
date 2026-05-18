@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-18T07:02Z",
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.4.0",
+    "mlx_teacache_version": "0.1.0",
+    "mflux_version": "0.17.5",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "prompt": "Portrait of a young woman with auburn hair and green eyes, soft golden-hour window light, photorealistic, shallow depth of field, 50mm prime lens, subtle freckles, neutral background, cinematic color grading.",
+  "seed": 42,
+  "height": 1024,
+  "width": 768,
+  "reps_per_condition": 3,
+  "isolation": "subprocess-per-condition",
+  "variants": {
+    "flux1-dev": {
+      "variant_id": "flux1-dev",
+      "num_inference_steps": 25,
+      "guidance": 3.5,
+      "vanilla": {
+        "rep_seconds": [
+          237.96820179198403,
+          233.94918287498876,
+          232.413415041985
+        ],
+        "cold_seconds": 237.96820179198403,
+        "warm_median_seconds": 233.18129895848688
+      },
+      "wrapper": {
+        "rep_seconds": [
+          200.12005654198583,
+          199.75026800000342,
+          196.75738862500293
+        ],
+        "cold_seconds": 200.12005654198583,
+        "warm_median_seconds": 198.25382831250317,
+        "skipped_per_rep": [
+          4,
+          4,
+          4
+        ],
+        "computed_per_rep": [
+          19,
+          19,
+          19
+        ],
+        "rel_l1_thresh_used": 0.2
+      },
+      "speedup_warm": 1.1761755167266092,
+      "speedup_cold": 1.1891271964639762,
+      "image_paths": {
+        "vanilla": "_artifacts/comparison/flux1-dev/vanilla.webp",
+        "wrapper": "_artifacts/comparison/flux1-dev/wrapper.webp"
+      }
+    },
+    "klein-base-4b-cfg": {
+      "variant_id": "flux2-klein-base-4b",
+      "num_inference_steps": 50,
+      "guidance": 4.0,
+      "vanilla": {
+        "rep_seconds": [
+          576.2358970000059,
+          600.1176347080036,
+          603.0950726660085
+        ],
+        "cold_seconds": 576.2358970000059,
+        "warm_median_seconds": 601.606353687006
+      },
+      "wrapper": {
+        "rep_seconds": [
+          486.4021731669782,
+          503.05899770901306,
+          503.57297800004017
+        ],
+        "cold_seconds": 486.4021731669782,
+        "warm_median_seconds": 503.3159878545266,
+        "skipped_per_rep": [
+          8,
+          8,
+          8
+        ],
+        "computed_per_rep": [
+          40,
+          40,
+          40
+        ],
+        "rel_l1_thresh_used": 0.17
+      },
+      "speedup_warm": 1.1952856022942158,
+      "speedup_cold": 1.1846902188946193,
+      "image_paths": {
+        "vanilla": "_artifacts/comparison/klein-base-4b-cfg/vanilla.webp",
+        "wrapper": "_artifacts/comparison/klein-base-4b-cfg/wrapper.webp"
+      }
+    }
+  }
+}

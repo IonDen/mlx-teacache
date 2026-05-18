@@ -70,9 +70,9 @@ def test_identify_flux2_klein_base_4b():
     assert identify_variant(_FakeFlux2Klein("flux2-klein-base-4b")) == "flux2-klein-base-4b"
 
 
-def test_flux2_klein_base_9b_rejected():
-    with pytest.raises(IncompatibleModelError):
-        identify_variant(_FakeFlux2Klein("flux2-klein-base-9b"))
+def test_identify_flux2_klein_base_9b():
+    """v0.5.0 added klein-base-9b as a supported variant."""
+    assert identify_variant(_FakeFlux2Klein("flux2-klein-base-9b")) == "flux2-klein-base-9b"
 
 
 def test_completely_unknown_type_rejected():

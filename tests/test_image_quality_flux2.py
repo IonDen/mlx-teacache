@@ -86,12 +86,12 @@ def _gen_kwargs_klein(
     runtime usage). base-4b uses the calibration-time 25-step schedule.
     cfg=True selects the upstream CFG recipe on base-4b: guidance=4.0 at
     the calibrated 50-step schedule. All other variants are unchanged."""
-    if variant_id == "flux2-klein-base-4b" and cfg:
+    if variant_id in ("flux2-klein-base-4b", "flux2-klein-base-9b") and cfg:
         num_inference_steps = 50
         guidance = 4.0
     elif variant_id in ("flux2-klein-4b", "flux2-klein-9b"):
         num_inference_steps = 8
-    elif variant_id == "flux2-klein-base-4b":
+    elif variant_id in ("flux2-klein-base-4b", "flux2-klein-base-9b"):
         num_inference_steps = 25
     else:
         raise ValueError(f"unsupported variant_id for _gen_kwargs_klein: {variant_id!r}")
@@ -131,7 +131,15 @@ def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: 
     return img_np
 
 
-@pytest.fixture(scope="module", params=["flux2-klein-4b", "flux2-klein-9b", "flux2-klein-base-4b"])
+@pytest.fixture(
+    scope="module",
+    params=[
+        "flux2-klein-4b",
+        "flux2-klein-9b",
+        "flux2-klein-base-4b",
+        "flux2-klein-base-9b",
+    ],
+)
 def flux2_klein(request) -> tuple[Any, str]:
     """Returns (flux instance, variant_id) so tests can pass variant_id to _gen_kwargs_klein."""
     from mflux.models.common.config.model_config import ModelConfig
@@ -144,6 +152,8 @@ def flux2_klein(request) -> tuple[Any, str]:
         cfg = ModelConfig.flux2_klein_9b()
     elif variant_id == "flux2-klein-base-4b":
         cfg = ModelConfig.flux2_klein_base_4b()
+    elif variant_id == "flux2-klein-base-9b":
+        cfg = ModelConfig.flux2_klein_base_9b()
     else:
         pytest.fail(f"unhandled variant_id={variant_id!r}")
     flux = Flux2Klein(quantize=4, model_config=cfg)

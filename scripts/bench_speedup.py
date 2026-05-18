@@ -19,9 +19,10 @@ Run as:
   uv run python scripts/bench_speedup.py --variant klein-4b
   uv run python scripts/bench_speedup.py --variant klein-base-4b   # 50-step, g=4.0 (v0.4.1+)
   uv run python scripts/bench_speedup.py --variant klein-base-4b --guidance 1.0 --num-inference-steps 25  # v0.4.0 row
+  uv run python scripts/bench_speedup.py --variant klein-base-9b   # 50-step, g=4.0 (v0.5.0)
   uv run python scripts/bench_speedup.py --variant flux1-dev
 
-Three-way mode (--three-way, default on klein-base-4b) additionally runs a
+Three-way mode (--three-way, default on klein-base-4b and klein-base-9b) additionally runs a
 wrapped-no-gate condition (rel_l1_thresh=0.0) to separate the v0.4
 compile-avoidance effect from the v0.4.1 gating effect:
   A = vanilla                (no wrapper)
@@ -66,6 +67,8 @@ def _load_flux2_klein(variant: str) -> Any:
         cfg = ModelConfig.flux2_klein_9b()
     elif variant == "klein-base-4b":
         cfg = ModelConfig.flux2_klein_base_4b()
+    elif variant == "klein-base-9b":
+        cfg = ModelConfig.flux2_klein_base_9b()
     else:
         raise ValueError(f"unsupported klein variant: {variant!r}")
     flux = Flux2Klein(quantize=4, model_config=cfg)
@@ -96,6 +99,14 @@ def _variant_config(variant: str) -> dict[str, Any]:
     if variant == "klein-base-4b":
         # Canonical upstream recipe (v0.4.1+). Override with
         # --guidance 1.0 --num-inference-steps 25 to reproduce the v0.4.0 row.
+        return {
+            "loader": _load_flux2_klein,
+            "num_inference_steps": 50,
+            "guidance": 4.0,
+        }
+    if variant == "klein-base-9b":
+        # Canonical upstream recipe — same as base-4b. Coefficients reused
+        # from base-4b verbatim (see src/mlx_teacache/coefficients.py).
         return {
             "loader": _load_flux2_klein,
             "num_inference_steps": 50,
@@ -145,7 +156,14 @@ def main() -> None:
     parser.add_argument(
         "--variant",
         required=True,
-        choices=["klein-4b", "klein-9b", "klein-base-4b", "flux1-dev", "flux1-schnell"],
+        choices=[
+            "klein-4b",
+            "klein-9b",
+            "klein-base-4b",
+            "klein-base-9b",
+            "flux1-dev",
+            "flux1-schnell",
+        ],
     )
     parser.add_argument("--reps", type=int, default=3, help="timed reps per condition")
     parser.add_argument(
@@ -164,7 +182,7 @@ def main() -> None:
         "--three-way",
         action="store_true",
         default=None,
-        help="Run vanilla + wrapped-no-gate + wrapped-gated conditions. Default True on klein-base-4b.",
+        help="Run vanilla + wrapped-no-gate + wrapped-gated conditions. Default True on klein-base-4b and klein-base-9b.",
     )
     parser.add_argument(
         "--report",
@@ -187,7 +205,9 @@ def main() -> None:
     num_inference_steps = (
         args.num_inference_steps if args.num_inference_steps is not None else cfg["num_inference_steps"]
     )
-    three_way = args.three_way if args.three_way is not None else (args.variant == "klein-base-4b")
+    three_way = (
+        args.three_way if args.three_way is not None else args.variant in ("klein-base-4b", "klein-base-9b")
+    )
 
     bench_dir = args.images_dir / args.variant
 

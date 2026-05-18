@@ -187,6 +187,31 @@ _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]
             default_thresh=0.17,
         ),
     ),
+    # flux2-klein-base-9b at the 50-step CFG canonical recipe (non-distilled).
+    # Coefficients REUSED VERBATIM from flux2-klein-base-4b (same tuple object —
+    # the test in tests/test_coefficients.py asserts this equality). Justification:
+    # same architecture family (FLUX.2 Klein), same calibration recipe (25 steps,
+    # guidance=1.0, origin-constrained polyfit). The reuse is validated
+    # empirically before each release of v0.5.x — see
+    # _artifacts/validation_klein_base_9b.json for the SSIM ≥ 0.95 evidence at
+    # 50 steps + guidance=4.0. default_thresh=0.17 likewise reused from base-4b's
+    # v0.4.0 SSIM sweep (see comment on base-4b entry above).
+    "flux2-klein-base-9b": (
+        _FLUX2_KLEIN_BASE_4B_COEFFS,
+        Provenance(
+            source="builtin",
+            revision="in-repo-2026-05-18-reuse-base-4b",
+            calibration_dataset=(
+                "REUSED from flux2-klein-base-4b — same architecture family + same recipe "
+                "(10 prompts × 25 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0, "
+                "origin-constrained polyfit); validated empirically at 50 steps + guidance=4.0"
+            ),
+            fit_metric="constrained-LSQ R^2 on consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
+            fit_metric_value=0.10643408169124158,
+            reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/validate_klein_base_9b.py",
+            default_thresh=0.17,
+        ),
+    ),
 }
 
 

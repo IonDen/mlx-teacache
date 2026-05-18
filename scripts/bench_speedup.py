@@ -196,7 +196,27 @@ def main() -> None:
         default=Path(__file__).parent.parent / "tests" / "_artifacts" / "bench_images",
         help="root directory for saved bench images (one subdir per variant)",
     )
+    parser.add_argument(
+        "--mlx-memory-cap-gb",
+        type=int,
+        default=None,
+        help=(
+            "MLX memory limit applied via mx.metal.set_memory_limit BEFORE the model "
+            "loads. Required for 9B+ variants on 32 GB machines — a previous unguarded "
+            "klein-base-9b run crashed the system with OOM. Default: 24 on klein-base-9b, "
+            "unset (MLX default) on smaller variants."
+        ),
+    )
     args = parser.parse_args()
+
+    # Memory guardrail. See CLAUDE.md "Memory guardrails for heavy generations on 32 GB".
+    # Set BEFORE the model load.
+    cap_gb = args.mlx_memory_cap_gb
+    if cap_gb is None and args.variant == "klein-base-9b":
+        cap_gb = 24
+    if cap_gb is not None:
+        mx.metal.set_memory_limit(int(cap_gb * 1024**3))
+        print(f"MLX memory cap set to {cap_gb} GB (mx.metal.set_memory_limit).")
 
     cfg = _variant_config(args.variant)
     print(f"Loading {args.variant} (quantize=4)...")
@@ -229,6 +249,9 @@ def main() -> None:
         suffix = f"  (saved {save.name})" if save else ""
         print(f"  rep {i + 1}: {t:.2f}s{suffix}")
 
+    # Free intermediates between conditions (CLAUDE.md "Memory guardrails").
+    mx.metal.clear_cache()
+
     nogate_times: list[float] = []
     if three_way:
         print(f"\n== Wrapped (no gate, rel_l1_thresh=0) x{args.reps} ==")
@@ -244,6 +267,7 @@ def main() -> None:
                 nogate_times.append(t)
             suffix = f"  (saved {save.name})" if save else ""
             print(f"  rep {i + 1}: {t:.2f}s  (rel_l1_thresh=0, no skipping){suffix}")
+        mx.metal.clear_cache()
 
     print(f"\n== TeaCache wrapper x{args.reps} ==")
     wrapper_times: list[float] = []

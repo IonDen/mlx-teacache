@@ -80,3 +80,38 @@ captures an architectural property (per-block residual sensitivity), so the
 schedule slice should not change the fit much. A dedicated img2img
 calibration may follow in v0.2.x if SSIM gates on real img2img workloads
 show drift.
+
+## Reusing coefficients across model sizes within an architecture family
+
+v0.5.0 ships `flux2-klein-base-9b` reusing the polynomial calibrated for
+`flux2-klein-base-4b` verbatim. Two conditions made this defensible:
+
+1. **Same architecture family.** Both variants use the FLUX.2 Klein
+   transformer (same block layout; different depth and hidden size). The
+   polynomial maps cumulative input-modulation rel-L1 onto output rel-L1,
+   a per-step property of the block structure rather than the parameter
+   count.
+2. **Same calibration recipe.** Both were calibrated (or in 9B's case,
+   would be calibrated) at 25 inference steps, guidance=1.0,
+   origin-constrained polyfit. A different recipe — say 50 steps with
+   guidance=4.0 — traces a different trajectory through the latent space
+   and produces a different polynomial; do not transfer fits across
+   recipes (this is the v0.4.1 plan-audit Finding 3 lesson).
+
+The reuse is converted from assumption to fact by a one-shot validation
+pass before merge: `scripts/validate_klein_base_9b.py` generates one
+fixed prompt at the canonical shipping recipe (50 steps + guidance=4.0)
+both vanilla and wrapped, decodes through the VAE, and asserts SSIM ≥
+0.95. The evidence lives at `_artifacts/validation_klein_base_9b.json`.
+
+If the validation fails (SSIM too low, or wrapper skips zero steps at the
+shared default threshold), the release holds and a fresh calibration runs
+through `scripts/calibrate_flux2.py --variant klein-base-9b --fit-mode origin`
+in a follow-up branch.
+
+**When this pattern applies.** Same architecture + same recipe + empirical
+validation. Reasonable for sibling variants within a generation (4B / 9B
+within FLUX.2 Klein base). Not reasonable across different recipes
+(g=1.0 → g=4.0 needs its own fit) or across families (FLUX.1 → FLUX.2
+needs its own fit). When in doubt, calibrate fresh; the script is fast
+relative to release timelines.

@@ -7,6 +7,32 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-19
+
+Adds `flux2-klein-base-9b` (non-distilled FLUX.2 Klein 9B, FLUX Non-Commercial license) as a supported variant. Ships by reusing `flux2-klein-base-4b`'s polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared architecture family and identical 25-step / g=1.0 calibration recipe — then validating empirically at the canonical 50-step CFG recipe before tagging.
+
+### Added
+- `flux2-klein-base-9b` in `src/mlx_teacache/integrations/mflux/detect.py` (`VariantId` Literal + `_SUPPORTED` tuple + alias branch).
+- `flux2-klein-base-9b` registry entry in `src/mlx_teacache/coefficients.py` pointing at the shared `_FLUX2_KLEIN_BASE_4B_COEFFS` tuple. Provenance comment cites the reuse rationale and links the validation evidence path.
+- `scripts/validate_klein_base_9b.py` — one-shot release-gate harness. Generates one fixed prompt at 50 steps + g=4.0 vanilla + wrapped, decodes through the VAE, computes SSIM, writes `_artifacts/validation_klein_base_9b.json`. Exits non-zero if SSIM < 0.95.
+- `klein-base-9b` choice in `scripts/bench_speedup.py` (50 steps + g=4.0; three-way mode default-on).
+- `klein-base-9b` parametrization in `tests/test_parity_flux2.py` and `tests/test_image_quality_flux2.py` (real-weight test suites, behind `HF_TOKEN`).
+
+### Changed
+- `tests/test_detect.py`: v0.4 rejection test replaced with acceptance test.
+- `tests/test_coefficients.py`: new unit tests asserting `flux2-klein-base-9b` coefficients are identity-equal to `flux2-klein-base-4b` and `default_thresh == 0.17` (catches accidental drift from the intentional reuse).
+- `scripts/calibrate_flux2.py`: `klein-base-9b` is no longer stubbed with `NotImplementedError`. The script is runnable for users who want to override the reused coefficients with a fresh fit; v0.5.0 itself does not run it.
+- README "Supported models" gains a `flux2-klein-base-9b` row with a footnote covering the license and the validation evidence. README "When to use" updated to mention both non-distilled Klein variants.
+
+### Measured
+
+- **Validation SSIM** (50 steps, guidance=4.0, seed=42, 1024×768, M1 Max 32GB, bf16, q4): _TBD: validation pass on 2026-05-19_.
+- **Three-way bench**: _TBD: bench run on 2026-05-19_. Numbers will distinguish gating contribution from `mx.compile`-path avoidance.
+
+### Why the coefficient reuse is honest
+
+`flux2-klein-base-4b` and `flux2-klein-base-9b` share the same FLUX.2 Klein transformer architecture (different depth / hidden size, same block layout) and the same non-distilled 25-step / guidance=1.0 calibration recipe. The polynomial maps cumulative input-modulation rel-L1 onto output rel-L1, a per-step property of the architecture rather than the parameter count. Validating empirically at the shipping recipe before merge converts this "should transfer" assumption into a measured fact. If the validation fails, v0.5.0 holds and a fresh calibration runs in a follow-up branch.
+
 ## [0.4.1] — 2026-05-17
 
 CFG-engaged TeaCache for FLUX.2. The canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) on `flux2-klein-base-4b` now runs through a gated forward with one shared decision per step and a cached residual per branch. Measured 1.26× wall-clock vs vanilla mflux on M1 Max (1.16× from step-skipping, 1.09× from `mx.compile`-path avoidance; 9/50 skips stable across 3 reps). SSIM ≥ 0.85 PR-gate passed; cosine ≥ 0.97 parity vs real mflux at threshold=0.

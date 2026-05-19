@@ -9,7 +9,7 @@
 
 Restructure `src/mlx_teacache/` from "shared everything, per-variant config" to **per-variant assemblies + shared algorithmic kernel**. Six supported variants (`flux1-dev`, `flux1-schnell`, `flux2-klein-4b`, `flux2-klein-9b`, `flux2-klein-base-4b`, `flux2-klein-base-9b`) each get their own directory under `src/mlx_teacache/variants/`. Pure-algorithm primitives (polynomial gate, CFG combination math, state machine, lifecycle FSM, stats types) move to `src/mlx_teacache/_kernel/`. Variant directories own integration, config, detection, and tests.
 
-Big-bang in v0.6.0. Public API (`apply_teacache`, `TeaCacheHandle`, `Provenance`, exception types) stays unchanged — no user-facing breakage.
+Big-bang in v0.6.0. Public API stays unchanged for users at every import path mlx-teacache exposes today — not just the `__all__` re-exports from the package root, but also `from mlx_teacache.stats import ...` and `from mlx_teacache.coefficients import Provenance`. Compatibility shims preserve those import paths in v0.6.0; deprecation cycle is a v0.7.x decision.
 
 ## Why this refactor, and why now
 
@@ -33,12 +33,16 @@ Four pain points the user surfaced explicitly during brainstorming. Each is addr
 
 ### Top-level layout
 
+**Runtime package** (shipped in the wheel, typechecked):
+
 ```
 src/mlx_teacache/
 ├── __init__.py                     # public exports (unchanged surface)
 ├── api.py                          # apply_teacache — variant dispatch
 ├── handle.py                       # TeaCacheHandle (context manager, variant-agnostic)
 ├── errors.py                       # exception hierarchy (unchanged)
+├── stats.py                        # COMPATIBILITY SHIM — re-exports from _kernel.stats
+├── coefficients.py                 # COMPATIBILITY SHIM — re-exports Provenance from _kernel.stats
 ├── _kernel/                        # pure-algorithm primitives
 │   ├── __init__.py
 │   ├── gate.py
@@ -47,21 +51,41 @@ src/mlx_teacache/
 │   ├── lifecycle.py
 │   └── stats.py
 └── variants/
-    ├── __init__.py                 # walks subdirs at import time, populates _REGISTRY
+    ├── __init__.py                 # eager: walks subdirs, registers META + matches() ONLY
     ├── flux1_dev/
-    │   ├── __init__.py             # exports META, matches, apply
-    │   ├── config.py               # COEFFICIENTS, DEFAULT_THRESH, RECIPES, LICENSE
-    │   ├── integration.py          # forward wrapper, mflux instance-attr swap, restore
-    │   ├── detect.py               # matches(flux) -> bool
-    │   └── tests/
-    │       ├── test_integration.py
-    │       └── test_parity.py
+    │   ├── __init__.py             # eager imports: META, matches. integration is LAZY.
+    │   ├── config.py               # eager: COEFFICIENTS, DEFAULT_THRESH, RECIPES, LICENSE, META
+    │   ├── detect.py               # eager: matches(flux) — no mflux imports
+    │   └── integration.py          # LAZY: forward wrapper + mflux instance-attr swap + restore.
+    │                               # Loaded only after matches() wins in apply_teacache().
     ├── flux1_schnell/...
     ├── flux2_klein_4b/...          # distilled, no CFG path
     ├── flux2_klein_9b/...          # distilled, no CFG path
     ├── flux2_klein_base_4b/...     # non-distilled, CFG per-branch
     └── flux2_klein_base_9b/...     # non-distilled, CFG per-branch (reuses base-4b polynomial)
 ```
+
+**Tests** (top-level, not shipped, not typechecked under `src/`):
+
+```
+tests/
+├── conftest.py                     # shared fixtures
+├── test_public_api.py              # public-surface snapshot (see Quality gates)
+├── _kernel/                        # kernel unit tests
+│   ├── test_gate.py
+│   ├── test_cfg.py
+│   ├── test_state.py
+│   ├── test_lifecycle.py
+│   └── test_stats.py
+└── variants/                       # per-variant tests
+    ├── flux1_dev/
+    │   ├── test_integration.py
+    │   └── test_parity.py
+    ├── flux1_schnell/...
+    └── ... (one subdir per variant)
+```
+
+The runtime tree stays under `src/`; tests stay at the top level so the wheel doesn't ship test code and mypy's `files = ["src/mlx_teacache"]` target stays clean. Pytest discovers `tests/variants/<name>/` automatically; no rootdir reconfiguration needed.
 
 ### Kernel surface
 
@@ -125,16 +149,32 @@ The kernel is small on purpose: ~600-1000 lines total, all pure / testable witho
 
 ### Variant interface
 
-Every `variants/<name>/__init__.py` re-exports three names. The package registry walks `variants/` at import time and registers each module by `META["variant_id"]`.
+Every variant exposes three things to the registry, but with a strict lazy-import rule: `config.py` and `detect.py` must import without `mflux` installed; `integration.py` is the only module allowed to touch mflux internals, and it is imported lazily on first dispatch.
 
 ```python
 # variants/flux1_dev/__init__.py
 from .config import META
 from .detect import matches
-from .integration import apply
+# integration is NOT imported here. apply_teacache loads it lazily.
 
-__all__ = ["META", "matches", "apply"]
+__all__ = ["META", "matches"]
+
+
+def _load_integration() -> "Callable[..., TeaCacheHandle]":
+    """Lazy importer used by the top-level dispatcher. Raises a clear,
+    package-rooted error if mflux is missing."""
+    try:
+        from .integration import apply
+    except ImportError as e:
+        raise IncompatibleModelError(
+            actual_type="(mflux not installed)",
+            actual_model_name=None,
+            supported=[META["variant_id"]],
+        ) from e
+    return apply
 ```
+
+The base-package import contract is enforced by a test (`tests/test_public_api.py::test_base_import_without_mflux_extra`) that uninstalls the `[mflux]` extra in a subprocess and confirms `import mlx_teacache; from mlx_teacache import apply_teacache` succeeds.
 
 ```python
 # variants/flux1_dev/config.py
@@ -165,30 +205,74 @@ def matches(flux: object) -> bool:
 ```python
 # variants/flux1_dev/integration.py
 from mlx_teacache import _kernel
+from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from .config import COEFFICIENTS, DEFAULT_THRESH
 
 def apply(flux, *, rel_l1_thresh: float | None = None, ...) -> TeaCacheHandle:
     """Wire up the FLUX.1 forward wrapper. Returns a context-manager handle.
-    On exit, restores flux to its pristine state."""
+    On exit, the handle runs the patch's rollback callbacks; flux is pristine."""
+    # ...install wrapper...
+    patch = VariantPatch(
+        rollbacks=[<callable that reverses the instance-attribute swap>, ...],
+        finalizers=[<callable that finalizes stats lifecycle>, ...],
+    )
+    return TeaCacheHandle(patch=patch, stats=..., provenance=...)
 ```
+
+### Handle contract: `VariantPatch`
+
+`TeaCacheHandle.restore()` is variant-agnostic. It runs the patch's rollback callbacks in reverse-install order, then runs the finalizers, then marks the handle as torn down. It does NOT know anything about FLUX.1 vs FLUX.2 vs CFG-per-branch shapes — that knowledge lives in the variant's `integration.py` and gets captured into the `VariantPatch` callbacks at install time.
+
+```python
+# src/mlx_teacache/handle.py
+@dataclass
+class VariantPatch:
+    rollbacks: list[Callable[[], None]]   # reverse the mutations apply() made to flux
+    finalizers: list[Callable[[], None]]  # stats finalization, sentinel cleanup, etc.
+
+class TeaCacheHandle:
+    def __init__(self, *, patch: VariantPatch, stats: TeaCacheStats, provenance: Provenance):
+        self._patch = patch
+        self.stats = stats
+        self.provenance = provenance
+        self._torn_down = False
+
+    def __enter__(self) -> TeaCacheHandle: return self
+    def __exit__(self, *exc) -> None: self.restore()
+
+    def restore(self) -> None:
+        if self._torn_down:
+            return
+        for rollback in reversed(self._patch.rollbacks):
+            rollback()
+        for finalize in self._patch.finalizers:
+            finalize()
+        self._torn_down = True
+```
+
+This is the contract that makes "new variants land without touching shared code" actually work. A variant that introduces a different mutation shape (e.g., wrapping a Module instead of swapping an instance attribute) just registers a different rollback callable; the handle does not change.
 
 ### Top-level dispatch
 
 ```python
 # src/mlx_teacache/api.py
-from mlx_teacache.variants import _REGISTRY
+from mlx_teacache.variants import _REGISTRY   # populated by variants/__init__.py
 from mlx_teacache.errors import IncompatibleModelError
 
 def apply_teacache(flux, **kwargs) -> TeaCacheHandle:
-    for variant_id, module in _REGISTRY.items():
-        if module.matches(flux):
-            return module.apply(flux, **kwargs)
+    for entry in _REGISTRY.values():
+        # entry = {"META": ..., "matches": <fn>, "load_integration": <lazy fn>}
+        if entry["matches"](flux):
+            apply = entry["load_integration"]()   # triggers mflux import for this variant only
+            return apply(flux, **kwargs)
     raise IncompatibleModelError(
         actual_type=type(flux).__name__,
         actual_model_name=getattr(getattr(flux, "model_config", None), "model_name", None),
         supported=sorted(_REGISTRY.keys()),
     )
 ```
+
+The `_REGISTRY` is built once at `import mlx_teacache.variants` time, but only walks `config.py` (for `META`) and `detect.py` (for `matches`) — both of which must be mflux-free. `integration.py` is loaded lazily inside `apply_teacache` on the first matching call. This is the contract that keeps `from mlx_teacache import apply_teacache` working on machines that installed the base package without the `[mflux]` extra.
 
 ### Coefficient reuse (the klein-base-9b case)
 
@@ -205,20 +289,27 @@ The import statement makes the reuse visible at review time. A test in `flux2_kl
 
 ### What stays public, what becomes internal
 
-**Stays public** (no user-visible change):
-- `apply_teacache(flux, ...)` — same signature, same return type, same side effects.
-- `TeaCacheHandle` — same context-manager protocol, same `.stats`, `.provenance`, `.restore()`.
-- `Provenance` — same dataclass (moves to `_kernel/stats.py` but re-exported from package root).
-- All exception types in `errors.py`.
-- `__version__`.
+**Stays public** (no user-visible change at any import path that exists today):
 
-**Becomes internal** (moves under `_kernel/` or `variants/`):
-- Forward-wrapper code.
-- State machine.
-- Variant detection mechanism.
-- Coefficient registry.
+| Import path | v0.6.0 source | Note |
+|---|---|---|
+| `from mlx_teacache import apply_teacache` | `mlx_teacache.api` | unchanged signature + behavior |
+| `from mlx_teacache import TeaCacheHandle` | `mlx_teacache.handle` | adds `.patch` internal attr; public surface unchanged |
+| `from mlx_teacache import TeaCacheStats, GenerationStats, StepDecision` | re-export from `_kernel.stats` | unchanged dataclass shapes |
+| `from mlx_teacache import Provenance` | re-export from `_kernel.stats` | unchanged |
+| `from mlx_teacache import <exception>` | `mlx_teacache.errors` | unchanged hierarchy |
+| `from mlx_teacache.stats import ...` | **compatibility shim** at `src/mlx_teacache/stats.py` re-exporting from `_kernel.stats` | preserves existing import path |
+| `from mlx_teacache.coefficients import Provenance` | **compatibility shim** at `src/mlx_teacache/coefficients.py` re-exporting from `_kernel.stats` | preserves existing import path |
+| `mlx_teacache.__version__` | `mlx_teacache._version` | unchanged |
 
-If a downstream report surfaces an internal import (e.g., `from mlx_teacache.coefficients import _REGISTRY`), we add a deprecation-shim module that re-exports under the old path with a `DeprecationWarning`. Not part of v0.6.0 unless someone needs it.
+The two shim modules contain only re-exports — no logic, no `_REGISTRY` access. They exist so users who did `from mlx_teacache.stats import TeaCacheStats` in v0.5.x keep working. Whether to emit `DeprecationWarning` from the shims is a v0.7.x decision; v0.6.0 ships them silent.
+
+**Becomes internal** (moves under `_kernel/` or `variants/`; no compatibility shim because there is no documented user-facing import path today):
+
+- Forward-wrapper code (was `integrations/mflux/forward.py`, `flux2.py`)
+- State machine internals (was `state.py`, `lifecycle.py` at top level)
+- Variant-detection internals (was `integrations/mflux/detect.py`)
+- The coefficient `_REGISTRY` mapping itself (the `Provenance` *type* keeps a compat shim; the registry data structure becomes a per-variant `config.py`)
 
 ## Data flow
 
@@ -250,8 +341,10 @@ For inference (unchanged at the user-facing layer):
 ## Quality gates
 
 - **Numerical equivalence with v0.5.0.** Per-variant baseline workloads must produce equivalent output (bit-exact for pure-core, SSIM ≥ 0.85 for real-weight, bench within 5%). Any divergence is a hard merge block.
-- **Public API surface unchanged.** A diff of public symbols (`mlx_teacache.__all__` + the docstrings of exported types) shows no removed names and no signature changes.
-- **No legacy code paths.** The old `integrations/mflux/forward.py`, `flux2.py`, `coefficients.py`, `state.py`, `lifecycle.py`, `stats.py` are deleted as part of the PR. v0.6.0 is the clean cut. (If a downstream import surfaces, we add a deprecation shim in v0.6.1.)
+- **Public-import-path surface unchanged.** A test (`tests/test_public_api.py`) imports every documented path from v0.5.0 (`from mlx_teacache import apply_teacache, TeaCacheHandle, TeaCacheStats, GenerationStats, StepDecision, Provenance`, plus every exception type, plus `from mlx_teacache.stats import TeaCacheStats`, plus `from mlx_teacache.coefficients import Provenance`) and asserts the resolved objects are callable / instantiable with the same shape as v0.5.0. The gate is import-path-level, not just `__all__`-level.
+- **Base-package import works without `[mflux]` extra.** A test runs `python -c "from mlx_teacache import apply_teacache"` in a subprocess that lacks mflux installed (uses `monkeypatch` on `sys.modules` to simulate, or a subprocess in an isolated venv if the CI image supports it). Must succeed. Catches accidental eager-mflux-import regressions.
+- **`VariantPatch` contract.** Each variant's `apply()` returns a `TeaCacheHandle` whose `.restore()` runs only the variant's registered rollback + finalizer callbacks. Shared handle code has zero `if variant == "..."` branches. Enforced by a static check in `tests/test_public_api.py` (greps the handle module).
+- **Legacy code paths deleted.** The old `integrations/mflux/forward.py`, `flux2.py`, `state.py` (top-level), `lifecycle.py` (top-level) are deleted as part of the PR. The OLD `coefficients.py` and `stats.py` modules at the top level are KEPT as compatibility shims (re-exports only).
 - **Three-way bench attribution lands for klein-base-9b.** The bench refactor's headline output is the clean split between gating contribution and `mx.compile`-path avoidance contribution. README footnote ³ + CHANGELOG v0.6.0 carry the measured numbers.
 
 ## Risks and mitigations
@@ -293,15 +386,19 @@ Per the release-flow rule: PR opens, human merges on GitHub, tag-push to PyPI is
 
 ## Acceptance criteria
 
-- [ ] `src/mlx_teacache/_kernel/` exists with pure-algorithm primitives. No mflux imports.
-- [ ] `src/mlx_teacache/variants/<name>/` exists for all six variants. Each exports `META`, `matches`, `apply`.
-- [ ] `apply_teacache(flux)` dispatches via `_REGISTRY`. Unsupported variants raise `IncompatibleModelError` with the same message shape as v0.5.0.
-- [ ] Numerical-equivalence run committed at `_artifacts/v0.6.0-baseline/` showing per-variant equivalence vs v0.5.0.
+- [ ] `src/mlx_teacache/_kernel/` exists with pure-algorithm primitives. No mflux imports anywhere under `_kernel/`.
+- [ ] `src/mlx_teacache/variants/<name>/` exists for all six variants. Each has `config.py` (mflux-free, exports `META`), `detect.py` (mflux-free, exports `matches`), `integration.py` (mflux-touching, lazy-imported).
+- [ ] `src/mlx_teacache/stats.py` and `src/mlx_teacache/coefficients.py` exist as compatibility shims that re-export from `_kernel.stats`. No logic, no registry access, no behavior — just `from mlx_teacache._kernel.stats import ...` re-exports.
+- [ ] `apply_teacache(flux)` dispatches via `_REGISTRY` walking metadata + `matches`. Integration module is lazy-imported only on first matching call.
+- [ ] `TeaCacheHandle` accepts a `VariantPatch` (rollbacks + finalizers). `restore()` runs the patch's callbacks; the handle source has zero `if variant == "..."` branches.
+- [ ] Numerical-equivalence run committed at `_artifacts/v0.6.0-baseline/` showing per-variant equivalence vs v0.5.0 (bit-exact pure-core, SSIM ≥ 0.85 real-weight, bench within 5%).
 - [ ] Three-way bench on klein-base-9b under the new subprocess-per-rep harness produces clean attribution. Numbers land in README footnote ³ and CHANGELOG v0.6.0.
-- [ ] `tests/test_public_api.py` confirms the public surface didn't drift.
-- [ ] Legacy modules (`integrations/mflux/forward.py`, `flux2.py`, top-level `coefficients.py`, `state.py`, `lifecycle.py`, `stats.py`) are deleted.
-- [ ] README "Supported models" table generated from variant `META` dicts.
-- [ ] CHANGELOG v0.6.0 frames the refactor honestly (architectural shift, no user-facing changes, future-variant velocity is the payoff).
+- [ ] `tests/test_public_api.py` snapshots every v0.5.0 documented import path (including `mlx_teacache.stats.*` and `mlx_teacache.coefficients.Provenance`) and asserts shape equivalence.
+- [ ] `tests/test_public_api.py::test_base_import_without_mflux_extra` runs `import mlx_teacache; from mlx_teacache import apply_teacache` in a subprocess that lacks mflux. Must succeed.
+- [ ] Legacy code-path modules deleted: `integrations/mflux/forward.py`, `integrations/mflux/flux2.py`, top-level `state.py`, top-level `lifecycle.py`. Top-level `stats.py` and `coefficients.py` are KEPT as shims.
+- [ ] Tests live under top-level `tests/_kernel/` and `tests/variants/<name>/`, not under `src/mlx_teacache/`. The wheel does not ship test code; mypy's `src/mlx_teacache` target stays clean.
+- [ ] README "Supported models" table generated from variant `META` dicts via `docs/_generate_supported_models.py`.
+- [ ] CHANGELOG v0.6.0 frames the refactor honestly (architectural shift, no user-facing changes at any v0.5.x import path, future-variant velocity is the payoff).
 - [ ] ROADMAP: v0.6.0 moves to Released; new Active item if any.
 - [ ] PR opens with three-way bench numbers and per-variant validation evidence in the body.
 
@@ -310,3 +407,12 @@ Per the release-flow rule: PR opens, human merges on GitHub, tag-push to PyPI is
 - **Bench script per-variant module or shared dispatcher?** v0.6.0 keeps the shared dispatcher (`scripts/bench_speedup.py` reads `_REGISTRY`); per-variant bench modules are deferred. The variant's `META["recipes"]["default"]` drives the bench config.
 - **`docs/variants/<name>.md` content scope.** Each file has: license + obligations, recommended recipes, memory cap hint, validation evidence path, the COMPARISON.md row link, any model-specific quirks. The README footnote-³-style prose becomes the per-variant doc.
 - **Generated docs.** A small `docs/_generate_supported_models.py` reads `_REGISTRY` and emits the "Supported models" table. Run pre-commit. Decided yes — table drift is a real failure mode.
+
+## Audit responses
+
+Folded in from `docs/superpowers/notes/2026-05-19-per-variant-cores-spec-audit.md`:
+
+- **F1 — Deleting `stats.py` / `coefficients.py` breaks `from mlx_teacache.stats import ...`:** Goal section + Public-import-path gate + Acceptance criteria now require compatibility shims at the original module paths. Re-exports only; no logic. Deprecation cycle is a v0.7.x decision.
+- **F2 — Tests under `src/mlx_teacache/variants/...` ship in wheel + get typechecked:** Layout section now puts runtime under `src/` and tests under top-level `tests/_kernel/` and `tests/variants/<name>/`. Acceptance criterion enforces.
+- **F3 — Variant-owned restore needs a handle contract:** New "Handle contract: `VariantPatch`" subsection defines the rollback + finalizer callback list. `TeaCacheHandle.restore()` has zero `if variant == "..."` branches; the handle is generic. Acceptance criterion enforces with a static check.
+- **F4 — Import-time registry can break the optional-mflux contract:** Variant interface section now requires `config.py` + `detect.py` to be mflux-free; `integration.py` is lazy-imported only on first dispatch. New acceptance criterion + test `test_base_import_without_mflux_extra` enforces base-package import without the `[mflux]` extra.

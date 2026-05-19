@@ -182,7 +182,13 @@ def main() -> None:
         "--three-way",
         action="store_true",
         default=None,
-        help="Run vanilla + wrapped-no-gate + wrapped-gated conditions. Default True on klein-base-4b and klein-base-9b.",
+        help=(
+            "Run vanilla + wrapped-no-gate + wrapped-gated conditions. Default True on "
+            "klein-base-4b only. NOT default on klein-base-9b: the same-process three-way "
+            "path runs 9 generations on a single flux instance, and a previous unguarded "
+            "9B run hit system-level OOM on 32 GB. Pass --three-way explicitly to opt in "
+            "on 9B, but the subprocess-per-rep refactor (v0.5.1) is the safe path."
+        ),
     )
     parser.add_argument(
         "--report",
@@ -225,9 +231,20 @@ def main() -> None:
     num_inference_steps = (
         args.num_inference_steps if args.num_inference_steps is not None else cfg["num_inference_steps"]
     )
-    three_way = (
-        args.three_way if args.three_way is not None else args.variant in ("klein-base-4b", "klein-base-9b")
-    )
+    # Default three-way only on klein-base-4b. klein-base-9b stays two-way by
+    # default because the same-process 9-generation path isn't memory-safe at
+    # 9B on 32 GB (see CLAUDE.md "Memory guardrails for heavy generations on
+    # 32 GB"). v0.5.1 refactors this to subprocess-per-rep and will flip the
+    # 9B default to three-way.
+    three_way = args.three_way if args.three_way is not None else args.variant == "klein-base-4b"
+    if three_way and args.variant == "klein-base-9b":
+        print(
+            "WARNING: three-way mode on klein-base-9b runs 9 same-process generations.\n"
+            "  This path is NOT memory-safe at 9B on 32 GB unified memory; a prior\n"
+            "  unguarded run hit system-level OOM. The subprocess-per-rep refactor\n"
+            "  (v0.5.1) is the right path. Close other apps and watch memory pressure\n"
+            "  if you proceed.",
+        )
 
     bench_dir = args.images_dir / args.variant
 

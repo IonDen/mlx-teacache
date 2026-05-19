@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
+- **v0.5.0** — `flux2-klein-base-9b` (non-distilled FLUX.2 Klein 9B, FLUX NC license). Ships by reusing `flux2-klein-base-4b`'s polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared architecture family and identical non-distilled 25-step / g=1.0 calibration recipe. Validated empirically at the canonical 50-step CFG recipe on M1 Max 32GB: SSIM 0.986 vs vanilla, **2.68× combined wall-clock** (vanilla 2744s, wrapper 1025s; 12/48 active steps skipped). Clean attribution between gating contribution and `mx.compile`-path avoidance is deferred to v0.5.1 (the existing `bench_speedup.py` runs 9 same-process generations and isn't memory-safe at 9B on 32GB; needs a subprocess-per-rep refactor first). New `scripts/validate_klein_base_9b.py` with subprocess-per-condition isolation + explicit MLX memory cap. New "Memory guardrails for heavy generations on 32 GB" rule documented after a same-process OOM crashed the machine during pre-release work.
 - **v0.4.1** — CFG per-branch caching for FLUX.2. Canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) on `flux2-klein-base-4b` is now gate-engaged: 1.26× combined wall-clock on M1 Max (1.16× gating contribution, 1.09× `mx.compile`-path avoidance), 9/50 skips, SSIM ≥ 0.99 vs vanilla. `_vanilla_flux2_cfg_predict()` retired from production paths. Three-way bench protocol (`vanilla` / `no-gate` / `gated`) separates the v0.4 compile-avoidance effect from the v0.4.1 gating contribution. `cfg_fallback_steps` deprecated.
 - **v0.4.0** — `flux2-klein-base-4b` (Apache-2.0, non-distilled, 25-step calibration). First FLUX.2 variant where the polynomial gate engages at the package default. Per-variant `default_thresh=0.17` ships via `Provenance.default_thresh` (3/25 skips on M1 Max; wrapper measures 1.41× wall-clock — both FLUX.2 mechanisms contribute: ~12% from step-skipping plus `mx.compile`-path avoidance; SSIM > 0.99). CFG-engaged caching deferred to v0.4.1. Per-variant default-threshold mechanism added (was Approach B in original brainstorming; now permanent API).
 - **v0.3.0** — `flux2-klein-9b` support (in-repo calibration, origin-constrained polyfit). Calibration script parameterized via `--variant` so v0.4 / v0.5 are additive. `Img2ImgNotSupportedError` (deprecated in v0.2.0) removed. Honest performance framing for FLUX.2 Klein: distilled schedules don't algorithmically step-skip; wall-clock improvement comes from `mx.compile`-path avoidance. `scripts/bench_speedup.py` committed as reproducible source of truth for all README benchmark numbers.
@@ -12,9 +13,17 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Active
 
-### v0.5.0: `flux2-klein-base-9b`
+### v0.5.1: clean three-way attribution for `flux2-klein-base-9b`
 
-Non-distilled 9B. FLUX Non-Commercial license + BFL safety filter (same constraints as Klein 9B today). Fresh calibration. Same approach as base-4B. Builds on v0.4.1's per-branch CFG caching so the canonical upstream recipe is accelerated end-to-end at ship time.
+Follow-up to v0.5.0. The 2.68× headline number on klein-base-9b combines step-skipping (the v0.4.1 gating effect) with `mx.compile`-path avoidance (the v0.4 effect that drops the wrapper's peak memory below vanilla's). v0.5.0 ships with the combined number because the existing three-way bench (`scripts/bench_speedup.py --three-way`) runs 9 same-process generations and isn't memory-safe at 9B on 32GB unified memory — a previous unguarded same-process run OOM'd and crashed the machine.
+
+Scope:
+
+1. Refactor `bench_speedup.py` to subprocess-per-rep, mirroring `scripts/bench_comparison.py` (worker prints a `::BENCH_RESULT::` JSON sentinel, orchestrator aggregates). One subprocess per (variant, condition, rep) so each rep starts cold and MLX's allocator releases everything on exit.
+2. Re-run the three-way bench on klein-base-9b at the canonical 50-step CFG recipe. Numbers go into the README footnote ³ and CHANGELOG.
+3. Same refactor lets us re-run the three-way bench on klein-base-4b cleanly too, replacing the v0.4.1 numbers if the new harness produces different attribution.
+
+Effort: 3-5 h refactor + 3-4 h bench wall-clock. Half a day total.
 
 ---
 

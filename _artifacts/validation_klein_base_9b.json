@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-19T07:38Z",
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.5.0"
+  },
+  "mlx_memory_cap_gb": 24,
+  "isolation": "subprocess-per-condition",
+  "prompt": "Portrait of a young woman with auburn hair and green eyes, soft golden-hour window light, photorealistic, shallow depth of field, 50mm prime lens, subtle freckles, neutral background, cinematic color grading.",
+  "seed": 42,
+  "height": 1024,
+  "width": 768,
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "rel_l1_thresh_used": 0.17,
+  "vanilla_seconds": 2743.9385153330004,
+  "wrapper_seconds": 1025.3400224579964,
+  "vanilla_peak_memory_gb": 25.213589500635862,
+  "wrapper_peak_memory_gb": 13.166086949408054,
+  "wrapper_skipped": 12,
+  "wrapper_computed": 36,
+  "ssim": 0.9863004088401794,
+  "ssim_threshold": 0.95,
+  "passed": true
+}

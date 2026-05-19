@@ -1857,6 +1857,8 @@ The v0.5.1 work folded into v0.6.0. Each (variant, condition, rep) runs in a fre
 
 The refactor is a self-contained replacement of `scripts/bench_speedup.py`. See Task 23 in the previous plan draft for the full skeleton; the new version reads variant metadata from `_REGISTRY` and applies `memory_cap_hint_gb` in each worker.
 
+**Memory-cap API (post fix/oom-wired-memory-cap, merged 2026-05-19):** each worker must call BOTH `mx.set_wired_limit(int((cap_gb - 2) * 1024**3))` (hard wired cap) AND `mx.set_memory_limit(int(cap_gb * 1024**3))` (soft secondary signal) before model load. `mx.metal.set_memory_limit` alone has been confirmed insufficient — it allowed a kernel watchdog panic on 2026-05-19 22:17. Default cap = 22 GB on klein-base-9b → 20 GB wired → ~12 GB OS headroom on a 32 GB Max. See CLAUDE.md "Memory guardrails for heavy generations on 32 GB" for the full rationale.
+
 Steps: write the new script, dry-run `--help` to confirm parsing, lint, commit. No tests for the bench harness itself — its output is the JSON report consumed by Phase G validation.
 
 ```bash

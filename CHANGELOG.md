@@ -26,8 +26,10 @@ Adds `flux2-klein-base-9b` (non-distilled FLUX.2 Klein 9B, FLUX Non-Commercial l
 
 ### Measured
 
-- **Validation SSIM** (50 steps, guidance=4.0, seed=42, 1024×768, M1 Max 32GB, bf16, q4): _TBD: validation pass on 2026-05-19_.
-- **Three-way bench**: _TBD: bench run on 2026-05-19_. Numbers will distinguish gating contribution from `mx.compile`-path avoidance.
+- **Validation SSIM**: 0.986 (50 steps, guidance=4.0, seed=42, 1024×768, M1 Max 32GB, bf16, q4, subprocess-isolated cold rep). Clears the 0.95 release gate.
+- **Wall-clock**: vanilla 2744s, wrapper 1025s → **2.68×** combined speedup. 12 of 48 active steps skipped at `rel_l1_thresh=0.17`. Wrapper peak memory 13.2 GB vs vanilla 25.2 GB (the wrapper bypasses mflux's compiled `_predict` and avoids its activation overhead).
+- **Caveat on the attribution.** The 2.68× combines step-skipping (the v0.4.1 gating effect) with `mx.compile`-path avoidance (the v0.4 effect that drops vanilla peak memory and runs the eager wrapper kernel-path). A clean three-way bench (vanilla / wrapped-no-gate / wrapped-gated) would attribute the two mechanisms separately. Deferred to v0.5.1 because the existing `bench_speedup.py` runs 9 same-process generations and is not memory-safe at 9B on 32 GB; refactoring it to subprocess-per-rep is the v0.5.1 follow-up.
+- **Evidence**: `_artifacts/validation_klein_base_9b.json` (full JSON with hardware + memory peaks + skip counts) and `_artifacts/validation_klein_base_9b_images/{vanilla,wrapper}.webp` (side-by-side images, perceptually equivalent).
 
 ### Why the coefficient reuse is honest
 

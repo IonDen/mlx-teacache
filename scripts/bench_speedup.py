@@ -207,10 +207,13 @@ def main() -> None:
         type=int,
         default=None,
         help=(
-            "MLX memory limit applied via mx.metal.set_memory_limit BEFORE the model "
-            "loads. Required for 9B+ variants on 32 GB machines — a previous unguarded "
-            "klein-base-9b run crashed the system with OOM. Default: 24 on klein-base-9b, "
-            "unset (MLX default) on smaller variants."
+            "Soft MLX memory cap (mx.set_memory_limit). The worker also sets a HARD "
+            "wired-memory cap via mx.set_wired_limit at (cap - 2) GB BEFORE the model "
+            "loads. The wired cap is what actually prevents kernel panics (the soft cap "
+            "alone is advisory — the 2026-05-19 kernel watchdog panic happened with "
+            "set_memory_limit(24 GB) but no wired cap). Default: 22 GB on klein-base-9b "
+            "→ 20 GB wired cap → ~12 GB OS headroom on a 32 GB Max. Unset (MLX default) "
+            "on smaller variants."
         ),
     )
     args = parser.parse_args()
@@ -219,10 +222,15 @@ def main() -> None:
     # Set BEFORE the model load.
     cap_gb = args.mlx_memory_cap_gb
     if cap_gb is None and args.variant == "klein-base-9b":
-        cap_gb = 24
+        cap_gb = 22
     if cap_gb is not None:
-        mx.metal.set_memory_limit(int(cap_gb * 1024**3))
-        print(f"MLX memory cap set to {cap_gb} GB (mx.metal.set_memory_limit).")
+        wired_gb = max(1, cap_gb - 2)
+        mx.set_wired_limit(int(wired_gb * 1024**3))
+        mx.set_memory_limit(int(cap_gb * 1024**3))
+        print(
+            f"MLX caps: wired={wired_gb} GB (mx.set_wired_limit, hard), "
+            f"memory={cap_gb} GB (mx.set_memory_limit, soft)."
+        )
 
     cfg = _variant_config(args.variant)
     print(f"Loading {args.variant} (quantize=4)...")

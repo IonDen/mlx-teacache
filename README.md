@@ -233,7 +233,7 @@ FLUX.2 with CFG (`guidance > 1.0`) runs through the gated path as of v0.4.1. The
 
 `flux2-klein-base-4b` runs TeaCache at both `guidance=1.0` (single-branch path) and `guidance > 1.0` (per-branch path, v0.4.1+). The upstream BFL base-4b model card recommends `guidance_scale=4.0, num_inference_steps=50`; v0.4.1 measures 1.26× wall-clock vs vanilla on M1 Max at that recipe (9/50 skips, SSIM PR-gate passed).
 
-`flux2-klein-base-9b` is not yet supported. Planned for v0.5.0 (FLUX Non-Commercial license + BFL safety filter).
+`flux2-klein-base-9b` shipped in v0.5.0 reusing base-4b's polynomial coefficients verbatim (same architecture family, same calibration recipe). Validated empirically at the canonical 50-step / guidance=4.0 recipe: SSIM 0.986 vs vanilla, **2.68×** combined wall-clock speedup, 12/48 active steps skipped at `rel_l1_thresh=0.17`. The 2.68× combines step-skipping with `mx.compile`-path avoidance; clean attribution between the two mechanisms is deferred to v0.5.1. Same FLUX Non-Commercial license + BFL safety-filter obligations as `flux2-klein-9b` — see [License obligations](#license-obligations).
 
 The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exchange for live per-step gating. Vanilla mflux compiles `_predict` on every chip except base + Pro M1/M2 (the `is_m1_or_m2()` predicate only excludes Max + Ultra). The 1.48× measurement is from M1 Max / FLUX.1-dev / 25 steps; speedup on M3 and newer is plausible but untested locally. On M5, the GPU Neural Accelerators (Metal 4 TensorOps) are only reachable through the compiled path, so the eager wrapper can lose some or all of that advantage. Output stays correct either way. See `docs/m3-plus-tradeoff.md` for the per-chip recipe; PRs with measurements welcome.
 
@@ -247,7 +247,7 @@ Calling `flux.parameters()` at the parent level can miss transformer parameters 
 
 The FLUX.1 variants (`flux1-dev`, `flux1-schnell`) and `flux2-klein-4b` come with their own upstream weight licenses; the wrapper this library applies does not change those terms.
 
-`flux2-klein-9b` is distributed under the FLUX.2 Klein license (non-commercial use + BFL safety-filter obligations). These terms flow with the weights, not with mlx-teacache. If you call `apply_teacache(Flux2Klein(model_config=ModelConfig.flux2_klein_9b()))`, you are responsible for ensuring your use complies with the upstream license — including the safety-filter requirements that the BFL model card describes. See the official model card at https://huggingface.co/black-forest-labs/FLUX.2-klein-9B for the full terms.
+`flux2-klein-9b` and `flux2-klein-base-9b` are both distributed under the FLUX.2 Klein license (non-commercial use + BFL safety-filter obligations). These terms flow with the weights, not with mlx-teacache. If you call `apply_teacache` on either variant — `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` or `Flux2Klein(model_config=ModelConfig.flux2_klein_base_9b())` — you are responsible for ensuring your use complies with the upstream license, including the safety-filter requirements the BFL model cards describe. See the official model cards at https://huggingface.co/black-forest-labs/FLUX.2-klein-9B and https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B for the full terms.
 
 ## Contributing
 

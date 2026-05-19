@@ -6,7 +6,9 @@ from mlx_teacache._kernel.stats import (
     StatsFrozenError,
     StepDecision,
     TeaCacheStats,
-    _Staging,
+)
+from mlx_teacache._kernel.stats import (
+    _Staging as _Staging,  # noqa: F401  # re-export for v0.5.x callers (tests/test_stats.py)
 )
 
-__all__ = ["Decision", "GenerationStats", "StatsFrozenError", "StepDecision", "TeaCacheStats", "_Staging"]
+__all__ = ["Decision", "GenerationStats", "StatsFrozenError", "StepDecision", "TeaCacheStats"]

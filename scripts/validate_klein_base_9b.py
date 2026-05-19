@@ -11,25 +11,31 @@ before tagging. Heavy generation; expect ~30-90 min on M1 Max.
 
 ## Memory guardrails (see CLAUDE.md "Memory guardrails for heavy generations on 32 GB")
 
-A previous same-process vanilla-then-wrapper run of this script triggered
-system-level OOM and crashed the machine on 2026-05-18. This version is
-restructured to avoid that:
+Two crashes happened during this script's development:
+- **2026-05-17**: same-process vanilla-then-wrapper triggered a jetsam OOM
+  (python peak 25.8 GB).
+- **2026-05-19**: separate subprocesses with `mx.metal.set_memory_limit(24 GB)`
+  triggered a kernel watchdog panic anyway, because `set_memory_limit` is a
+  soft guideline and does NOT bound wired (non-pageable Metal) memory.
+
+This version uses three guardrails together:
 
 1. **Subprocess-per-condition.** Vanilla and wrapper each run in a fresh
    subprocess (`--worker --condition {vanilla,wrapper}`). MLX's lazy
-   allocator releases everything on process exit; the second condition
-   never has to share memory with the first.
-2. **Explicit MLX memory cap.** Each worker sets `mx.metal.set_memory_limit`
-   before loading the model. Configurable via `--mlx-memory-cap-gb` on the
-   orchestrator (default 24 GB, leaves ~8 GB OS headroom on 32 GB Max).
-   MLX raises a clean OOM error if the cap is exceeded instead of swap-
-   thrashing the OS.
-3. **Vanilla image is persisted to disk** between subprocesses (the
+   allocator releases everything on process exit.
+2. **HARD wired-memory cap** via `mx.set_wired_limit` set BEFORE the model
+   loads. This is the cap that actually prevents kernel panics — wired
+   memory is non-pageable, so the OS can't recover from over-allocation
+   except by panicking. Set to `(--mlx-memory-cap-gb - 2)` GB.
+3. **Soft memory cap** via `mx.set_memory_limit` as a secondary signal at
+   the `--mlx-memory-cap-gb` value (default 22 GB → 20 GB wired cap on a
+   32 GB Max → ~12 GB OS headroom).
+4. **Vanilla image persisted to disk** between subprocesses (the
    SSIM-comparison loop in the orchestrator reloads both PNGs).
 
 Usage:
   uv run python scripts/validate_klein_base_9b.py
-  uv run python scripts/validate_klein_base_9b.py --mlx-memory-cap-gb 26
+  uv run python scripts/validate_klein_base_9b.py --mlx-memory-cap-gb 24  # only if you raised sysctl iogpu.wired_limit_mb first
 """
 
 from __future__ import annotations
@@ -110,8 +116,14 @@ def _worker(condition: str, save_image_to: Path, mlx_memory_cap_gb: int) -> None
     single JSON line prefixed by WORKER_RESULT_SENTINEL on stdout."""
     import mlx.core as mx
 
-    # Set the memory cap BEFORE the model load. See module docstring.
-    mx.metal.set_memory_limit(int(mlx_memory_cap_gb * 1024**3))
+    # Set the memory cap BEFORE the model load. See CLAUDE.md
+    # "Memory guardrails for heavy generations on 32 GB unified memory".
+    # `set_wired_limit` is the HARD cap on Metal wired (non-pageable) memory.
+    # `set_memory_limit` is a soft guideline. We need both, and the wired
+    # limit must be the smaller of the two.
+    wired_gb = max(1, mlx_memory_cap_gb - 2)  # 2 GB headroom under the soft cap
+    mx.set_wired_limit(int(wired_gb * 1024**3))
+    mx.set_memory_limit(int(mlx_memory_cap_gb * 1024**3))
 
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
@@ -305,11 +317,15 @@ def main() -> int:
     parser.add_argument(
         "--mlx-memory-cap-gb",
         type=int,
-        default=24,
+        default=22,
         help=(
-            "MLX memory limit applied via mx.metal.set_memory_limit at the top of "
-            "each worker. Default 24 GB leaves ~8 GB OS headroom on a 32 GB Max. "
-            "Lower this if other apps are running; raise it on machines with more RAM."
+            "Soft MLX memory cap (mx.set_memory_limit). The worker also sets a "
+            "HARD wired-memory cap via mx.set_wired_limit at (cap - 2) GB. The "
+            "wired cap is what actually prevents kernel panics from Metal pinned "
+            "memory exceeding system headroom (mx.set_memory_limit alone is "
+            "advisory). Default 22 GB → 20 GB wired cap → ~12 GB OS headroom on "
+            "a 32 GB Max. The 2026-05-19 kernel panic happened at 24 GB cap; do "
+            "not raise back without raising sysctl iogpu.wired_limit_mb."
         ),
     )
     args = parser.parse_args()

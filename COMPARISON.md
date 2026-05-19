@@ -47,6 +47,22 @@ FLUX.1 dev runs the schedule that mlx-teacache was originally calibrated for. Th
 
 This is the canonical FLUX.2 Klein base setting from Black Forest Labs: 50 steps with real classifier-free guidance at 4.0. The wrapper skips eight of the 48 active transformer evaluations under both the conditional and unconditional branches (per-branch caching, the v0.4.1 feature). The two portraits are perceptually equivalent at output size; close inspection shows slightly softer microtexture in the wrapped version, which is the expected trade for the skipped steps.
 
+### `flux2-klein-base-9b` — 50 steps, guidance=4.0
+
+|  | Vanilla mflux | mlx-teacache |
+|---|---|---|
+| Time (single cold rep)¹ | 2744 s | 1025 s |
+| Cold speedup | — | **2.68×** |
+| Steps skipped | 0 of 48 active | 12 of 48 active |
+| Threshold | — | rel_l1 = 0.17 |
+| Peak memory | 25.2 GB | 13.2 GB |
+| SSIM vs vanilla | — | **0.986** |
+| Image | ![vanilla](_artifacts/validation_klein_base_9b_images/vanilla.webp) | ![wrapper](_artifacts/validation_klein_base_9b_images/wrapper.webp) |
+
+¹ Numbers come from the v0.5.0 release-gate validation (`scripts/validate_klein_base_9b.py`), which runs a single subprocess-isolated cold rep per condition. Warm-median bench is deferred to v0.5.1 because the existing three-way bench (`scripts/bench_speedup.py --three-way`) is not memory-safe at 9B on 32 GB unified memory — a previous unguarded same-process run hit system-level OOM. v0.5.1 refactors the bench to subprocess-per-rep and re-measures.
+
+`flux2-klein-base-9b` is the non-distilled FLUX.2 Klein 9B variant (FLUX Non-Commercial license — see [README License obligations](README.md#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). v0.5.0 ships reusing base-4b's polynomial coefficients verbatim — same FLUX.2 Klein architecture family, same calibration recipe, validated empirically at the canonical 50-step CFG recipe. The 2.68× cold-rep speedup combines step-skipping with `mx.compile`-path avoidance (the wrapper's peak memory at 13 GB vs vanilla's 25 GB is the tell — the wrapper bypasses mflux's compiled `_predict` and its activation overhead). Clean attribution between the two mechanisms is queued for v0.5.1.
+
 ## What is excluded and why
 
 - `flux1-schnell` and `flux2-klein-4b` / `flux2-klein-9b` distilled schedules: the residual change between adjacent steps is too large for the gate to engage at any reasonable threshold. They skip zero steps and the wrapper would only add a ~1-2% gating tax. Run them through vanilla mflux instead.

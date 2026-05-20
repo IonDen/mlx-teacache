@@ -5,11 +5,59 @@ The `mflux` marker is auto-applied to any test that lives in a test file
 named test_integration*, test_parity*, test_flux1*, test_flux2*, test_forward_*,
 test_lifecycle.py, or test_api.py — these all import the integration layer
 and therefore require mflux. The test-pure-core CI job skips them via
-`-m "not mflux"`."""
+`-m "not mflux"`.
+
+Memory guardrail: at session start we install a hard cap on MLX wired
+(non-pageable Metal) memory via `mx.set_wired_limit`. Without this cap,
+running a marker-misfiltered parity test (e.g. `pytest tests/ -m "not
+slow"`) loads a real FLUX model whose wired peak crosses the system
+wired limit and panics the kernel watchdog — observed on this 32 GB
+M1 Max as crashes on 2026-05-17, 2026-05-19, and 2026-05-20. The
+session cap means even a misrouted heavy test runs slow (or fails
+cleanly with an MLX allocation error) instead of taking the machine
+down. See CLAUDE.md "Memory guardrails for heavy generations" and
+ml-explore/mlx-lm #883 for the upstream confirmation that wired
+memory — not the soft `set_memory_limit` — is the root cause."""
 
 from __future__ import annotations
 
 import pytest
+
+
+def _install_mlx_memory_caps() -> None:
+    """Hard-cap Metal wired memory before any test imports MLX models.
+
+    Skipped silently if MLX isn't importable (pure-core CI without MLX
+    installed) or if the platform pre-dates macOS 15 (where
+    `set_wired_limit` is a no-op). The numbers below are tuned for
+    32 GB Apple Silicon; on bigger machines they still apply (just
+    leave more headroom)."""
+    try:
+        import mlx.core as mx
+    except ImportError:
+        return
+
+    info = mx.device_info()
+    total_gb = info.get("memory_size", 0) / 1024**3
+    # 32 GB machines: cap wired at 20 GB (well under the ~25 GB system limit),
+    # cap memory at 22 GB. On larger machines, scale proportionally but keep
+    # at least 8 GB headroom for the OS + other apps.
+    if total_gb <= 36:
+        wired_gb, memory_gb = 20, 22
+    else:
+        # Leave ~12 GB for OS on bigger machines; cap wired 2 GB below memory.
+        memory_gb = int(total_gb - 12)
+        wired_gb = memory_gb - 2
+
+    try:
+        mx.set_wired_limit(int(wired_gb * 1024**3))
+        mx.set_memory_limit(int(memory_gb * 1024**3))
+    except Exception:  # noqa: BLE001  # set_wired_limit is macOS 15+ only
+        pass
+
+
+_install_mlx_memory_caps()
+
 
 _MFLUX_FILES = {
     "test_lifecycle.py",

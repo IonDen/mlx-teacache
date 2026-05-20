@@ -5,8 +5,10 @@ Stats commit/discard stays in the mflux lifecycle wrapper.
 """
 from __future__ import annotations
 
+from mlx_teacache._kernel.coefficients import Provenance
 
-def test_handle_runs_rollbacks_in_reverse_install_order():
+
+def test_handle_runs_rollbacks_in_reverse_install_order() -> None:
     from mlx_teacache._kernel.stats import TeaCacheStats
     from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 
@@ -22,7 +24,7 @@ def test_handle_runs_rollbacks_in_reverse_install_order():
     assert log == ["r2", "r1"]
 
 
-def test_handle_restore_is_idempotent():
+def test_handle_restore_is_idempotent() -> None:
     from mlx_teacache._kernel.stats import TeaCacheStats
     from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 
@@ -35,7 +37,7 @@ def test_handle_restore_is_idempotent():
     assert counter["n"] == 1
 
 
-def test_handle_does_not_finalize_stats():
+def test_handle_does_not_finalize_stats() -> None:
     """Audit F2: stats commit stays in mflux lifecycle. Handle restore must
     not call finalize_last_generation; that's the lifecycle's job in
     integrations/mflux/lifecycle.py:wrap_generate_image."""
@@ -54,7 +56,7 @@ def test_handle_does_not_finalize_stats():
     assert stats.generations == 0
 
 
-def test_handle_has_no_variant_branches():
+def test_handle_has_no_variant_branches() -> None:
     """Audit F3: TeaCacheHandle is variant-agnostic. Static-grep check."""
     import inspect
 
@@ -67,6 +69,5 @@ def test_handle_has_no_variant_branches():
         assert bad not in code, f"handle.py must not mention {bad!r}"
 
 
-def _dummy_provenance():
-    from mlx_teacache._kernel.coefficients import Provenance
+def _dummy_provenance() -> Provenance:
     return Provenance(source="builtin")

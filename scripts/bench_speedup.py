@@ -6,25 +6,33 @@ reproducible across runs (within the bounds of Metal / thermal noise on the
 measuring host).
 
 For each --variant:
-  1. Load the model at the same quantization README claims for (q4).
-  2. Generate one warmup image (vanilla) to seed any one-time compile work.
-  3. Time 3 vanilla generations + 3 wrapper generations (alternating reduces
-     thermal bias across the two conditions but isn't worth the extra code).
-  4. Report the median per condition + ratio + per-rep skip counts so the
+  1. Load the model inside a fresh subprocess.
+  2. Run --reps generations per (condition, rep) — every combination spawns
+     an isolated Python interpreter so each timing starts from a clean
+     MLX allocator state ("cold" reps are genuinely cold).
+  3. Report the median per condition + ratio + per-rep skip counts so the
      wall-clock improvement can be attributed to step-skipping or to
      other causes (e.g. avoiding mflux's mx.compile).
+
+Architecture
+------------
+
+Each (variant, condition, rep) runs in a SEPARATE subprocess so timing is
+not contaminated by warm MLX kernel state or Metal wired-memory from a prior
+run. The same file is both orchestrator and worker — selected by --worker flag.
+Workers print one JSON line (prefixed by WORKER_RESULT_SENTINEL) on stdout;
+the orchestrator collects + aggregates into the final report.
 
 Run as:
   uv run python scripts/bench_speedup.py --variant klein-9b
   uv run python scripts/bench_speedup.py --variant klein-4b
-  uv run python scripts/bench_speedup.py --variant klein-base-4b   # 50-step, g=4.0 (v0.4.1+)
-  uv run python scripts/bench_speedup.py --variant klein-base-4b --guidance 1.0 --num-inference-steps 25  # v0.4.0 row
-  uv run python scripts/bench_speedup.py --variant klein-base-9b   # 50-step, g=4.0 (v0.5.0)
+  uv run python scripts/bench_speedup.py --variant klein-base-4b   # 50-step, g=4.0
+  uv run python scripts/bench_speedup.py --variant klein-base-9b   # 50-step, g=4.0
   uv run python scripts/bench_speedup.py --variant flux1-dev
 
-Three-way mode (--three-way, default on klein-base-4b and klein-base-9b) additionally runs a
-wrapped-no-gate condition (rel_l1_thresh=0.0) to separate the v0.4
-compile-avoidance effect from the v0.4.1 gating effect:
+Three-way mode (--three-way) additionally runs a wrapped-no-gate condition
+(rel_l1_thresh=0.0) to separate the compile-avoidance effect from the gating
+effect:
   A = vanilla                (no wrapper)
   B = wrapped, no gate       (rel_l1_thresh=0.0 — compile-avoidance only)
   C = wrapped, gated         (default threshold — full TeaCache)
@@ -36,95 +44,98 @@ Output: prints summary to stdout, optionally writes JSON via --report.
 The script also generates and saves a single vanilla + wrapper image pair
 under tests/_artifacts/bench_images/<variant>/ for visual quality comparison.
 The bench_images/ directory is git-ignored.
+
+Memory safety
+-------------
+
+Each worker calls mx.set_wired_limit (hard cap on non-pageable Metal
+allocations) AND mx.set_memory_limit (soft secondary) BEFORE the model loads.
+The cap is taken from the variant's META["memory_cap_hint_gb"] in _REGISTRY, or
+22 GB by default, or overridden via --cap-gb.  Running vanilla then wrapper in
+the same process was confirmed to panic the kernel watchdog on 2026-05-19
+22:17 and 2026-05-20 20:35 on a 32 GB M1 Max. Subprocess isolation prevents
+wired-memory accumulation.
+
+Compatibility note
+------------------
+
+The orchestrator output format (Summary section + JSON keys in --report) is
+backward-compatible with the pre-v0.6.0 format where possible. The new JSON
+adds "isolation": "subprocess-per-rep" and per-rep arrays for peak_memory_gb.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import platform
 import statistics
+import subprocess
+import sys
 import time
 from pathlib import Path
-from typing import Any
-
-import mlx.core as mx
-
-from mlx_teacache import apply_teacache
+from typing import Any, cast
 
 PROMPT = "a red apple on a wooden table"
 SEED = 42
 HEIGHT = 512
 WIDTH = 512
 
+WORKER_RESULT_SENTINEL = "::BENCH_RESULT::"
 
-def _load_flux2_klein(variant: str) -> Any:
-    from mflux.models.common.config.model_config import ModelConfig
-    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+# Variants supported by this script. Maps the CLI --variant slug to the
+# registry variant_id used in _REGISTRY.
+_VARIANT_SLUG_TO_ID: dict[str, str] = {
+    "klein-4b": "flux2-klein-4b",
+    "klein-9b": "flux2-klein-9b",
+    "klein-base-4b": "flux2-klein-base-4b",
+    "klein-base-9b": "flux2-klein-base-9b",
+    "flux1-dev": "flux1-dev",
+    "flux1-schnell": "flux1-schnell",
+}
 
-    if variant == "klein-4b":
-        cfg = ModelConfig.flux2_klein_4b()
-    elif variant == "klein-9b":
-        cfg = ModelConfig.flux2_klein_9b()
-    elif variant == "klein-base-4b":
-        cfg = ModelConfig.flux2_klein_base_4b()
-    elif variant == "klein-base-9b":
-        cfg = ModelConfig.flux2_klein_base_9b()
+# Default bench recipe per variant (num_inference_steps, guidance).
+_VARIANT_RECIPE: dict[str, dict[str, Any]] = {
+    "klein-4b": {"num_inference_steps": 8, "guidance": 1.0},
+    "klein-9b": {"num_inference_steps": 8, "guidance": 1.0},
+    "klein-base-4b": {"num_inference_steps": 50, "guidance": 4.0},
+    "klein-base-9b": {"num_inference_steps": 50, "guidance": 4.0},
+    "flux1-dev": {"num_inference_steps": 25, "guidance": 3.5},
+    "flux1-schnell": {"num_inference_steps": 4, "guidance": 1.0},
+}
+
+# Default soft memory cap (GB) per variant when _REGISTRY META is absent.
+# Workers derive the hard wired cap as (soft_cap - 2) GB.
+_DEFAULT_CAP_GB = 22
+
+
+# ---------------------------------------------------------------------------
+# WORKER side — runs in a subprocess for one (variant, condition, rep).
+# ---------------------------------------------------------------------------
+
+
+def _load_flux(variant: str) -> Any:
+    """Load and freeze the mflux model for the given CLI variant slug."""
+    if variant in ("klein-4b", "klein-9b", "klein-base-4b", "klein-base-9b"):
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+        cfg_map = {
+            "klein-4b": ModelConfig.flux2_klein_4b,
+            "klein-9b": ModelConfig.flux2_klein_9b,
+            "klein-base-4b": ModelConfig.flux2_klein_base_4b,
+            "klein-base-9b": ModelConfig.flux2_klein_base_9b,
+        }
+        flux = Flux2Klein(quantize=4, model_config=cfg_map[variant]())
+    elif variant in ("flux1-dev", "flux1-schnell"):
+        from mflux.models.flux.variants.txt2img.flux import Flux1
+
+        name = "dev" if variant == "flux1-dev" else "schnell"
+        flux = Flux1.from_name(name, quantize=4)
     else:
-        raise ValueError(f"unsupported klein variant: {variant!r}")
-    flux = Flux2Klein(quantize=4, model_config=cfg)
+        raise ValueError(f"unsupported variant: {variant!r}")
     flux.freeze()
     return flux
-
-
-def _load_flux1(variant: str) -> Any:
-    from mflux.models.flux.variants.txt2img.flux import Flux1
-
-    if variant == "flux1-dev":
-        flux = Flux1.from_name("dev", quantize=4)
-    elif variant == "flux1-schnell":
-        flux = Flux1.from_name("schnell", quantize=4)
-    else:
-        raise ValueError(f"unsupported flux1 variant: {variant!r}")
-    flux.freeze()
-    return flux
-
-
-def _variant_config(variant: str) -> dict[str, Any]:
-    if variant in ("klein-4b", "klein-9b"):
-        return {
-            "loader": _load_flux2_klein,
-            "num_inference_steps": 8,
-            "guidance": 1.0,
-        }
-    if variant == "klein-base-4b":
-        # Canonical upstream recipe (v0.4.1+). Override with
-        # --guidance 1.0 --num-inference-steps 25 to reproduce the v0.4.0 row.
-        return {
-            "loader": _load_flux2_klein,
-            "num_inference_steps": 50,
-            "guidance": 4.0,
-        }
-    if variant == "klein-base-9b":
-        # Canonical upstream recipe — same as base-4b. Coefficients reused
-        # from base-4b verbatim (see src/mlx_teacache/coefficients.py).
-        return {
-            "loader": _load_flux2_klein,
-            "num_inference_steps": 50,
-            "guidance": 4.0,
-        }
-    if variant == "flux1-dev":
-        return {
-            "loader": _load_flux1,
-            "num_inference_steps": 25,
-            "guidance": 3.5,
-        }
-    if variant == "flux1-schnell":
-        return {
-            "loader": _load_flux1,
-            "num_inference_steps": 4,
-            "guidance": 1.0,
-        }
-    raise ValueError(f"unknown variant: {variant!r}")
 
 
 def _generate(
@@ -134,6 +145,9 @@ def _generate(
     guidance: float,
     save_path: Path | None = None,
 ) -> tuple[float, Any]:
+    """Time one generation. Flushes GPU before stopping the clock."""
+    import mlx.core as mx
+
     start = time.perf_counter()
     image = flux.generate_image(
         prompt=PROMPT,
@@ -151,21 +165,262 @@ def _generate(
     return elapsed, image
 
 
+def _worker_main(args: argparse.Namespace) -> None:
+    """Subprocess entrypoint. Runs ONE (variant, condition, rep) and prints
+    a single JSON line prefixed by WORKER_RESULT_SENTINEL on stdout."""
+    import mlx.core as mx
+
+    # --- Memory guardrail (MUST come before model load) ---
+    # cap_gb is passed by the orchestrator; fall back to _DEFAULT_CAP_GB.
+    cap_gb: int = args.cap_gb if args.cap_gb is not None else _DEFAULT_CAP_GB
+    # If the variant has a META hint, prefer that (unless orchestrator overrode).
+    if args.cap_gb is None:
+        variant_id = _VARIANT_SLUG_TO_ID.get(args.variant, "")
+        if variant_id:
+            from mlx_teacache.variants import _REGISTRY
+            registry_entry = _REGISTRY.get(variant_id)
+            if registry_entry is not None:
+                hint = registry_entry["META"].get("memory_cap_hint_gb")
+                if hint is not None:
+                    cap_gb = hint
+
+    wired_gb = max(1, cap_gb - 2)
+    mx.set_wired_limit(int(wired_gb * 1024**3))
+    mx.set_memory_limit(int(cap_gb * 1024**3))
+    print(
+        f"  [worker] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
+        flush=True,
+    )
+
+    variant = args.variant
+    condition = args.condition
+    rep = args.rep
+    recipe = _VARIANT_RECIPE[variant]
+    num_inference_steps: int = args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
+    guidance: float = args.guidance if args.guidance is not None else recipe["guidance"]
+    save_path: Path | None = Path(args.save_to) if args.save_to else None
+
+    flux = _load_flux(variant)
+
+    stats_summary: dict[str, Any] = {}
+    elapsed: float
+
+    if condition == "vanilla":
+        elapsed, _ = _generate(
+            flux,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            save_path=save_path,
+        )
+        print(f"  vanilla rep {rep + 1}: {elapsed:.2f}s", flush=True)
+    elif condition == "wrapper_nogate":
+        from mlx_teacache import apply_teacache
+
+        with apply_teacache(flux, rel_l1_thresh=0.0) as handle:
+            elapsed, _ = _generate(
+                flux,
+                num_inference_steps=num_inference_steps,
+                guidance=guidance,
+                save_path=save_path,
+            )
+            stats_summary = {
+                "skipped_count": handle.stats.skipped_count,
+                "computed_count": handle.stats.computed_count,
+                "rel_l1_thresh_used": 0.0,
+            }
+        print(
+            f"  wrapper_nogate rep {rep + 1}: {elapsed:.2f}s "
+            f"(skipped {stats_summary['skipped_count']}/{num_inference_steps})",
+            flush=True,
+        )
+    elif condition == "wrapper":
+        from mlx_teacache import apply_teacache
+
+        with apply_teacache(flux) as handle:
+            elapsed, _ = _generate(
+                flux,
+                num_inference_steps=num_inference_steps,
+                guidance=guidance,
+                save_path=save_path,
+            )
+            stats_summary = {
+                "skipped_count": handle.stats.skipped_count,
+                "computed_count": handle.stats.computed_count,
+                "rel_l1_thresh_used": handle.rel_l1_thresh,
+            }
+        print(
+            f"  wrapper rep {rep + 1}: {elapsed:.2f}s "
+            f"(skipped {stats_summary['skipped_count']}/{num_inference_steps})",
+            flush=True,
+        )
+    else:
+        raise ValueError(f"unknown --condition {condition!r}")
+
+    peak_memory_gb = mx.get_peak_memory() / 1024**3
+
+    result: dict[str, Any] = {
+        "variant": variant,
+        "condition": condition,
+        "rep": rep,
+        "elapsed_s": elapsed,
+        "peak_memory_gb": peak_memory_gb,
+        "stats_summary": stats_summary,
+    }
+    print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# ORCHESTRATOR side — spawns the workers and assembles the report.
+# ---------------------------------------------------------------------------
+
+
+def _mflux_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("mflux")
+    except Exception:
+        return "unknown"
+
+
+def _mlx_teacache_version() -> str:
+    from mlx_teacache import __version__
+
+    return __version__
+
+
+def _macos_sysctl(key: str) -> str | None:
+    """Read a macOS sysctl value as a string. Returns None on failure."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        out = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, check=True)
+        return out.stdout.strip() or None
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+
+def _detect_hardware() -> dict[str, Any]:
+    chip = (
+        _macos_sysctl("machdep.cpu.brand_string")
+        or platform.processor()
+        or "Apple Silicon"
+    )
+    ram_bytes_str = _macos_sysctl("hw.memsize")
+    ram_gb: int | None = None
+    if ram_bytes_str is not None:
+        try:
+            ram_gb = round(int(ram_bytes_str) / (1024**3))
+        except ValueError:
+            ram_gb = None
+    return {
+        "chip": chip,
+        "ram_gb": ram_gb,
+        "machine": platform.machine(),
+        "os": f"{platform.system()} {platform.release()}",
+        "mlx_teacache_version": _mlx_teacache_version(),
+        "mflux_version": _mflux_version(),
+        "quantize": 4,
+        "dtype": "bf16",
+    }
+
+
+def _run_one_worker(
+    *,
+    variant: str,
+    condition: str,
+    rep: int,
+    cap_gb: int | None,
+    num_inference_steps: int | None,
+    guidance: float | None,
+    save_to: Path | None,
+) -> dict[str, Any]:
+    """Spawn one worker subprocess and return its parsed result dict."""
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--worker",
+        "--variant", variant,
+        "--condition", condition,
+        "--rep", str(rep),
+    ]
+    if cap_gb is not None:
+        cmd += ["--cap-gb", str(cap_gb)]
+    if num_inference_steps is not None:
+        cmd += ["--num-inference-steps", str(num_inference_steps)]
+    if guidance is not None:
+        cmd += ["--guidance", str(guidance)]
+    if save_to is not None:
+        cmd += ["--save-to", str(save_to)]
+
+    label = f"{variant}/{condition}/rep{rep}"
+    print(f"\n>> spawning worker: {label}", flush=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.stdout:
+        sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        raise RuntimeError(f"worker failed for {label}: exit {proc.returncode}")
+    for line in proc.stdout.splitlines():
+        if line.startswith(WORKER_RESULT_SENTINEL):
+            return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL):]))
+    raise RuntimeError(f"worker for {label} did not emit a {WORKER_RESULT_SENTINEL} result line")
+
+
+def _run_condition(
+    *,
+    variant: str,
+    condition: str,
+    reps: int,
+    cap_gb: int | None,
+    num_inference_steps: int | None,
+    guidance: float | None,
+    bench_dir: Path,
+    three_way: bool,
+) -> list[dict[str, Any]]:
+    """Run all reps for one (variant, condition). Returns list of worker result dicts."""
+    results: list[dict[str, Any]] = []
+    for rep in range(reps):
+        # Save image only on rep 0.
+        if rep == 0:
+            if condition == "vanilla":
+                save_to = bench_dir / "vanilla.png"
+            elif condition == "wrapper_nogate":
+                save_to = bench_dir / "wrapper_nogate.png"
+            else:  # wrapper
+                save_to = bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
+        else:
+            save_to = None
+        result = _run_one_worker(
+            variant=variant,
+            condition=condition,
+            rep=rep,
+            cap_gb=cap_gb,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            save_to=save_to,
+        )
+        results.append(result)
+    return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+
+    # --worker flag puts this invocation in worker mode.
+    parser.add_argument(
+        "--worker",
+        action="store_true",
+        help="(internal) run as a worker subprocess for one (variant, condition, rep).",
+    )
+
+    # Shared args (used by both orchestrator and worker).
     parser.add_argument(
         "--variant",
-        required=True,
-        choices=[
-            "klein-4b",
-            "klein-9b",
-            "klein-base-4b",
-            "klein-base-9b",
-            "flux1-dev",
-            "flux1-schnell",
-        ],
+        choices=list(_VARIANT_SLUG_TO_ID.keys()),
+        help="Variant slug.",
     )
-    parser.add_argument("--reps", type=int, default=3, help="timed reps per condition")
     parser.add_argument(
         "--guidance",
         type=float,
@@ -176,183 +431,171 @@ def main() -> None:
         "--num-inference-steps",
         type=int,
         default=None,
+        dest="num_inference_steps",
         help="Override the variant's default step count.",
     )
+    parser.add_argument(
+        "--cap-gb",
+        type=int,
+        default=None,
+        dest="cap_gb",
+        help=(
+            "Soft MLX memory cap in GB (mx.set_memory_limit). The worker also sets a "
+            "hard wired cap at (cap - 2) GB via mx.set_wired_limit. Defaults to the "
+            "variant META's memory_cap_hint_gb (e.g. 24 GB on klein-base-9b) or "
+            f"{_DEFAULT_CAP_GB} GB otherwise. See CLAUDE.md 'Memory guardrails'."
+        ),
+    )
+
+    # Worker-only args.
+    parser.add_argument("--condition", help="vanilla / wrapper / wrapper_nogate (worker mode).")
+    parser.add_argument("--rep", type=int, default=0, help="Rep index 0-based (worker mode).")
+    parser.add_argument("--save-to", default=None, dest="save_to", help="Image destination path (worker mode).")
+
+    # Orchestrator-only args.
+    parser.add_argument("--reps", type=int, default=3, help="Timed reps per condition (orchestrator mode).")
     parser.add_argument(
         "--three-way",
         action="store_true",
         default=None,
+        dest="three_way",
         help=(
-            "Run vanilla + wrapped-no-gate + wrapped-gated conditions. Default True on "
-            "klein-base-4b only. NOT default on klein-base-9b: the same-process three-way "
-            "path runs 9 generations on a single flux instance, and a previous unguarded "
-            "9B run hit system-level OOM on 32 GB. Pass --three-way explicitly to opt in "
-            "on 9B, but the subprocess-per-rep refactor (v0.5.1) is the safe path."
+            "Run vanilla + wrapped-no-gate + wrapped-gated conditions. "
+            "Three-way mode separates compile-avoidance (A/B) from gating (B/C)."
         ),
     )
     parser.add_argument(
         "--report",
         type=Path,
         default=None,
-        help="optional JSON output path for the summary",
+        help="Optional JSON output path for the summary.",
     )
     parser.add_argument(
         "--images-dir",
         type=Path,
         default=Path(__file__).parent.parent / "tests" / "_artifacts" / "bench_images",
-        help="root directory for saved bench images (one subdir per variant)",
+        dest="images_dir",
+        help="Root directory for saved bench images (one subdir per variant).",
     )
+
+    # Legacy alias kept for backward-compat.
     parser.add_argument(
         "--mlx-memory-cap-gb",
         type=int,
         default=None,
-        help=(
-            "Soft MLX memory cap (mx.set_memory_limit). The worker also sets a HARD "
-            "wired-memory cap via mx.set_wired_limit at (cap - 2) GB BEFORE the model "
-            "loads. The wired cap is what actually prevents kernel panics (the soft cap "
-            "alone is advisory — the 2026-05-19 kernel watchdog panic happened with "
-            "set_memory_limit(24 GB) but no wired cap). Default: 22 GB on klein-base-9b "
-            "→ 20 GB wired cap → ~12 GB OS headroom on a 32 GB Max. Unset (MLX default) "
-            "on smaller variants."
-        ),
+        dest="mlx_memory_cap_gb",
+        help=argparse.SUPPRESS,  # hidden; use --cap-gb instead
     )
+
     args = parser.parse_args()
 
-    # Memory guardrail. See CLAUDE.md "Memory guardrails for heavy generations on 32 GB".
-    # Set BEFORE the model load.
-    cap_gb = args.mlx_memory_cap_gb
-    if cap_gb is None and args.variant == "klein-base-9b":
-        cap_gb = 22
-    if cap_gb is not None:
-        wired_gb = max(1, cap_gb - 2)
-        mx.set_wired_limit(int(wired_gb * 1024**3))
-        mx.set_memory_limit(int(cap_gb * 1024**3))
-        print(
-            f"MLX caps: wired={wired_gb} GB (mx.set_wired_limit, hard), "
-            f"memory={cap_gb} GB (mx.set_memory_limit, soft)."
-        )
+    # --worker → subprocess worker mode.
+    if args.worker:
+        # Merge legacy alias into cap_gb.
+        if args.cap_gb is None and args.mlx_memory_cap_gb is not None:
+            args.cap_gb = args.mlx_memory_cap_gb
+        if args.variant is None or args.condition is None:
+            parser.error("--worker requires --variant and --condition")
+        _worker_main(args)
+        return
 
-    cfg = _variant_config(args.variant)
-    print(f"Loading {args.variant} (quantize=4)...")
-    flux = cfg["loader"](args.variant)
-    guidance = args.guidance if args.guidance is not None else cfg["guidance"]
-    num_inference_steps = (
-        args.num_inference_steps if args.num_inference_steps is not None else cfg["num_inference_steps"]
-    )
-    # Default three-way only on klein-base-4b. klein-base-9b stays two-way by
-    # default because the same-process 9-generation path isn't memory-safe at
-    # 9B on 32 GB (see CLAUDE.md "Memory guardrails for heavy generations on
-    # 32 GB"). v0.5.1 refactors this to subprocess-per-rep and will flip the
-    # 9B default to three-way.
-    three_way = args.three_way if args.three_way is not None else args.variant == "klein-base-4b"
-    if three_way and args.variant == "klein-base-9b":
-        print(
-            "WARNING: three-way mode on klein-base-9b runs 9 same-process generations.\n"
-            "  This path is NOT memory-safe at 9B on 32 GB unified memory; a prior\n"
-            "  unguarded run hit system-level OOM. The subprocess-per-rep refactor\n"
-            "  (v0.5.1) is the right path. Close other apps and watch memory pressure\n"
-            "  if you proceed.",
-        )
+    # Orchestrator mode — --variant is required.
+    if args.variant is None:
+        parser.error("--variant is required")
 
-    bench_dir = args.images_dir / args.variant
+    # Merge legacy alias.
+    cap_gb = args.cap_gb if args.cap_gb is not None else args.mlx_memory_cap_gb
 
-    print(f"\n== Warmup (vanilla, {num_inference_steps} steps) ==")
-    warmup_t, _ = _generate(flux, num_inference_steps=num_inference_steps, guidance=guidance)
-    print(f"warmup: {warmup_t:.2f}s")
+    variant = args.variant
+    recipe = _VARIANT_RECIPE[variant]
+    num_inference_steps: int = args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
+    guidance: float = args.guidance if args.guidance is not None else recipe["guidance"]
+    reps: int = args.reps
+    # three_way defaults to None from argparse (store_true + default=None).
+    three_way: bool = bool(args.three_way)
 
-    print(f"\n== Vanilla x{args.reps} ==")
-    vanilla_times: list[float] = []
-    for i in range(args.reps):
-        save = bench_dir / "vanilla.png" if i == 0 else None
-        t, _ = _generate(
-            flux,
-            num_inference_steps=num_inference_steps,
-            guidance=guidance,
-            save_path=save,
-        )
-        vanilla_times.append(t)
-        suffix = f"  (saved {save.name})" if save else ""
-        print(f"  rep {i + 1}: {t:.2f}s{suffix}")
+    bench_dir = args.images_dir / variant
 
-    # Free intermediates between conditions (CLAUDE.md "Memory guardrails").
-    mx.metal.clear_cache()
-
-    nogate_times: list[float] = []
+    conditions = ["vanilla"]
     if three_way:
-        print(f"\n== Wrapped (no gate, rel_l1_thresh=0) x{args.reps} ==")
-        for i in range(args.reps):
-            save = bench_dir / "wrapper_nogate.png" if i == 0 else None
-            with apply_teacache(flux, rel_l1_thresh=0.0) as h:
-                t, _ = _generate(
-                    flux,
-                    num_inference_steps=num_inference_steps,
-                    guidance=guidance,
-                    save_path=save,
-                )
-                nogate_times.append(t)
-            suffix = f"  (saved {save.name})" if save else ""
-            print(f"  rep {i + 1}: {t:.2f}s  (rel_l1_thresh=0, no skipping){suffix}")
-        mx.metal.clear_cache()
+        conditions.append("wrapper_nogate")
+    conditions.append("wrapper")
 
-    print(f"\n== TeaCache wrapper x{args.reps} ==")
-    wrapper_times: list[float] = []
-    skipped_counts: list[int] = []
-    computed_counts: list[int] = []
-    for i in range(args.reps):
-        save_name = "wrapper_gated.png" if three_way else "wrapper.png"
-        save = bench_dir / save_name if i == 0 else None
-        with apply_teacache(flux) as h:
-            t, _ = _generate(
-                flux,
-                num_inference_steps=num_inference_steps,
-                guidance=guidance,
-                save_path=save,
-            )
-            wrapper_times.append(t)
-            skipped_counts.append(h.stats.skipped_count)
-            computed_counts.append(h.stats.computed_count)
-        suffix = f"  (saved {save.name})" if save else ""
-        print(f"  rep {i + 1}: {t:.2f}s  (skipped {skipped_counts[-1]}/{num_inference_steps} steps){suffix}")
+    all_results: dict[str, list[dict[str, Any]]] = {}
 
+    for condition in conditions:
+        print(f"\n== {condition} x{reps} ==")
+        results = _run_condition(
+            variant=variant,
+            condition=condition,
+            reps=reps,
+            cap_gb=cap_gb,
+            num_inference_steps=num_inference_steps if args.num_inference_steps is not None else None,
+            guidance=guidance if args.guidance is not None else None,
+            bench_dir=bench_dir,
+            three_way=three_way,
+        )
+        all_results[condition] = results
+
+    # --- Aggregate ---
+    def _times(cond: str) -> list[float]:
+        return [r["elapsed_s"] for r in all_results[cond]]
+
+    def _skipped(cond: str) -> list[int]:
+        return [r["stats_summary"].get("skipped_count", 0) for r in all_results[cond]]
+
+    def _computed(cond: str) -> list[int]:
+        return [r["stats_summary"].get("computed_count", 0) for r in all_results[cond]]
+
+    vanilla_times = _times("vanilla")
+    wrapper_times = _times("wrapper")
     vanilla_med = statistics.median(vanilla_times)
     wrapper_med = statistics.median(wrapper_times)
     speedup = vanilla_med / wrapper_med
+    skipped_counts = _skipped("wrapper")
+    computed_counts = _computed("wrapper")
 
     print("\n== Summary ==")
-    print(f"  variant:          {args.variant}")
+    print(f"  variant:             {variant}")
+    print("  isolation:           subprocess-per-rep")
     print(f"  num_inference_steps: {num_inference_steps}")
-    print(f"  guidance:         {guidance}")
-    print(f"  reps:             {args.reps}")
-    print(f"  vanilla median:   {vanilla_med:.2f}s   (all: {[round(x, 2) for x in vanilla_times]})")
-    print(f"  wrapper median:   {wrapper_med:.2f}s   (all: {[round(x, 2) for x in wrapper_times]})")
-    print(f"  speedup (median): {speedup:.2f}x")
-    print(f"  skipped/computed: {skipped_counts} / {computed_counts}")
+    print(f"  guidance:            {guidance}")
+    print(f"  reps:                {reps}")
+    print(f"  vanilla median:      {vanilla_med:.2f}s   (all: {[round(x, 2) for x in vanilla_times]})")
+    print(f"  wrapper median:      {wrapper_med:.2f}s   (all: {[round(x, 2) for x in wrapper_times]})")
+    print(f"  speedup (median):    {speedup:.2f}x")
+    print(f"  skipped/computed:    {skipped_counts} / {computed_counts}")
+
     if three_way:
+        nogate_times = _times("wrapper_nogate")
         nogate_med = statistics.median(nogate_times)
         compile_avoidance_ratio = vanilla_med / nogate_med
         gating_ratio = nogate_med / wrapper_med
         combined_ratio = vanilla_med / wrapper_med
         print(
-            f"  three-way medians: vanilla {vanilla_med:.2f}s | no-gate {nogate_med:.2f}s | gated {wrapper_med:.2f}s"
+            f"  three-way medians:   vanilla {vanilla_med:.2f}s | no-gate {nogate_med:.2f}s | gated {wrapper_med:.2f}s"
         )
         print(f"  compile-avoidance (vanilla / no-gate): {compile_avoidance_ratio:.2f}x  [v0.4 effect]")
-        print(f"  gating          (no-gate / gated):    {gating_ratio:.2f}x  [v0.4.1 effect]")
+        print(f"  gating          (no-gate / gated):     {gating_ratio:.2f}x  [v0.4.1 effect]")
         print(f"  combined        (vanilla / gated):     {combined_ratio:.2f}x")
-        print(f"  bench images:     {bench_dir}/{{vanilla,wrapper_nogate,wrapper_gated}}.png")
+        print(f"  bench images:        {bench_dir}/{{vanilla,wrapper_nogate,wrapper_gated}}.png")
     else:
-        print(f"  bench images:     {bench_dir}/{{vanilla,wrapper}}.png")
+        print(f"  bench images:        {bench_dir}/{{vanilla,wrapper}}.png")
 
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         report_data: dict[str, Any] = {
-            "variant": args.variant,
+            "schema_version": 2,
+            "isolation": "subprocess-per-rep",
+            "variant": variant,
             "num_inference_steps": num_inference_steps,
             "guidance": guidance,
             "prompt": PROMPT,
             "seed": SEED,
             "height": HEIGHT,
             "width": WIDTH,
-            "reps": args.reps,
+            "reps": reps,
+            "hardware": _detect_hardware(),
             "vanilla_seconds": vanilla_times,
             "wrapper_seconds": wrapper_times,
             "vanilla_median": vanilla_med,
@@ -361,8 +604,11 @@ def main() -> None:
             "skipped_counts": skipped_counts,
             "computed_counts": computed_counts,
             "bench_images_dir": str(bench_dir),
+            "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
+            "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],
         }
         if three_way:
+            nogate_times = _times("wrapper_nogate")
             nogate_med = statistics.median(nogate_times)
             compile_avoidance_ratio = vanilla_med / nogate_med
             gating_ratio = nogate_med / wrapper_med
@@ -372,8 +618,9 @@ def main() -> None:
             report_data["compile_avoidance_ratio"] = compile_avoidance_ratio
             report_data["gating_ratio"] = gating_ratio
             report_data["combined_ratio"] = combined_ratio
+            report_data["nogate_peak_memory_gb"] = [r["peak_memory_gb"] for r in all_results["wrapper_nogate"]]
         args.report.write_text(json.dumps(report_data, indent=2))
-        print(f"  report:           {args.report}")
+        print(f"  report:              {args.report}")
 
 
 if __name__ == "__main__":

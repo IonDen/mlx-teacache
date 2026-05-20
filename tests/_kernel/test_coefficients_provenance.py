@@ -28,21 +28,3 @@ def test_legacy_coefficients_re_exports_provenance_identity():
     assert LP is KP
 
 
-def test_legacy_registry_still_works():
-    """Phase A keeps _REGISTRY, load_builtin, validate_custom in
-    src/mlx_teacache/coefficients.py until Task 18. They must still
-    function after the Provenance move."""
-    from mlx_teacache.coefficients import (
-        _REGISTRY,
-        _UPSTREAM_FLUX_COEFFS,
-        load_builtin,
-        validate_custom,
-    )
-
-    assert "flux1-dev" in _REGISTRY
-    coeffs, prov = load_builtin("flux1-dev")
-    assert coeffs == _UPSTREAM_FLUX_COEFFS
-    assert prov.source == "builtin"
-
-    tup = validate_custom([1.0, 2.0, 3.0, 4.0, 5.0])
-    assert tup == (1.0, 2.0, 3.0, 4.0, 5.0)

@@ -18,14 +18,6 @@ def test_meta_variant_id() -> None:
     assert META["non_distilled"] is True
 
 
-def test_coefficients_match_v05_registry() -> None:
-    """Audit F4 guard: the variant's COEFFICIENTS must equal the v0.5.x
-    registry entry. This catches transcription errors before the legacy
-    registry is removed in Task 18."""
-    from mlx_teacache.coefficients import _FLUX2_KLEIN_BASE_4B_COEFFS
-    from mlx_teacache.variants.flux2_klein_base_4b.config import COEFFICIENTS
-    assert COEFFICIENTS == _FLUX2_KLEIN_BASE_4B_COEFFS
-
 
 def test_default_thresh_is_017() -> None:
     from mlx_teacache.variants.flux2_klein_base_4b.config import DEFAULT_THRESH

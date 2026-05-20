@@ -18,14 +18,6 @@ def test_meta_variant_id() -> None:
     assert META["non_distilled"] is True
 
 
-def test_coefficients_match_v05_registry() -> None:
-    """Audit F4 guard: the variant's COEFFICIENTS must equal the v0.5.x
-    registry entry. This catches transcription errors before the legacy
-    registry is removed in Task 18."""
-    from mlx_teacache.coefficients import _UPSTREAM_FLUX_COEFFS
-    from mlx_teacache.variants.flux1_dev.config import COEFFICIENTS
-    assert COEFFICIENTS == _UPSTREAM_FLUX_COEFFS
-
 
 def test_matches_dev_alias() -> None:
     from mlx_teacache.variants.flux1_dev.detect import matches

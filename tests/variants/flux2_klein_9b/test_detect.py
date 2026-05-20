@@ -21,11 +21,6 @@ def test_meta_variant_id() -> None:
     assert META["recipes"]["default"]["guidance"] == 1.0
 
 
-def test_coefficients_match_v05_registry() -> None:
-    from mlx_teacache.coefficients import _FLUX2_KLEIN_9B_COEFFS
-    from mlx_teacache.variants.flux2_klein_9b.config import COEFFICIENTS
-    assert COEFFICIENTS == _FLUX2_KLEIN_9B_COEFFS
-
 
 def test_default_thresh_is_none() -> None:
     """Distilled 8-step gate doesn't engage; package fallback used."""

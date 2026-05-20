@@ -17,8 +17,8 @@ import mlx.core as mx
 import pytest
 
 from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.coefficients import load_builtin
 from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache.variants.flux1_dev.config import COEFFICIENTS as _FLUX1_DEV_COEFFICIENTS
 from mlx_teacache.variants.flux1_dev.integration import flux1_forward_with_gate
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ def _make_handle(
     *, rel_l1_thresh: float, skip_first: int = 0, skip_last: int = 0, num_inference_steps: int = 25
 ) -> Any:
     """Minimal handle stub with the attributes forward.py reads."""
-    coefficients, _ = load_builtin("flux1-dev")
+    coefficients = _FLUX1_DEV_COEFFICIENTS
     state = SimpleNamespace(
         cache=TeaCacheState(),
         stats=TeaCacheStats(),

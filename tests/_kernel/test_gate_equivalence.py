@@ -10,7 +10,7 @@ import pytest
 from mlx_teacache import gate as legacy_gate
 from mlx_teacache._kernel import gate as kernel_gate
 from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.coefficients import _UPSTREAM_FLUX_COEFFS
+from mlx_teacache.variants.flux1_dev.config import COEFFICIENTS as _UPSTREAM_FLUX_COEFFS
 
 
 @pytest.mark.parametrize(

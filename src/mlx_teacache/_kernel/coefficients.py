@@ -1,15 +1,16 @@
-"""Canonical home for the Provenance dataclass (extracted in v0.6.0).
+"""Canonical home for the Provenance dataclass and coefficient utilities.
 
-The coefficient _REGISTRY and per-variant tuples remain in
-src/mlx_teacache/coefficients.py for the duration of Phase A — they
-move to per-variant config.py files in Phase C, with the legacy
-registry deleted in Task 18.
+The coefficient _REGISTRY and per-variant tuples lived in
+src/mlx_teacache/coefficients.py through Phase A — they moved to
+per-variant config.py files in Phase C (Task 18). The legacy
+src/mlx_teacache/coefficients.py is now a Provenance re-export shim.
 
 See docs/superpowers/specs/2026-05-19-per-variant-cores-design.md.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -27,3 +28,22 @@ class Provenance:
     @classmethod
     def for_user_supplied(cls) -> Provenance:
         return cls(source="user")
+
+
+def validate_custom(coeffs: object) -> tuple[float, float, float, float, float]:
+    """Coerce a user-supplied coefficient sequence into a length-5 tuple of finite floats.
+
+    Raises ValueError with a helpful message on any failure."""
+    try:
+        items = list(coeffs)  # type: ignore[call-overload]
+    except TypeError as e:
+        raise ValueError(f"coefficients must be a sequence of 5 floats, got {type(coeffs).__name__}") from e
+    if len(items) != 5:
+        raise ValueError(f"coefficients must have length 5 (got {len(items)})")
+    try:
+        floats = tuple(float(x) for x in items)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"coefficients must be convertible to float: {coeffs!r}") from e
+    if not all(math.isfinite(x) for x in floats):
+        raise ValueError(f"coefficients must all be finite (no nan/inf): {floats!r}")
+    return floats  # type: ignore[return-value]

@@ -17,8 +17,8 @@ from typing import Any
 import mlx.core as mx
 
 from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.coefficients import load_builtin
 from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache.variants.flux2_klein_4b.config import COEFFICIENTS as _FLUX2_KLEIN_4B_COEFFICIENTS
 from mlx_teacache.variants.flux2_klein_base_4b.integration import flux2_forward_with_gate
 
 # ---------------------------------------------------------------------------
@@ -128,7 +128,7 @@ class _FakeFlux2Inner:
 def _make_handle(*, rel_l1_thresh: float, num_inference_steps: int = 4) -> Any:
     """Minimal handle stub. FLUX.2 forward reads `handle._gen_ctx.active_num_steps`
     for the gate (not from config), so we set it directly."""
-    coefficients, _ = load_builtin("flux2-klein-4b")
+    coefficients = _FLUX2_KLEIN_4B_COEFFICIENTS
     state = SimpleNamespace(cache=TeaCacheState(), stats=TeaCacheStats())
     gen_ctx = SimpleNamespace(active_num_steps=num_inference_steps)
     return SimpleNamespace(

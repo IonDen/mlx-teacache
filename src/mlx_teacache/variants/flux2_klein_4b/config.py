@@ -3,10 +3,20 @@ from __future__ import annotations
 
 from typing import Any
 
-# Cross-import from coefficients.py for v0.6.0 transition.
-from mlx_teacache.coefficients import _FLUX2_KLEIN_4B_COEFFS as _LEGACY_COEFFS
-
-COEFFICIENTS: tuple[float, float, float, float, float] = _LEGACY_COEFFS
+# Derived in-repo by scripts/calibrate_flux2.py --variant klein-4b on 2026-05-15:
+#   10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, guidance=1.0,
+#   512×512, vanilla forward (no caching). 70 consecutive-step pairs of
+#   (rel_l1(mod_in_t, mod_in_{t-1}), rel_l1(body_out_t, body_out_{t-1})).
+#   numpy.polyfit degree=4 → R² = 0.6530.
+# See scripts/_calibration_flux2_klein_4b.json for the full report.
+# Stored verbatim; do not hand-edit. New calibrations bump revision and minor version.
+COEFFICIENTS: tuple[float, float, float, float, float] = (
+    236.9190176127698,
+    -201.47401360106662,
+    66.91354236854073,
+    -11.14796738073235,
+    1.2674506310647067,
+)
 
 DEFAULT_THRESH: float | None = None  # distilled gate doesn't engage; use package fallback 0.20
 

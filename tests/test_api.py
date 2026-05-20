@@ -40,12 +40,19 @@ class _FakeTransformer(nn.Module):
         return mx.zeros((1, 8))
 
 
-def _make_fake_flux1(model_name="dev"):
-    """Build a fake that detect.identify_variant will accept as Flux1."""
+def _make_fake_flux1(alias="dev"):
+    """Build a fake that detect.identify_variant will accept as Flux1.
+
+    mflux 0.17+ requires `model_config.aliases` to contain the short name
+    ("dev" or "schnell") — `model_name` alone is the HF repo path and is
+    ambiguous with controlnet/upscaler variants."""
     from mflux.models.flux.variants.txt2img.flux import Flux1
 
     flux = Flux1.__new__(Flux1)
-    flux.model_config = SimpleNamespace(model_name=model_name)
+    flux.model_config = SimpleNamespace(
+        model_name="black-forest-labs/FLUX.1-" + alias,
+        aliases=[alias],
+    )
     flux.transformer = _FakeTransformer()
     flux.callbacks = _FakeCallbackRegistry()
     flux.generate_image = lambda **kw: "image"

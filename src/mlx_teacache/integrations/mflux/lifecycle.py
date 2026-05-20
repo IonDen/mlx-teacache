@@ -237,6 +237,35 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
     flux.generate_image = wrapped
 
 
+def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
+    """Walk every callback list on the registry and remove `target` by identity.
+    Returns True iff at least one removal succeeded. mflux 0.17 stores the
+    actual lists on `before_loop` / `in_loop` / `after_loop` / `interrupt`;
+    the suffixed names (`*_callbacks`) are methods returning those same lists.
+    We try the real list names first, then the suffixed names (for backward
+    compat with existing fake-registry test fixtures), then generic fallbacks."""
+    removed_any = False
+    for attr in (
+        "before_loop",
+        "in_loop",
+        "after_loop",
+        "interrupt",
+        "before_loop_callbacks",
+        "in_loop_callbacks",
+        "after_loop_callbacks",
+        "interrupt_callbacks",
+        "_callbacks",
+        "callbacks",
+    ):
+        lst = getattr(registry, attr, None)
+        if isinstance(lst, list):
+            for i in range(len(lst) - 1, -1, -1):
+                if lst[i] is target:
+                    del lst[i]
+                    removed_any = True
+    return removed_any
+
+
 def _callback_present_by_identity(registry: Any, target: Any) -> bool:
     """Return True iff target is registered (by identity) on any of the standard
     callback lists. mflux 0.17's CallbackRegistry stores lists on `before_loop`

@@ -99,7 +99,7 @@ def apply(
                 del flux.generate_image
 
     def _unsubscribe_callback() -> None:
-        from mlx_teacache.api import _remove_callback_by_identity
+        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
         _remove_callback_by_identity(flux.callbacks, callback)
 
     patch = VariantPatch(
@@ -108,9 +108,14 @@ def apply(
     )
 
     # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
-    return TeaCacheHandle(
+    handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,
         provenance=_PROVENANCE,
         rel_l1_thresh=resolved_thresh,
     )
+    # Expose resolved coefficients and callback instance as dynamic attributes
+    # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
+    handle.coefficients = resolved_coeffs  # type: ignore[attr-defined]
+    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    return handle

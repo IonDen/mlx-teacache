@@ -33,7 +33,7 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 
-from mlx_teacache.integrations.mflux.forward import (
+from mlx_teacache.variants.flux2_klein_base_4b.integration import (
     _flux2_extract_mod_input,
     _flux2_run_body,
 )

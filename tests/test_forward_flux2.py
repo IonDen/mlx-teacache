@@ -18,8 +18,8 @@ import mlx.core as mx
 
 from mlx_teacache.cache import TeaCacheState
 from mlx_teacache.coefficients import load_builtin
-from mlx_teacache.integrations.mflux.forward import flux2_forward_with_gate
 from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache.variants.flux2_klein_base_4b.integration import flux2_forward_with_gate
 
 # ---------------------------------------------------------------------------
 # Fake Flux2Transformer

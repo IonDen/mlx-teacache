@@ -23,7 +23,7 @@ class _TinyInnerTransformer(nn.Module):
 
 @pytest.fixture
 def proxy_and_inner():
-    from mlx_teacache.integrations.mflux.flux1 import ProxyFlux1Transformer
+    from mlx_teacache.variants.flux1_dev.integration import ProxyFlux1Transformer
 
     inner = _TinyInnerTransformer()
     handle = object()  # not exercised in these compat tests
@@ -64,7 +64,7 @@ def test_parent_traversal_misses_inner_documented_limitation():
     silently regress. Parent-level traversal of a holder that uses the proxy
     as a child should NOT include the proxy's inner params (because _inner
     is filtered by MLX's valid_parameter_filter)."""
-    from mlx_teacache.integrations.mflux.flux1 import ProxyFlux1Transformer
+    from mlx_teacache.variants.flux1_dev.integration import ProxyFlux1Transformer
 
     class Holder(nn.Module):
         def __init__(self, transformer):

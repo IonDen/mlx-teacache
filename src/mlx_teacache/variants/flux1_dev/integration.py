@@ -19,7 +19,6 @@ from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
 from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
-from mlx_teacache.integrations.mflux.lifecycle import wrap_generate_image  # shared
 
 from .config import COEFFICIENTS, DEFAULT_THRESH
 
@@ -404,18 +403,40 @@ def apply(
     # 4. Save original transformer for rollback.
     original_transformer = flux.transformer
 
+    import contextlib
+
+    # Eager rollback list for the transactional patch (per audit medium #3):
+    # if any mutation raises after the first, all preceding mutations are reversed.
+    _rollbacks_so_far: list[Any] = []
+
     # 5. Build proxy and swap onto flux.transformer.
     proxy = ProxyFlux1Transformer(inner=original_transformer, handle=internal)
     flux.transformer = proxy
+    _rollbacks_so_far.append(lambda: setattr(flux, "transformer", original_transformer))
 
     # 6. Register lifecycle callback via wrap_generate_image. This registers
     #    GenerationContextCallback and wraps flux.generate_image.
-    from mlx_teacache.integrations.mflux.lifecycle import GenerationContextCallback
+    # Import GenerationContextCallback lazily here (same module as lifecycle).
+    # Call wrap_generate_image via the module so monkeypatching lifecycle in
+    # tests affects this call site (top-level import caches the original ref).
+    from mlx_teacache.integrations.mflux import lifecycle as _lifecycle
+    from mlx_teacache.integrations.mflux.lifecycle import (
+        GenerationContextCallback,
+        _remove_callback_by_identity,
+    )
 
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
     flux.callbacks.register(callback)
-    wrap_generate_image(flux, internal)
+    _rollbacks_so_far.append(lambda: _remove_callback_by_identity(flux.callbacks, callback))
+
+    try:
+        _lifecycle.wrap_generate_image(flux, internal)
+    except BaseException:
+        for _undo in reversed(_rollbacks_so_far):
+            with contextlib.suppress(Exception):
+                _undo()
+        raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
     #    callback + restores generate_image. NO stats finalize call (audit F2).
@@ -423,8 +444,8 @@ def apply(
         flux.transformer = original_transformer
 
     def _unsubscribe_callback() -> None:
-        from mlx_teacache.api import _remove_callback_by_identity
-        _remove_callback_by_identity(flux.callbacks, callback)
+        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity as _rcbi
+        _rcbi(flux.callbacks, callback)
 
     def _restore_generate_image() -> None:
         if internal._generate_image_was_instance_attr:
@@ -439,9 +460,14 @@ def apply(
     )
 
     # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
-    return TeaCacheHandle(
+    handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,
         provenance=_PROVENANCE,
         rel_l1_thresh=resolved_thresh,
     )
+    # Expose resolved coefficients and callback instance as dynamic attributes
+    # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
+    handle.coefficients = resolved_coeffs  # type: ignore[attr-defined]
+    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    return handle

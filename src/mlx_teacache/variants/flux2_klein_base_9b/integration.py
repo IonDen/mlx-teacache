@@ -50,8 +50,15 @@ def apply(
 ) -> TeaCacheHandle:
     """FLUX.2 Klein base 9B apply. Mirrors flux2_klein_base_4b.apply() but
     with this variant's COEFFICIENTS, DEFAULT_THRESH, and _PROVENANCE."""
-    # 1. Resolve rel_l1_thresh (caller > DEFAULT_THRESH).
-    resolved_thresh: float = rel_l1_thresh if rel_l1_thresh is not None else DEFAULT_THRESH
+    # 1. Resolve rel_l1_thresh.
+    # Priority: explicit caller > per-variant DEFAULT_THRESH (only when using
+    # builtin coefficients) > package fallback 0.20.
+    if rel_l1_thresh is not None:
+        resolved_thresh: float = rel_l1_thresh
+    elif coefficients is None and DEFAULT_THRESH is not None:
+        resolved_thresh = DEFAULT_THRESH
+    else:
+        resolved_thresh = 0.20
 
     # 2. Resolve coefficients (caller > COEFFICIENTS).
     resolved_coeffs: tuple[float, float, float, float, float] = (
@@ -95,7 +102,7 @@ def apply(
                 del flux.generate_image
 
     def _unsubscribe_callback() -> None:
-        from mlx_teacache.api import _remove_callback_by_identity
+        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
 
         _remove_callback_by_identity(flux.callbacks, callback)
 
@@ -105,9 +112,14 @@ def apply(
     )
 
     # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
-    return TeaCacheHandle(
+    handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,
         provenance=_PROVENANCE,
         rel_l1_thresh=resolved_thresh,
     )
+    # Expose resolved coefficients and callback instance as dynamic attributes
+    # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
+    handle.coefficients = resolved_coeffs  # type: ignore[attr-defined]
+    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    return handle

@@ -20,7 +20,12 @@ def test_root_package_exports() -> None:
 
 
 def test_stats_submodule_paths() -> None:
-    from mlx_teacache.stats import GenerationStats, StatsFrozenError, StepDecision, TeaCacheStats  # noqa: F401
+    from mlx_teacache.stats import (  # noqa: F401
+        GenerationStats,
+        StatsFrozenError,
+        StepDecision,
+        TeaCacheStats,
+    )
     s = TeaCacheStats()
     assert s.computed_count == 0
     assert s.speedup_estimate == 1.0

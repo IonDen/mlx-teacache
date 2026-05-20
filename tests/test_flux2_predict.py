@@ -14,9 +14,9 @@ from mlx_teacache.errors import (
     InvalidStepWindowError,
     MissingGenerationContextError,
 )
-from mlx_teacache.integrations.mflux.flux2 import make_teacache_predict_factory
 from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
 from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_predict_factory
 
 pytestmark = pytest.mark.parity
 

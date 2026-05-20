@@ -18,8 +18,8 @@ import pytest
 
 from mlx_teacache.cache import TeaCacheState
 from mlx_teacache.coefficients import load_builtin
-from mlx_teacache.integrations.mflux.forward import flux1_forward_with_gate
 from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache.variants.flux1_dev.integration import flux1_forward_with_gate
 
 # ---------------------------------------------------------------------------
 # Fake transformer

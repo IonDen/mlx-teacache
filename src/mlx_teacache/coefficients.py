@@ -13,9 +13,8 @@ coefficients are derived in-repo via scripts/calibrate_flux2.py."""
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Literal
 
+from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.errors import CalibrationError
 
 # Vendored from https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py
@@ -100,21 +99,6 @@ _FLUX2_KLEIN_BASE_4B_COEFFS: tuple[float, float, float, float, float] = (
     8.179509586828413,
     0.0,
 )
-
-
-@dataclass(frozen=True)
-class Provenance:
-    source: Literal["builtin", "user"]
-    revision: str | None = None
-    calibration_dataset: str | None = None
-    fit_metric: str | None = None
-    fit_metric_value: float | None = None
-    reference_url: str | None = None
-    default_thresh: float | None = None
-
-    @classmethod
-    def for_user_supplied(cls) -> Provenance:
-        return cls(source="user")
 
 
 _REGISTRY: dict[str, tuple[tuple[float, float, float, float, float], Provenance]] = {

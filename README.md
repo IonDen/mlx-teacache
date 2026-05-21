@@ -91,20 +91,28 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 
 ## Supported models
 
-| Variant id | mflux class + config | Coefficient source |
-|---|---|---|
-| `flux1-dev` | `Flux1(model_config=ModelConfig.dev())` | upstream ali-vilab/TeaCache |
-| `flux1-schnell` | `Flux1(model_config=ModelConfig.schnell())` | upstream (shared with dev) |
-| `flux2-klein-4b` | `Flux2Klein(model_config=ModelConfig.flux2_klein_4b())` | in-repo (see `docs/calibration.md`) |
-| `flux2-klein-9b`¹ | `Flux2Klein(model_config=ModelConfig.flux2_klein_9b())` | in-repo (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
-| `flux2-klein-base-4b`² | `Flux2Klein(model_config=ModelConfig.flux2_klein_base_4b())` | in-repo (25-step calibration, origin-constrained; see [`docs/calibration.md`](docs/calibration.md)) |
-| `flux2-klein-base-9b`³ | `Flux2Klein(model_config=ModelConfig.flux2_klein_base_9b())` | reused from base-4b; validated empirically (see [`docs/calibration.md`](docs/calibration.md)) — see [License obligations](#license-obligations) |
+The table below is generated from the variant registry — see `docs/_generate_supported_models.py`. Per-variant detail (mflux constructor, coefficient provenance, quirks) lives in `docs/variants/<id>.md`.
 
-¹ `flux2-klein-9b` coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See the [Benchmarks](#benchmarks) "How the speedup happens" subsection.
+<!-- SUPPORTED_MODELS_START -->
+| Variant id | Display name | Distilled? | Default recipe | License |
+|---|---|---|---|---|
+| `flux1-dev` | FLUX.1 dev | no | 25 steps, g=3.5 | [FLUX.1-dev Non-Commercial License](https://huggingface.co/black-forest-labs/FLUX.1-dev) |
+| `flux1-schnell` | FLUX.1 schnell | yes | 4 steps, g=1.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.1-schnell) |
+| `flux2-klein-4b` | FLUX.2 Klein 4B | yes | 8 steps, g=1.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) |
+| `flux2-klein-9b` | FLUX.2 Klein 9B | yes | 8 steps, g=1.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
+| `flux2-klein-base-4b` | FLUX.2 Klein base 4B | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) |
+| `flux2-klein-base-9b` | FLUX.2 Klein base 9B | no | 50 steps, g=4.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) |
+<!-- SUPPORTED_MODELS_END -->
 
-² `flux2-klein-base-4b` is the non-distilled FLUX.2 Klein 4B variant (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps and the wrapper measures 1.41× wall-clock vs vanilla (~12% from step-skipping plus the FLUX.2 `mx.compile`-path avoidance contribution); SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) runs through a per-branch gated path as of v0.4.1: the canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) skips 9/50 steps for a 1.26× wall-clock speedup vs vanilla mflux on M1 Max.
+### Per-variant notes
 
-³ `flux2-klein-base-9b` is the non-distilled FLUX.2 Klein 9B variant (FLUX Non-Commercial license — see [License obligations](#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). Ships in v0.5.0 reusing base-4b's polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared FLUX.2-Klein architecture family and identical non-distilled 25-step / g=1.0 calibration recipe. Validated empirically at the canonical 50-step CFG recipe (subprocess-isolated cold rep on M1 Max 32GB, bf16, q4): wrapper measures **2.68× wall-clock vs vanilla mflux** (vanilla 2744s, wrapper 1025s; 12/48 active steps skipped at `rel_l1_thresh=0.17`); SSIM 0.986 vs vanilla. The 2.68× combines step-skipping with the FLUX.2 `mx.compile`-path avoidance contribution; clean attribution between the two mechanisms is deferred to v0.5.1. See `_artifacts/validation_klein_base_9b.json` for the full evidence and `_artifacts/validation_klein_base_9b_images/` for the side-by-side images.
+Each variant has its own page under [`docs/variants/`](docs/variants) — mflux constructor, recipe, license obligations, coefficient provenance, quirks. The highlights for the variants where behavior diverges from the default story:
+
+**[`flux2-klein-9b`](docs/variants/flux2-klein-9b.md)** — coefficients are calibrated at `num_inference_steps=8`, origin-constrained polyfit. At the default threshold, the gate produces 0 step-skips on Klein 9B's 8-step schedule (the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 threshold). The library still helps via `mx.compile`-path avoidance (measured ~1.5-2.0× wall-clock improvement), and output quality is preserved (SSIM ≥ 0.85 PR-gate). See [Benchmarks](#benchmarks) → "How the speedup happens".
+
+**[`flux2-klein-base-4b`](docs/variants/flux2-klein-base-4b.md)** — non-distilled FLUX.2 Klein 4B (Apache-2.0). TeaCache engages at `guidance=1.0` with a per-variant default `rel_l1_thresh=0.17`. At 25 steps the gate skips 3/25 steps and the wrapper measures 1.41× wall-clock vs vanilla (~12% from step-skipping plus the FLUX.2 `mx.compile`-path avoidance contribution); SSIM > 0.99 vs vanilla. CFG (`guidance > 1.0`) runs through a per-branch gated path as of v0.4.1: the canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) skips 9/50 steps for a 1.26× wall-clock speedup vs vanilla mflux on M1 Max.
+
+**[`flux2-klein-base-9b`](docs/variants/flux2-klein-base-9b.md)** — non-distilled FLUX.2 Klein 9B (FLUX Non-Commercial — see [License obligations](#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). Ships in v0.5.0 reusing base-4b's polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared FLUX.2-Klein architecture family and identical non-distilled 25-step / g=1.0 calibration recipe. Validated empirically at the canonical 50-step CFG recipe (subprocess-isolated cold rep on M1 Max 32 GB, bf16, q4): wrapper measures **2.68× wall-clock vs vanilla mflux** (vanilla 2744s, wrapper 1025s; 12/48 active steps skipped at `rel_l1_thresh=0.17`); SSIM 0.986 vs vanilla. The 2.68× combines step-skipping with the FLUX.2 `mx.compile`-path avoidance contribution; clean attribution between the two mechanisms is deferred. See `_artifacts/validation_klein_base_9b.json` for the full evidence and `_artifacts/validation_klein_base_9b_images/` for the side-by-side images.
 
 ## When to use mlx-teacache
 

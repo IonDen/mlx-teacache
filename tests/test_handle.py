@@ -3,6 +3,7 @@
 Critical property (audit F2/F3): handle does NOT call stats finalize.
 Stats commit/discard stays in the mflux lifecycle wrapper.
 """
+
 from __future__ import annotations
 
 from mlx_teacache._kernel.coefficients import Provenance
@@ -18,8 +19,7 @@ def test_handle_runs_rollbacks_in_reverse_install_order() -> None:
         finalizers=[],
     )
     stats = TeaCacheStats()
-    h = TeaCacheHandle(patch=patch, stats=stats,
-                      provenance=_dummy_provenance(), rel_l1_thresh=0.2)
+    h = TeaCacheHandle(patch=patch, stats=stats, provenance=_dummy_provenance(), rel_l1_thresh=0.2)
     h.restore()
     assert log == ["r2", "r1"]
 
@@ -30,8 +30,7 @@ def test_handle_restore_is_idempotent() -> None:
 
     counter = {"n": 0}
     patch = VariantPatch(rollbacks=[lambda: counter.update(n=counter["n"] + 1)], finalizers=[])
-    h = TeaCacheHandle(patch=patch, stats=TeaCacheStats(),
-                      provenance=_dummy_provenance(), rel_l1_thresh=0.2)
+    h = TeaCacheHandle(patch=patch, stats=TeaCacheStats(), provenance=_dummy_provenance(), rel_l1_thresh=0.2)
     h.restore()
     h.restore()
     assert counter["n"] == 1
@@ -45,11 +44,11 @@ def test_handle_does_not_finalize_stats() -> None:
     from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 
     stats = TeaCacheStats()
-    stats.record(StepDecision(step_idx=0, timestep=1.0, rel_l1=None,
-                              accumulated_distance=0.0, decision="computed"))
+    stats.record(
+        StepDecision(step_idx=0, timestep=1.0, rel_l1=None, accumulated_distance=0.0, decision="computed")
+    )
     # Staging has 1 entry; public counters still 0.
-    h = TeaCacheHandle(patch=VariantPatch(), stats=stats,
-                      provenance=_dummy_provenance(), rel_l1_thresh=0.2)
+    h = TeaCacheHandle(patch=VariantPatch(), stats=stats, provenance=_dummy_provenance(), rel_l1_thresh=0.2)
     h.restore()
     # Public counters unchanged — restore did NOT commit.
     assert stats.computed_count == 0
@@ -63,8 +62,7 @@ def test_handle_has_no_variant_branches() -> None:
     from mlx_teacache import handle as handle_module
 
     source = inspect.getsource(handle_module)
-    code = "\n".join(ln for ln in source.splitlines()
-                     if not ln.lstrip().startswith("#")).lower()
+    code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#")).lower()
     for bad in ("flux1", "flux2", "klein"):
         assert bad not in code, f"handle.py must not mention {bad!r}"
 

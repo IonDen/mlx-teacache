@@ -1,4 +1,5 @@
 """FLUX.1 dev configuration. mflux-free."""
+
 from __future__ import annotations
 
 from typing import Any

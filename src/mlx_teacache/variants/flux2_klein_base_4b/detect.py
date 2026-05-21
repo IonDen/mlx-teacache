@@ -1,4 +1,5 @@
 """mflux-free detector."""
+
 from __future__ import annotations
 
 

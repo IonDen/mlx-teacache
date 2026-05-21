@@ -2,12 +2,15 @@
 without mflux installed or if Flux2Klein.from_name constructor is not
 available in the installed mflux version (constructor signature varies
 across versions; T20 validation covers the full load path)."""
+
 from __future__ import annotations
 
 import pytest
 
 
-@pytest.mark.skip("smoke deferred until mflux 0.17 Flux2Klein constructor pinned — Flux2Klein has no from_name; T20 validation covers the real load path")
+@pytest.mark.skip(
+    "smoke deferred until mflux 0.17 Flux2Klein constructor pinned — Flux2Klein has no from_name; T20 validation covers the real load path"
+)
 def test_apply_returns_handle_and_restores_pristine() -> None:
     pytest.importorskip("mflux")
     try:

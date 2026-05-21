@@ -2,6 +2,7 @@
 + factory verbatim from flux2_klein_base_4b. Distilled klein-9b at
 g=1.0 uses only the no-CFG forward path; CFG forward is not exercised.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -27,8 +28,7 @@ _PROVENANCE = Provenance(
     source="builtin",
     revision="in-repo-2026-05-16-origin",
     calibration_dataset=(
-        "10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0, "
-        "origin-constrained polyfit"
+        "10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0, origin-constrained polyfit"
     ),
     fit_metric="constrained-LSQ R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
     fit_metric_value=0.4710289350635284,
@@ -101,6 +101,7 @@ def apply(
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+
         _remove_callback_by_identity(flux.callbacks, callback)
 
     patch = VariantPatch(

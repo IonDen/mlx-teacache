@@ -2,6 +2,7 @@
 + factory verbatim from flux2_klein_base_4b. Distilled klein-4b at
 g=1.0 uses only the no-CFG forward path; CFG forward is not exercised.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -26,9 +27,7 @@ from .config import COEFFICIENTS, DEFAULT_THRESH
 _PROVENANCE = Provenance(
     source="builtin",
     revision="in-repo-2026-05-15",
-    calibration_dataset=(
-        "10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0"
-    ),
+    calibration_dataset=("10 prompts × 8 steps × seed=42, M1 Max 32GB, bf16, 512x512, guidance=1.0"),
     fit_metric="numpy.polyfit R^2 on 70 consecutive-step (mod_in, body_out) rel-L1 pairs",
     fit_metric_value=0.6530168924992779,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
@@ -100,6 +99,7 @@ def apply(
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+
         _remove_callback_by_identity(flux.callbacks, callback)
 
     patch = VariantPatch(

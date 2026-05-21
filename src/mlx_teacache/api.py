@@ -31,9 +31,7 @@ def apply_teacache(
     if skip_last_n_steps < 0:
         raise ValueError(f"skip_last_n_steps must be >= 0, got {skip_last_n_steps}")
     if coefficients is not None and len(coefficients) != 5:
-        raise ValueError(
-            f"coefficients must have length 5, got {len(coefficients)}"
-        )
+        raise ValueError(f"coefficients must have length 5, got {len(coefficients)}")
     if rel_l1_thresh is not None and not (0.0 <= rel_l1_thresh <= 1.0):
         raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
 
@@ -67,9 +65,7 @@ def apply_teacache(
             # means this rollback runs FIRST (after all variant rollbacks).
             flux._teacache_handle = handle
 
-            def _clear_sentinel(
-                _flux: Any = flux, _handle: Any = handle
-            ) -> None:
+            def _clear_sentinel(_flux: Any = flux, _handle: Any = handle) -> None:
                 if getattr(_flux, "_teacache_handle", None) is _handle:
                     delattr(_flux, "_teacache_handle")
 

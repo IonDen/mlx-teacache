@@ -23,7 +23,7 @@ START_MARKER = "<!-- SUPPORTED_MODELS_START -->"
 END_MARKER = "<!-- SUPPORTED_MODELS_END -->"
 
 
-def _recipe_summary(recipes: dict) -> str:
+def _recipe_summary(recipes: dict[str, dict[str, object]]) -> str:
     default = recipes.get("default", {})
     steps = default.get("num_inference_steps", "?")
     guidance = default.get("guidance", "?")

@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "isolation": "subprocess-per-rep",
+  "variant": "klein-base-9b",
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.5.0",
+    "mlx_teacache_version": "0.1.0",
+    "mflux_version": "0.17.5",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "vanilla_seconds": [
+    518.6502148330001,
+    517.5645993750004,
+    517.6263844169989
+  ],
+  "wrapper_seconds": [
+    380.6425238330012,
+    381.87606954199873,
+    379.2774055000009
+  ],
+  "vanilla_median": 517.6263844169989,
+  "wrapper_median": 380.6425238330012,
+  "speedup_median": 1.3598753476216874,
+  "skipped_counts": [
+    13,
+    13,
+    13
+  ],
+  "computed_counts": [
+    35,
+    35,
+    35
+  ],
+  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/klein-base-9b",
+  "vanilla_peak_memory_gb": [
+    21.97492678835988,
+    22.22268602438271,
+    22.22268565557897
+  ],
+  "wrapper_peak_memory_gb": [
+    9.729035846889019,
+    9.729019165039062,
+    9.982039270922542
+  ],
+  "nogate_seconds": [
+    509.26062616700074,
+    509.32729229199686,
+    509.33809383300104
+  ],
+  "nogate_median": 509.32729229199686,
+  "compile_avoidance_ratio": 1.016294222301844,
+  "gating_ratio": 1.338072496901196,
+  "combined_ratio": 1.3598753476216874,
+  "nogate_peak_memory_gb": [
+    10.184309778735042,
+    10.18429451994598,
+    10.224760826677084
+  ]
+}

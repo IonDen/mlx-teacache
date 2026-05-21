@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Released
 
+- **v0.6.0** — Per-variant cores + shared algorithmic kernel. Adding a new FLUX variant now lives in `src/mlx_teacache/variants/<id>/{config,detect,integration}.py` plus matching tests — no more cross-cutting edits to `api.py`, `forward.py`, `coefficients.py::_REGISTRY`, and `detect.py`. Pure-algorithm primitives moved to `src/mlx_teacache/_kernel/` and import-clean (gated by `tests/_kernel/test_kernel_no_mflux_import.py`); `TeaCacheHandle` collapsed to a variant-agnostic context manager driven by per-variant `VariantPatch` rollback/finalizer callbacks. The 4-kwarg `apply_teacache` public signature is preserved byte-equivalent (snapshot-tested). `scripts/bench_speedup.py` refactored to subprocess-per-rep — the v0.5.1 backlog item folded into this release because the 9B + CFG memory-safety story depends on it. The subprocess-isolated three-way bench on `flux2-klein-base-9b` (50 steps + g=4.0, M1 Max 32 GB) measures **1.36× combined** (1.34× gating + 1.02× compile-avoidance), correcting v0.5.0's inflated 2.68× headline (caused by same-process MLX state leakage in the v0.5.x harness). Sanity check on `flux2-klein-base-4b` against the v0.4.1 baseline pending.
 - **v0.5.0** — `flux2-klein-base-9b` (non-distilled FLUX.2 Klein 9B, FLUX NC license). Ships by reusing `flux2-klein-base-4b`'s polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared architecture family and identical non-distilled 25-step / g=1.0 calibration recipe. Validated empirically at the canonical 50-step CFG recipe on M1 Max 32GB: SSIM 0.986 vs vanilla, **2.68× combined wall-clock** (vanilla 2744s, wrapper 1025s; 12/48 active steps skipped). Clean attribution between gating contribution and `mx.compile`-path avoidance is deferred to v0.5.1 (the existing `bench_speedup.py` runs 9 same-process generations and isn't memory-safe at 9B on 32GB; needs a subprocess-per-rep refactor first). New `scripts/validate_klein_base_9b.py` with subprocess-per-condition isolation + explicit MLX memory cap. New "Memory guardrails for heavy generations on 32 GB" rule documented after a same-process OOM crashed the machine during pre-release work.
 - **v0.4.1** — CFG per-branch caching for FLUX.2. Canonical upstream recipe (`guidance_scale=4.0, num_inference_steps=50`) on `flux2-klein-base-4b` is now gate-engaged: 1.26× combined wall-clock on M1 Max (1.16× gating contribution, 1.09× `mx.compile`-path avoidance), 9/50 skips, SSIM ≥ 0.99 vs vanilla. `_vanilla_flux2_cfg_predict()` retired from production paths. Three-way bench protocol (`vanilla` / `no-gate` / `gated`) separates the v0.4 compile-avoidance effect from the v0.4.1 gating contribution. `cfg_fallback_steps` deprecated.
 - **v0.4.0** — `flux2-klein-base-4b` (Apache-2.0, non-distilled, 25-step calibration). First FLUX.2 variant where the polynomial gate engages at the package default. Per-variant `default_thresh=0.17` ships via `Provenance.default_thresh` (3/25 skips on M1 Max; wrapper measures 1.41× wall-clock — both FLUX.2 mechanisms contribute: ~12% from step-skipping plus `mx.compile`-path avoidance; SSIM > 0.99). CFG-engaged caching deferred to v0.4.1. Per-variant default-threshold mechanism added (was Approach B in original brainstorming; now permanent API).
@@ -13,17 +14,7 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Active
 
-### v0.5.1: clean three-way attribution for `flux2-klein-base-9b`
-
-Follow-up to v0.5.0. The 2.68× headline number on klein-base-9b combines step-skipping (the v0.4.1 gating effect) with `mx.compile`-path avoidance (the v0.4 effect that drops the wrapper's peak memory below vanilla's). v0.5.0 ships with the combined number because the existing three-way bench (`scripts/bench_speedup.py --three-way`) runs 9 same-process generations and isn't memory-safe at 9B on 32GB unified memory — a previous unguarded same-process run OOM'd and crashed the machine.
-
-Scope:
-
-1. Refactor `bench_speedup.py` to subprocess-per-rep, mirroring `scripts/bench_comparison.py` (worker prints a `::BENCH_RESULT::` JSON sentinel, orchestrator aggregates). One subprocess per (variant, condition, rep) so each rep starts cold and MLX's allocator releases everything on exit.
-2. Re-run the three-way bench on klein-base-9b at the canonical 50-step CFG recipe. Numbers go into the README footnote ³ and CHANGELOG.
-3. Same refactor lets us re-run the three-way bench on klein-base-4b cleanly too, replacing the v0.4.1 numbers if the new harness produces different attribution.
-
-Effort: 3-5 h refactor + 3-4 h bench wall-clock. Half a day total.
+(v0.5.1's clean three-way attribution work was folded into v0.6.0 — the subprocess-per-rep refactor that makes the bench memory-safe at 9B on 32 GB shipped as part of the per-variant cores release. The triage of two remaining `test_paired_parity_at_threshold_zero_klein_pr_gate[*-0.7]` parity failures from the v0.6.0 release run is the open item.)
 
 ---
 

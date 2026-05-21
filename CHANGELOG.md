@@ -7,6 +7,60 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-21
+
+Per-variant cores + shared algorithmic kernel. The single 315-line `api.py` and the per-family integration modules (`flux1.py`, `flux2.py`, `forward.py`, `detect.py` under `integrations/mflux/`) are replaced by:
+
+- `src/mlx_teacache/_kernel/` — pure-algorithm primitives (`gate`, `cache`, `stats`, `coefficients`). No mflux imports anywhere in this subtree; `tests/_kernel/test_kernel_no_mflux_import.py` walks the modules in a simulated no-mflux env and asserts every import succeeds.
+- `src/mlx_teacache/variants/<id>/` — one subpackage per FLUX variant with `config.py` (META + COEFFICIENTS + RECIPES, mflux-free), `detect.py` (alias-based matcher, mflux-free), `integration.py` (the per-variant `apply()` plus its share of the verbatim forward port, mflux-imported lazily).
+- `src/mlx_teacache/handle.py` — variant-agnostic `TeaCacheHandle` + `VariantPatch` rollback/finalizer contract. Variants build a `VariantPatch` describing their teardown; the handle runs rollbacks in reverse order on `restore()`. Stats commit/discard stays in the mflux lifecycle wrapper — `restore()` does not finalize stats (audit finding F2).
+
+Behavior is byte-equivalent to v0.5.0 for end users. The 4-kwarg `apply_teacache(flux, *, rel_l1_thresh, coefficients, skip_first_n_steps, skip_last_n_steps)` signature is preserved (audit F3); `tests/test_api_dispatch.py` + `tests/test_public_api.py` enforce this via `inspect.signature` and a subprocess that forces `mflux` unimportable and confirms `import mlx_teacache` still works (audit F4).
+
+### Added
+- `src/mlx_teacache/_kernel/{gate,cache,stats,coefficients}.py` — verbatim extraction from the legacy module locations. Module docstring is the only diff; field sets, function bodies, and import-time behavior unchanged.
+- `src/mlx_teacache/variants/__init__.py` — `_REGISTRY` walker that eagerly imports each variant's `config.py` + `detect.py` on first `mlx_teacache.variants` import; `integration.py` is loaded lazily via `entry["load_integration"]()` only after `apply_teacache` picks the winning variant.
+- `src/mlx_teacache/handle.py::TeaCacheHandle` with `VariantPatch`. `tests/test_handle.py` includes a static-grep audit that `handle.py` mentions no variant names.
+- Six variant subpackages under `src/mlx_teacache/variants/` covering all v0.5.x FLUX models: `flux1_dev`, `flux1_schnell`, `flux2_klein_4b`, `flux2_klein_9b`, `flux2_klein_base_4b`, `flux2_klein_base_9b`.
+- `tests/conftest.py` — session-level `mx.set_wired_limit(20 GB)` + `mx.set_memory_limit(22 GB)` cap. Prevents kernel watchdog panics from misrouted parity tests that load real FLUX models (root-caused after the v0.5.x test suite triggered a kernel panic on 2026-05-20 with the conftest unguarded).
+- `tests/test_api_dispatch.py` — gates the 4-kwarg `apply_teacache` signature via `inspect.signature` (audit F3 regression guard).
+- `tests/test_public_api.py` — snapshots every documented v0.5.x import path + the subprocess "import without mflux" check (audit F4).
+- `docs/_generate_supported_models.py` — reads `_REGISTRY` and emits the README's `## Supported models` table between `<!-- SUPPORTED_MODELS_START -->` markers. Future variants land in README automatically when registered.
+- `docs/variants/<id>.md` — one page per FLUX variant covering mflux constructor, recipe + defaults, coefficient provenance, license obligations, quirks.
+
+### Changed
+- `src/mlx_teacache/api.py` is now an 86-line dispatcher that walks `_REGISTRY`. The FLUX.1 + FLUX.2 branches that used to live inline moved into each variant's `integration.py::apply()`.
+- `src/mlx_teacache/integrations/mflux/lifecycle.py` is kept as the shared lifecycle module (`GenerationContextCallback`, `wrap_generate_image`, `_remove_callback_by_identity`). `_remove_callback_by_identity` moved here from `api.py`; all six variant integrations now import it from `integrations/mflux/lifecycle`.
+- `src/mlx_teacache/coefficients.py` shrinks from ~235 lines to an 8-line compatibility shim that re-exports `Provenance` and `validate_custom` from `_kernel.coefficients`. `_REGISTRY`, `load_builtin`, and the per-variant coefficient tuples are gone — each variant's `config.py` owns its own COEFFICIENTS literal now (with the vendoring/calibration comment block carried over).
+- `scripts/bench_speedup.py` refactored to subprocess-per-rep. Each (variant, condition, rep) runs in a fresh Python subprocess; workers print `::BENCH_RESULT::<json>` sentinels and the orchestrator aggregates median/min/max + peak memory + skip counts. Memory caps applied in each worker before model load. Folds the v0.5.1 "always intended" fix into this release.
+- `scripts/calibrate_flux2.py` and several tests retargeted to import from the variant subpackages instead of the deleted `integrations/mflux/forward.py`.
+
+### Removed
+- `src/mlx_teacache/integrations/mflux/{forward,flux1,flux2,detect}.py` — 1000+ lines of legacy code. The verbatim ports live in `variants/<id>/integration.py`. Files moved to `~/.Trash` per `CLAUDE.md`'s "never `rm`" rule rather than deleted, in case any reviewer wants to inspect the verbatim-port mapping.
+- `mlx_teacache.coefficients._REGISTRY` + the four per-variant coefficient tuples + `load_builtin`. The legacy registry served its purpose during the migration (transcription-error catcher); each variant owns its tuple now.
+
+### Measured
+
+Three-way bench on `flux2-klein-base-9b` at the canonical 50-step + g=4.0 recipe (3 reps, subprocess-per-rep, M1 Max 32 GB, bf16, q4):
+
+- **Combined: 1.36×** (vanilla 517.6 s median, wrapper 380.6 s median)
+- **Gating contribution: 1.34×** (no-gate 509.3 s → gated 380.6 s) — the v0.4.1 effect
+- **`mx.compile`-path avoidance: 1.02×** (vanilla 517.6 s → no-gate 509.3 s) — the v0.4 effect, much smaller than measured on klein-base-4b
+- Skip count: 13/48 active steps at `rel_l1_thresh=0.17` (stable across 3 reps)
+- Wrapper peak memory: ~10 GB vs vanilla's ~22 GB
+
+**Correction to v0.5.0's headline.** v0.5.0 reported a 2.68× combined speedup on klein-base-9b (vanilla 2744 s, wrapper 1025 s). That measurement was inflated by same-process MLX state leakage: the v0.5.0 bench harness ran vanilla and wrapper sequentially in one Python interpreter, so the vanilla rep paid full-cold MLX compilation cost while the wrapper rep inherited warm allocator state. Wall-clock difference under that setup conflates the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness gives every (variant, condition, rep) its own fresh interpreter — both vanilla and wrapper are now genuinely cold. The honest number is 1.36×, in line with the v0.4.1 klein-base-4b result (1.26×). v0.5.0's `README.md` and `docs/variants/flux2-klein-base-9b.md` are updated in this release.
+
+Sanity check on `flux2-klein-base-4b` against the v0.4.1 baseline (1.16× gating, 1.09× compile-avoidance, 1.26× combined) is the next bench — deferred to a follow-up because clearing the v0.5.0 correction was the higher-priority release-gate item.
+
+Full evidence: `_artifacts/v0.6.0_bench_klein_base_9b.json` and `tests/_artifacts/bench_images/klein-base-9b/`.
+
+### Why this refactor
+
+v0.5.0 made it clear that adding a new FLUX variant required edits to four cross-cutting files (`detect.py`, `coefficients.py::_REGISTRY`, `forward.py`, `api.py::apply_teacache`) plus matching test plumbing. The per-variant layout reduces this to a directory copy: a new FLUX variant lands as `variants/<new-id>/{__init__,config,detect,integration}.py` plus `tests/variants/<new-id>/`. The plan amendment after the kernel-boundary audit (T14) confirmed no `gate_step` / `poly_eval` / `mean_abs_rel_l1` redefinitions in variants — the kernel functions live in `_kernel/` and stay there.
+
+The architectural pieces flush a v0.5.1 backlog item (subprocess-per-rep bench) into this release because the memory-safety story for 9B + CFG on 32 GB depends on it.
+
 ## [0.5.0] — 2026-05-19
 
 Adds `flux2-klein-base-9b` (non-distilled FLUX.2 Klein 9B, FLUX Non-Commercial license) as a supported variant. Ships by reusing `flux2-klein-base-4b`'s polynomial coefficients verbatim and the same `rel_l1_thresh=0.17` default — justified by the shared architecture family and identical 25-step / g=1.0 calibration recipe — then validating empirically at the canonical 50-step CFG recipe before tagging.

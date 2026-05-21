@@ -51,17 +51,17 @@ This is the canonical FLUX.2 Klein base setting from Black Forest Labs: 50 steps
 
 |  | Vanilla mflux | mlx-teacache |
 |---|---|---|
-| Time (single cold rep)¹ | 2744 s | 1025 s |
-| Cold speedup | — | **2.68×** |
-| Steps skipped | 0 of 48 active | 12 of 48 active |
+| Time (median of 3 reps)¹ | 517.6 s | 380.6 s |
+| Speedup | — | **1.36×** |
+| Steps skipped | 0 of 48 active | 13 of 48 active |
 | Threshold | — | rel_l1 = 0.17 |
-| Peak memory | 25.2 GB | 13.2 GB |
+| Peak memory | ~22 GB | ~10 GB |
 | SSIM vs vanilla | — | **0.986** |
 | Image | ![vanilla](_artifacts/validation_klein_base_9b_images/vanilla.webp) | ![wrapper](_artifacts/validation_klein_base_9b_images/wrapper.webp) |
 
-¹ Numbers come from the v0.5.0 release-gate validation (`scripts/validate_klein_base_9b.py`), which runs a single subprocess-isolated cold rep per condition. Warm-median bench is deferred to v0.5.1 because the existing three-way bench (`scripts/bench_speedup.py --three-way`) is not memory-safe at 9B on 32 GB unified memory — a previous unguarded same-process run hit system-level OOM. v0.5.1 refactors the bench to subprocess-per-rep and re-measures.
+¹ Subprocess-per-rep bench on M1 Max 32 GB, bf16, q4 — every (variant, condition, rep) runs in a fresh Python interpreter so each timing starts from a cold MLX allocator. Full report: `_artifacts/v0.6.0_bench_klein_base_9b.json`. v0.5.0 advertised 2.68× on this same recipe; that number was inflated by same-process MLX state leakage in the v0.5.x bench harness — vanilla ran cold while the wrapper inherited warm allocator state. v0.6.0's subprocess isolation exposes the honest 1.36×.
 
-`flux2-klein-base-9b` is the non-distilled FLUX.2 Klein 9B variant (FLUX Non-Commercial license — see [README License obligations](README.md#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). v0.5.0 ships reusing base-4b's polynomial coefficients verbatim — same FLUX.2 Klein architecture family, same calibration recipe, validated empirically at the canonical 50-step CFG recipe. The 2.68× cold-rep speedup combines step-skipping with `mx.compile`-path avoidance (the wrapper's peak memory at 13 GB vs vanilla's 25 GB is the tell — the wrapper bypasses mflux's compiled `_predict` and its activation overhead). Clean attribution between the two mechanisms is queued for v0.5.1.
+`flux2-klein-base-9b` is the non-distilled FLUX.2 Klein 9B variant (FLUX Non-Commercial license — see [README License obligations](README.md#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). Reuses base-4b's polynomial coefficients verbatim — same FLUX.2 Klein architecture family, same calibration recipe. The 1.36× combined speedup decomposes into 1.34× from gating (the v0.4.1 effect) and 1.02× from `mx.compile`-path avoidance (the v0.4 effect; small on M1 Max for this recipe — the peak-memory drop from 22 GB to 10 GB is the tell that the wrapper bypasses mflux's compiled `_predict`).
 
 ## What is excluded and why
 

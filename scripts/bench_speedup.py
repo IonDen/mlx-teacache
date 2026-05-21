@@ -178,6 +178,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         variant_id = _VARIANT_SLUG_TO_ID.get(args.variant, "")
         if variant_id:
             from mlx_teacache.variants import _REGISTRY
+
             registry_entry = _REGISTRY.get(variant_id)
             if registry_entry is not None:
                 hint = registry_entry["META"].get("memory_cap_hint_gb")
@@ -196,7 +197,9 @@ def _worker_main(args: argparse.Namespace) -> None:
     condition = args.condition
     rep = args.rep
     recipe = _VARIANT_RECIPE[variant]
-    num_inference_steps: int = args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
+    num_inference_steps: int = (
+        args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
+    )
     guidance: float = args.guidance if args.guidance is not None else recipe["guidance"]
     save_path: Path | None = Path(args.save_to) if args.save_to else None
 
@@ -301,11 +304,7 @@ def _macos_sysctl(key: str) -> str | None:
 
 
 def _detect_hardware() -> dict[str, Any]:
-    chip = (
-        _macos_sysctl("machdep.cpu.brand_string")
-        or platform.processor()
-        or "Apple Silicon"
-    )
+    chip = _macos_sysctl("machdep.cpu.brand_string") or platform.processor() or "Apple Silicon"
     ram_bytes_str = _macos_sysctl("hw.memsize")
     ram_gb: int | None = None
     if ram_bytes_str is not None:
@@ -340,9 +339,12 @@ def _run_one_worker(
         sys.executable,
         str(Path(__file__).resolve()),
         "--worker",
-        "--variant", variant,
-        "--condition", condition,
-        "--rep", str(rep),
+        "--variant",
+        variant,
+        "--condition",
+        condition,
+        "--rep",
+        str(rep),
     ]
     if cap_gb is not None:
         cmd += ["--cap-gb", str(cap_gb)]
@@ -364,7 +366,7 @@ def _run_one_worker(
         raise RuntimeError(f"worker failed for {label}: exit {proc.returncode}")
     for line in proc.stdout.splitlines():
         if line.startswith(WORKER_RESULT_SENTINEL):
-            return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL):]))
+            return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
     raise RuntimeError(f"worker for {label} did not emit a {WORKER_RESULT_SENTINEL} result line")
 
 
@@ -450,7 +452,9 @@ def main() -> None:
     # Worker-only args.
     parser.add_argument("--condition", help="vanilla / wrapper / wrapper_nogate (worker mode).")
     parser.add_argument("--rep", type=int, default=0, help="Rep index 0-based (worker mode).")
-    parser.add_argument("--save-to", default=None, dest="save_to", help="Image destination path (worker mode).")
+    parser.add_argument(
+        "--save-to", default=None, dest="save_to", help="Image destination path (worker mode)."
+    )
 
     # Orchestrator-only args.
     parser.add_argument("--reps", type=int, default=3, help="Timed reps per condition (orchestrator mode).")
@@ -508,7 +512,9 @@ def main() -> None:
 
     variant = args.variant
     recipe = _VARIANT_RECIPE[variant]
-    num_inference_steps: int = args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
+    num_inference_steps: int = (
+        args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
+    )
     guidance: float = args.guidance if args.guidance is not None else recipe["guidance"]
     reps: int = args.reps
     # three_way defaults to None from argparse (store_true + default=None).
@@ -618,7 +624,9 @@ def main() -> None:
             report_data["compile_avoidance_ratio"] = compile_avoidance_ratio
             report_data["gating_ratio"] = gating_ratio
             report_data["combined_ratio"] = combined_ratio
-            report_data["nogate_peak_memory_gb"] = [r["peak_memory_gb"] for r in all_results["wrapper_nogate"]]
+            report_data["nogate_peak_memory_gb"] = [
+                r["peak_memory_gb"] for r in all_results["wrapper_nogate"]
+            ]
         args.report.write_text(json.dumps(report_data, indent=2))
         print(f"  report:              {args.report}")
 

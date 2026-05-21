@@ -6,6 +6,7 @@ integration.py is loaded lazily via load_integration() — apply_teacache
 calls it after detect picks the winning variant. This is the contract
 that keeps `import mlx_teacache` working without the [mflux] extra.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -27,6 +28,7 @@ def _make_lazy_loader(module_name: str) -> Callable[[], Callable[..., Any]]:
     def _load() -> Callable[..., Any]:
         integration = importlib.import_module(f"{module_name}.integration")
         return cast(Callable[..., Any], integration.apply)
+
     return _load
 
 

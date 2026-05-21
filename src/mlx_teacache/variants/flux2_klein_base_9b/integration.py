@@ -4,6 +4,7 @@ path (both no-CFG at low_step recipe and CFG-per-branch at the canonical
 50-step + g=4.0 recipe) — only the metadata (Provenance) and memory_cap
 hint differ.
 """
+
 from __future__ import annotations
 
 from typing import Any

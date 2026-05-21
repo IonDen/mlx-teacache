@@ -2,6 +2,7 @@
 verbatim; same transformer architecture. Only the public-facing
 metadata (provenance) and the apply() defaults differ.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -40,7 +41,9 @@ def apply(
     resolved_thresh: float = rel_l1_thresh if rel_l1_thresh is not None else DEFAULT_THRESH
 
     # 2. Resolve coefficients (caller > COEFFICIENTS).
-    resolved_coeffs: tuple[float, float, float, float, float] = coefficients if coefficients is not None else COEFFICIENTS
+    resolved_coeffs: tuple[float, float, float, float, float] = (
+        coefficients if coefficients is not None else COEFFICIENTS
+    )
 
     # 3. Build internal handle (carries state, gen context, and per-generation
     #    fields that lifecycle.py and the forward block reference).
@@ -74,6 +77,7 @@ def apply(
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+
         _remove_callback_by_identity(flux.callbacks, callback)
 
     def _restore_generate_image() -> None:

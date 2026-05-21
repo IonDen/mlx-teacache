@@ -1,5 +1,6 @@
 """Real-weight smoke test for flux1-dev integration. Skipped without
 mflux installed."""
+
 import pytest
 
 

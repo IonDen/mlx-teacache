@@ -1,4 +1,5 @@
 """FLUX.2 Klein base 4B configuration. mflux-free."""
+
 from __future__ import annotations
 
 from typing import Any

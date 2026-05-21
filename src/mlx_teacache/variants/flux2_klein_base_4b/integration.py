@@ -13,6 +13,7 @@
 mflux is imported only inside this module. The registry loads this
 lazily, after detect.matches() wins.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -569,6 +570,7 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
 
 # ---------- apply() — translated from v0.5.x api.py::apply_teacache FLUX.2 branch ----------
 
+
 def apply(
     flux: Any,
     *,
@@ -642,6 +644,7 @@ def apply(
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+
         _remove_callback_by_identity(flux.callbacks, callback)
 
     patch = VariantPatch(

@@ -6,6 +6,7 @@
 mflux is imported only inside this module. The package registry loads
 this lazily, after detect.matches() wins.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ _PROVENANCE = Provenance(
 
 # ----- Internal handle shape (mirrors v0.5.x TeaCacheHandle fields used by
 #       forward.py and lifecycle.py). Not part of the public API. -----
+
 
 @dataclass
 class _InternalHandleState:
@@ -74,6 +76,7 @@ class _InternalHandle:
 
 
 # ----- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/flux1.py -----
+
 
 class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
     def __init__(self, inner: Any, handle: Any) -> None:
@@ -375,6 +378,7 @@ def flux1_forward_with_gate(
 
 # ----- apply() — translated from v0.5.x api.py::apply_teacache FLUX.1 branch -----
 
+
 def apply(
     flux: Any,
     *,
@@ -389,7 +393,9 @@ def apply(
     resolved_thresh: float = rel_l1_thresh if rel_l1_thresh is not None else DEFAULT_THRESH
 
     # 2. Resolve coefficients (caller > COEFFICIENTS).
-    resolved_coeffs: tuple[float, float, float, float, float] = coefficients if coefficients is not None else COEFFICIENTS
+    resolved_coeffs: tuple[float, float, float, float, float] = (
+        coefficients if coefficients is not None else COEFFICIENTS
+    )
 
     # 3. Build internal handle (carries state, gen context, and per-generation
     #    fields that lifecycle.py and the forward block reference).
@@ -445,6 +451,7 @@ def apply(
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity as _rcbi
+
         _rcbi(flux.callbacks, callback)
 
     def _restore_generate_image() -> None:

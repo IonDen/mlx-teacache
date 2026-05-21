@@ -4,6 +4,7 @@ Coefficients are REUSED from flux2_klein_base_4b — same architecture
 family, same calibration recipe. v0.5.0 validated this reuse with
 SSIM 0.986 at 50 steps + g=4.0; see scripts/validate_klein_base_9b.py
 and _artifacts/validation_klein_base_9b.json for the evidence."""
+
 from __future__ import annotations
 
 from typing import Any

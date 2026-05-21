@@ -338,18 +338,22 @@ def test_paired_parity_reverse_order_klein(flux2_klein: tuple[Any, str]) -> None
 
 
 def test_cfg_fallback_matches_vanilla(flux2_klein: tuple[Any, str]) -> None:
-    """At guidance > 1.0 the FLUX.2 wrapper bypasses gating entirely and
-    delegates to vanilla mflux's compiled _predict. Paired parity is
-    bit-exact (not just allclose) because both sides go through the same
-    compiled kernel. Every StepDecision is `cfg-fallback`."""
+    """At guidance > 1.0 the FLUX.2 wrapper routes through the gated
+    CFG-per-branch path (flux2_cfg_forward_with_gate, v0.4.1+) — NOT a
+    bypass to vanilla mflux's compiled _predict. The wrapper runs eager
+    Python while vanilla goes through mx.compile, so paired parity is
+    NOT bit-exact: ~1 ULP per branch compounds across steps. Cosine
+    similarity stays >= 0.97 — see the module docstring."""
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id, guidance=3.5)
     vb, w, va, _ = _paired_parity(flux, kw)
-    assert mx.array_equal(vb, w), (
-        "CFG fallback should be byte-identical to vanilla in-process "
-        "(both sides go through the same compiled _predict)"
+    cos = _cosine(vb, w)
+    assert cos >= _FLUX2_COSINE_GATE, (
+        f"CFG-gated wrapper cosine vs vanilla = {cos:.6f} "
+        f"< {_FLUX2_COSINE_GATE}; eager wrapper vs compiled vanilla "
+        f"is expected to diverge ~1 ULP/step but stay above gate."
     )
-    assert mx.array_equal(vb, va)
+    assert mx.array_equal(vb, va), "restore() left a trace; vanilla_after differs from vanilla_before"
 
 
 # ---------------------------------------------------------------------------

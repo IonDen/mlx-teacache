@@ -96,32 +96,35 @@ def test_invalid_step_window_raised_on_first_non_cfg_step():
         )
 
 
-def test_cfg_path_does_not_raise_invalid_step_window():
-    """All-CFG short schedule should NOT raise — per §5.6, validation is
-    deferred to first non-CFG step, and an all-CFG generation never reaches one."""
+def test_cfg_path_enforces_skip_window_validation():
+    """v0.4.1+ behavior: skip-window validation runs on the FIRST gated
+    call regardless of CFG. Pre-v0.4.1 deferred validation to a non-CFG
+    step (and an all-CFG generation never reached one), which silently
+    skipped the check. The new contract makes the gate fire eagerly so
+    misconfigured runs fail fast.
+
+    Regression guard: with skip_first=1 + skip_last=1 and active_num_steps=2,
+    the sum (2) is not strictly less than active_num_steps (2), so the
+    first CFG call must raise InvalidStepWindowError before reaching the
+    transformer."""
+    from mlx_teacache.errors import InvalidStepWindowError
+
     handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
     _set_ctx_ready(handle, num_steps=2)
     factory = make_teacache_predict_factory(handle)
-    # Use a fake transformer that returns a tensor — we only care that the
-    # call completes without InvalidStepWindowError.
-    call_count = [0]
 
     def transformer(**kw):
-        call_count[0] += 1
         return mx.zeros((1, 2, 4))
 
     predict = factory(transformer)
-    predict(
-        latents=mx.zeros((1, 2, 4)),
-        latent_ids=mx.zeros((1, 2, 3)),
-        prompt_embeds=mx.zeros((1, 8, 16)),
-        text_ids=mx.zeros((1, 8, 3)),
-        negative_prompt_embeds=mx.zeros((1, 8, 16)),
-        negative_text_ids=mx.zeros((1, 8, 3)),
-        guidance=3.5,
-        timestep=mx.array(1.0),
-    )
-    # CFG path calls transformer twice (positive + negative)
-    assert call_count[0] == 2
-    assert handle._state.stats._staging.cfg_fallback == 1
-    assert handle._state.cache.step_counter == 1
+    with pytest.raises(InvalidStepWindowError):
+        predict(
+            latents=mx.zeros((1, 2, 4)),
+            latent_ids=mx.zeros((1, 2, 3)),
+            prompt_embeds=mx.zeros((1, 8, 16)),
+            text_ids=mx.zeros((1, 8, 3)),
+            negative_prompt_embeds=mx.zeros((1, 8, 16)),
+            negative_text_ids=mx.zeros((1, 8, 3)),
+            guidance=3.5,
+            timestep=mx.array(1.0),
+        )

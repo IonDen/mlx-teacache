@@ -301,7 +301,9 @@ def test_default_threshold_skips_and_stays_close_to_vanilla(flux1_dev: Any) -> N
 def test_failed_generation_retry_no_stale_cache(flux1_dev: Any) -> None:
     """A mid-loop crash must not leak state into a retry. Retry output
     must remain close to a same-process vanilla baseline."""
-    import mlx_teacache.integrations.mflux.forward as fwd
+    # v0.6.0: _flux1_run_body moved from integrations/mflux/forward.py to
+    # variants/flux1_dev/integration.py (verbatim port).
+    import mlx_teacache.variants.flux1_dev.integration as fwd
 
     orig = fwd._flux1_run_body
     call_count = [0]

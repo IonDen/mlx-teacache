@@ -31,19 +31,14 @@ def _recipe_summary(recipes: dict[str, dict[str, object]]) -> str:
 
 
 def _build_table() -> str:
-    header = (
-        "| Variant id | Display name | Distilled? | Default recipe | License |\n"
-        "|---|---|---|---|---|"
-    )
+    header = "| Variant id | Display name | Distilled? | Default recipe | License |\n|---|---|---|---|---|"
     rows = []
     for variant_id in sorted(_REGISTRY):
         meta = _REGISTRY[variant_id]["META"]
         distilled = "no" if meta["non_distilled"] else "yes"
         recipe = _recipe_summary(meta["recipes"])
         license_url = meta.get("license_url", "")
-        license_cell = (
-            f"[{meta['license']}]({license_url})" if license_url else meta["license"]
-        )
+        license_cell = f"[{meta['license']}]({license_url})" if license_url else meta["license"]
         rows.append(
             f"| `{meta['variant_id']}` | {meta['display_name']} | {distilled} | {recipe} | {license_cell} |"
         )

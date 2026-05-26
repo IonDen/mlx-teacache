@@ -1,9 +1,14 @@
-"""Real-weight smoke test for flux1-dev integration. Skipped without
-mflux installed."""
+"""Real-weight smoke test for flux1-dev integration. Marked slow+network
+because Flux1.from_name("dev") downloads the gated black-forest-labs/FLUX.1-dev
+weights from HuggingFace — CI does not have HF auth for that repo. Run
+locally with `pytest -m "slow and network" tests/variants/flux1_dev/` after
+accepting the model license."""
 
 import pytest
 
 
+@pytest.mark.slow
+@pytest.mark.network
 def test_apply_returns_handle_and_restores_pristine() -> None:
     pytest.importorskip("mflux")
     from mflux.models.flux.variants.txt2img.flux import Flux1

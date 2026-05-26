@@ -97,3 +97,26 @@ def test_shim_re_exports_identity():
     from mlx_teacache.stats import StatsFrozenError as LSE
 
     assert LSE is KSE
+
+
+def test_speedup_estimate_returns_one_when_all_steps_skipped():
+    """denom <= 0 branch in speedup_estimate (stats.py:112-113): if every
+    active step was skipped, division would blow up — fall back to 1.0."""
+    from mlx_teacache._kernel.stats import TeaCacheStats
+
+    s = TeaCacheStats(skipped_count=5)
+    # total_active_steps == skipped_count, so denom = 0
+    assert s.total_active_steps == 5
+    assert s.speedup_estimate == 1.0
+
+
+def test_finalize_last_generation_on_frozen_stats_raises():
+    """frozen-stats guard on finalize_last_generation (stats.py:141)."""
+    import pytest
+
+    from mlx_teacache._kernel.stats import StatsFrozenError, TeaCacheStats
+
+    s = TeaCacheStats()
+    s._frozen = True
+    with pytest.raises(StatsFrozenError):
+        s.finalize_last_generation(num_inference_steps=4, cfg_was_active=False)

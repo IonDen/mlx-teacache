@@ -1,14 +1,17 @@
 # Side-by-side: vanilla mflux vs mlx-teacache
 
-Visual showcase of what the wrapper does on real generations. Every number on this page comes from `scripts/bench_comparison.py` and the JSON report at `_artifacts/comparison_report.json`. The images are committed alongside this file.
+Visual showcase of what the wrapper does on real generations. Two harnesses contribute to this page:
+
+- The `flux1-dev` and `flux2-klein-base-4b` rows are from `scripts/bench_comparison.py` (subprocess-per-condition, three reps per subprocess; cold = rep 1, warm = median of reps 2 and 3). Full report: `_artifacts/comparison_report.json`. Committed images alongside this file under `_artifacts/comparison/<variant>/`.
+- The `flux2-klein-base-9b` row is from `scripts/bench_speedup.py --three-way --reps 3` (subprocess-per-rep — every rep gets a fresh interpreter, fully cold). Full report: `_artifacts/v0.6.0_bench_klein_base_9b.json`. Images under `tests/_artifacts/bench_images/klein-base-9b/`.
+
+The two harnesses use different prompts and resolutions (the bench_comparison row is the 768×1024 portrait listed below; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
 
 Only non-distilled variants are listed here. Distilled schedules (`flux1-schnell`, `flux2-klein-4b`, `flux2-klein-9b`) skip zero steps and gain nothing from the wrapper. See the "When to use mlx-teacache" section in the README for the recommendation.
 
 ## Test machine
 
-Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5. mlx-teacache 0.4.1.
-
-Each variant is run as two subprocesses (one vanilla, one wrapped). Inside each subprocess we record three reps: rep 1 is genuinely cold (the model just loaded), reps 2 and 3 are warm. The "cold" timing on the page is rep 1; the "warm" timing is the median of reps 2 and 3.
+Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5. mlx-teacache 0.6.1.
 
 Shared inputs across every cell:
 
@@ -70,16 +73,26 @@ This is the canonical FLUX.2 Klein base setting from Black Forest Labs: 50 steps
 
 ## Reproducing these numbers
 
+The `flux1-dev` and `klein-base-4b` rows above:
+
 ```bash
 uv run python scripts/bench_comparison.py
 ```
 
-The script writes images into `_artifacts/comparison/<variant>/{vanilla,wrapper}.webp` and the full JSON to `_artifacts/comparison_report.json`. Expect about 42 minutes total wall time on an M1 Max: roughly 12 minutes for flux1-dev (six 25-step reps) and 30 minutes for klein-base-4b at the CFG schedule (six 50-step reps with CFG doubling the per-step cost).
+Writes images into `_artifacts/comparison/<variant>/{vanilla,wrapper}.webp` and the full JSON to `_artifacts/comparison_report.json`. Expect about 42 minutes total wall time on an M1 Max: roughly 12 minutes for flux1-dev (six 25-step reps) and 30 minutes for klein-base-4b at the CFG schedule (six 50-step reps with CFG doubling the per-step cost).
 
-Override the hardware label in the JSON if you are running on a different chip:
+The `klein-base-9b` row:
+
+```bash
+uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report _artifacts/v0.6.0_bench_klein_base_9b.json
+```
+
+Subprocess-per-rep (every rep gets a fresh Python interpreter), three-way decomposition (vanilla / wrapped-no-gate / wrapped-gated). Expect roughly 70 minutes on an M1 Max (9 cold generations, each loading the 9B model once).
+
+Override the hardware label in the bench_comparison.py JSON if you are running on a different chip:
 
 ```bash
 uv run python scripts/bench_comparison.py --machine-label "Apple M3 Max" --ram-gb 64
 ```
 
-To re-run a single variant after a partial run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`).
+To re-run a single variant after a partial bench_comparison.py run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`).

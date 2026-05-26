@@ -7,6 +7,28 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-05-26
+
+Docs-only fast-follow. No code or behavior changes. Corrects stale and self-contradictory claims across README, COMPARISON, and the distilled-klein per-variant docs after the v0.6.0 release shipped.
+
+### Changed
+- README "Quick start" install pin: bumped the `==0.4.1` example to `==0.6.1`.
+- README headline + threshold guide + chip table + Limitations + bench-table: aligned FLUX.1-dev at 25 steps to **1.44×** (the reproducible `bench_speedup.py` number) and removed the conflicting "1.48×" appearances from the earlier sweep era. Both numbers describe the same recipe; keeping one is the honest fix.
+- README "Per-variant notes" + bench-table row + footnote ⁴ + Limitations: replaced `flux2-klein-base-4b` CFG headline of 1.26× combined / 1.16× gating / 1.09× compile-avoidance (v0.4.1 same-process measurement) with the v0.6.0 subprocess-per-rep numbers: **1.23× combined / 1.22× gating / 1.01× compile-avoidance**. Combined number is within day-to-day noise of v0.4.1's claim; decomposition shifted honestly under cold isolation. Same correction pattern previously applied to the 9B 2.68× → 1.36×.
+- README "How the speedup happens" → mechanism (2): replaced the blanket "~1.2-1.9× faster than the compiled path even when zero steps get skipped" claim. v0.6.0's three-way bench measured compile-avoidance at 1.01-1.02× on klein-base 50-step CFG, so the wide range applies specifically to short distilled schedules (8 steps), not to long non-distilled ones. Both regimes are now called out by their measured numbers.
+- README bench table: added a `flux2-klein-base-9b` row mirroring the 4B CFG row (1.36× combined, 13/50 skips, footnote ⁵) so the 9B story is in the main table rather than only in the per-variant notes.
+- README bench-table footer: added v0.6.0 measurement dates (2026-05-26) and the harness distinction (subprocess-per-rep vs same-process). Distilled klein rows footnoted † as pending re-bench.
+- README footnote ³ (klein-base-4b @ 25-step): flagged the 1.41× as v0.4.0 same-process measurement, not yet re-bench'd; v0.6.0's 50-step finding suggests the decomposition may shift on re-measurement.
+- README "How it works" calibration sentence: now mentions all four FLUX.2 calibrated tuples (distilled klein-4b/9b, base-4b each have their own; klein-base-9b cross-imports base-4b) instead of only the distilled pair.
+- COMPARISON.md header rewritten to acknowledge two harnesses (`bench_comparison.py` for flux1-dev + klein-base-4b, `bench_speedup.py --three-way` for klein-base-9b). The previous "Every number comes from bench_comparison.py" claim was false after the 9B row was added.
+- COMPARISON.md "Test machine" version bumped 0.4.1 → 0.6.1.
+- COMPARISON.md "Reproducing these numbers" split into two reproducer commands (bench_comparison.py for flux1-dev + 4B, bench_speedup.py for 9B) with their respective wall-times.
+- docs/variants/flux2-klein-4b.md + flux2-klein-9b.md: tightened the "~1.5-2.0× wall-clock improvement" claim. v0.4-era same-process figure flagged as pending re-bench; v0.6.0's re-measurement of the same mechanism on klein-base 50-step CFG came out at 1.01-1.02× so the larger distilled figure is specific to short schedules where per-step dispatch overhead dominates wall-clock.
+
+### Not changed
+- All code paths. The 6 variant integrations, the dispatcher, the kernel, and the lifecycle wrapper are untouched.
+- CHANGELOG entries for v0.6.0 and earlier. Historical entries record what was true at release time and stay as-is; v0.6.1 corrects what current docs say about those releases, not the releases themselves.
+
 ## [0.6.0] — 2026-05-21
 
 Per-variant cores + shared algorithmic kernel. The single 315-line `api.py` and the per-family integration modules (`flux1.py`, `flux2.py`, `forward.py`, `detect.py` under `integrations/mflux/`) are replaced by:

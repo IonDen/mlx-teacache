@@ -17,7 +17,7 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
 - Default `rel_l1_thresh`: `None` (caller passes one, or the package fallback 0.20 is used)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At 8 steps the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 fallback threshold. Gate produces 0 step-skips. The wrapper still measures **~1.5-2.0× wall-clock improvement** on M1 Max from sidestepping mflux's compiled `_predict` path (a chip-dependent effect; modest on Max/Ultra, larger on M3+, expected to disappear on M5+).
+At 8 steps the empirical adjacent-step body-output rel-L1 starts at 0.25 — above the 0.20 fallback threshold. Gate produces 0 step-skips. The wrapper still measures a wall-clock improvement on M1 Max from sidestepping mflux's compiled `_predict` path. The v0.4-era same-process bench observed ~1.5-2.0× with high thermal variance on the 8-step distilled schedule; that row is pending a re-bench under v0.6.0's subprocess-per-rep harness. For context, v0.6.0's re-measurement of the same compile-avoidance mechanism on the 50-step klein-base CFG recipe produced only 1.01×, suggesting the larger distilled effect is specific to short schedules where per-step dispatch overhead is a bigger share of wall-clock. The chip-dependence still applies: modest on Max/Ultra, likely larger on M3+, expected to shrink on M5+.
 
 ## Coefficient provenance
 

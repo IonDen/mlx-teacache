@@ -221,13 +221,29 @@ def test_paired_parity_klein_pr_gate(flux2_klein: tuple[Any, str]) -> None:
 
 @pytest.mark.parametrize("image_strength", [0.0, 0.5, 0.7])
 def test_paired_parity_at_threshold_zero_klein_pr_gate(
-    flux2_klein: tuple[Any, str], image_strength: float
+    flux2_klein: tuple[Any, str], image_strength: float, request: pytest.FixtureRequest
 ) -> None:
     """Same-process paired parity at rel_l1_thresh=0 for FLUX.2 Klein 4B.
     Cosine >= 0.97 (not bit-exact) because the wrapper is eager-Python and
     vanilla _predict is compiled — dispatch noise compounds ~1 ULP/element
-    across steps. Covers txt2img + img2img schedule slices."""
+    across steps. Covers txt2img + img2img schedule slices.
+
+    Distilled klein @ strength=0.7 is xfail (strict): the 8-step schedule
+    reduces to ~3 active steps; with default skip_first=1 + skip_last=1 only
+    1 eligible step remains (0 possible skips) and TeaCacheNoBenefitWarning
+    fires from lifecycle.py:120 (commit a1524de, pre-v0.6.0). The warning is
+    correct production behavior, not a port regression — same forward code
+    passes at strength=0.7 on klein-base-4b/9b which have ≥17 active steps."""
     flux, variant_id = flux2_klein
+    if variant_id in ("flux2-klein-4b", "flux2-klein-9b") and image_strength == 0.7:
+        request.applymarker(
+            pytest.mark.xfail(
+                strict=True,
+                reason="distilled klein @ strength=0.7 triggers TeaCacheNoBenefitWarning "
+                "(active_num_steps≈3, 0 possible skips with default skip-window); "
+                "warning predates v0.6.0",
+            )
+        )
     kw = _gen_kwargs_klein("a red apple on a wooden table", variant_id=variant_id)
     if image_strength > 0.0:
         kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / "natural_512.png")

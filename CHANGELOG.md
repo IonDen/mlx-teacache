@@ -51,9 +51,17 @@ Three-way bench on `flux2-klein-base-9b` at the canonical 50-step + g=4.0 recipe
 
 **Correction to v0.5.0's headline.** v0.5.0 reported a 2.68× combined speedup on klein-base-9b (vanilla 2744 s, wrapper 1025 s). That measurement was inflated by same-process MLX state leakage: the v0.5.0 bench harness ran vanilla and wrapper sequentially in one Python interpreter, so the vanilla rep paid full-cold MLX compilation cost while the wrapper rep inherited warm allocator state. Wall-clock difference under that setup conflates the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness gives every (variant, condition, rep) its own fresh interpreter — both vanilla and wrapper are now genuinely cold. The honest number is 1.36×, in line with the v0.4.1 klein-base-4b result (1.26×). v0.5.0's `README.md` and `docs/variants/flux2-klein-base-9b.md` are updated in this release.
 
-Sanity check on `flux2-klein-base-4b` against the v0.4.1 baseline (1.16× gating, 1.09× compile-avoidance, 1.26× combined) is the next bench — deferred to a follow-up because clearing the v0.5.0 correction was the higher-priority release-gate item.
+Three-way bench on `flux2-klein-base-4b` at the same recipe (3 reps, subprocess-per-rep, M1 Max 32 GB, bf16, q4):
 
-Full evidence: `_artifacts/v0.6.0_bench_klein_base_9b.json` and `tests/_artifacts/bench_images/klein-base-9b/`.
+- **Combined: 1.23×** (vanilla 236.2 s median, wrapper 191.8 s median)
+- **Gating contribution: 1.22×** (no-gate 233.4 s → gated 191.8 s)
+- **`mx.compile`-path avoidance: 1.01×** (vanilla 236.2 s → no-gate 233.4 s) — effectively noise on M1 Max for this recipe
+- Skip count: 9/48 active steps at `rel_l1_thresh=0.17` (stable across 3 reps, byte-identical to v0.4.1's algorithmic skip count)
+- Wrapper peak memory: ~5.9 GB vs vanilla's ~10.7 GB
+
+The 1.23× combined lands inside the day-to-day noise band on the v0.4.1 claim of 1.26× — no refactor regression. The decomposition shifts honestly: v0.4.1 attributed 1.16× to gating and 1.09× to compile-avoidance, but subprocess isolation reveals that gating is doing essentially all the work (1.22×) and compile-avoidance is at noise level (1.01×). The 4B decomposition tracks the 9B finding (gating 1.34× / compile-avoidance 1.02×) — same mechanism dominance across both base variants.
+
+Full evidence: `_artifacts/v0.6.0_bench_klein_base_9b.json`, `_artifacts/v0.6.0_bench_klein_base_4b.json`, and `tests/_artifacts/bench_images/{klein-base-9b,klein-base-4b}/`.
 
 ### Why this refactor
 

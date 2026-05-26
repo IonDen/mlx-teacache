@@ -17,7 +17,7 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_9b())
 - Default `rel_l1_thresh`: `None` (caller passes one, or the package fallback 0.20 is used)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-Gate engagement is the same shape as klein-4b — distilled 8-step schedule produces adjacent-step body-output rel-L1 above the threshold, so 0 skips at the package default. Wrapper benefit on M1 Max is from `mx.compile`-path avoidance.
+Gate engagement is the same shape as klein-4b: the distilled 8-step schedule produces adjacent-step body-output rel-L1 above the threshold, so 0 skips at the package default. Wrapper benefit on M1 Max comes from `mx.compile`-path avoidance. The v0.4-era same-process bench reported a wide 1.5-2.0× range with high thermal variance on the 8-step schedule (one rep combined a thermally-throttled 227 s vanilla with a recovered 46 s wrapper to land 1.93× median; steady-state is closer to 1.5×). This row is pending a re-bench under v0.6.0's subprocess-per-rep harness. v0.6.0's re-measurement of the same mechanism on the 50-step klein-base-9b CFG recipe came out at 1.02× — so the wide distilled-row figure is specific to short schedules where per-step dispatch overhead dominates wall-clock.
 
 ## Coefficient provenance
 

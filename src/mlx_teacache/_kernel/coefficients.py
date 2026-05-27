@@ -4,8 +4,6 @@ The coefficient _REGISTRY and per-variant tuples lived in
 src/mlx_teacache/coefficients.py through Phase A — they moved to
 per-variant config.py files in Phase C (Task 18). The legacy
 src/mlx_teacache/coefficients.py is now a Provenance re-export shim.
-
-See docs/superpowers/specs/2026-05-19-per-variant-cores-design.md.
 """
 
 from __future__ import annotations

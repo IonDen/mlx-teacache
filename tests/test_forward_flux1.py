@@ -155,8 +155,7 @@ def test_threshold_zero_does_not_build_cache_tensors():
     """At rel_l1_thresh <= 0, no future step can ever skip — so the wrapper
     must NOT build cached_residual / previous_mod_input. Keeping those
     intermediates alive blocks Metal in-place buffer donation and perturbs
-    downstream kernel dispatch (see
-    docs/superpowers/notes/2026-05-14-task-25-mlx-nondeterminism*.md)."""
+    downstream kernel dispatch."""
     handle = _make_handle(rel_l1_thresh=0.0)
     _run_one_step(handle, t=0)
     assert handle._state.cache.cached_residual is None

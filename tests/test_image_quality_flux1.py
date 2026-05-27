@@ -10,8 +10,6 @@ perceptually close to the same-process vanilla baseline.
 This is the upstream-standard validation pattern. ali-vilab TeaCache,
 ComfyUI-TeaCache, and HuggingFace Diffusers FirstBlockCache all validate
 caching layers via visual quality comparison, not bit-exact byte parity.
-See `docs/superpowers/notes/2026-05-14-task-25-fast-path-measurement.md`
-and the 2026-05-15 audit for the full rationale.
 
 Cost: each test does 2× generation (~5 min) + 2× VAE decode (~30s).
 PR-time uses one prompt; full 5-prompt suite is gated by `@pytest.mark.slow`.

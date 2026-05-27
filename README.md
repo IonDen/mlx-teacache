@@ -11,6 +11,14 @@
 
 On FLUX.2 Klein at the distilled 4-8 step defaults the polynomial gate does not trigger any skips. Every adjacent-step body output change already exceeds the default threshold, so the gate signals "compute" every time. The wrapper still runs faster than vanilla mflux on distilled Klein on M1 Max — measured ~1.5-2.0× in v0.4-era same-process benches, with high thermal variance — but the win comes from sidestepping mflux's `mx.compile` of `_predict` rather than from caching. v0.6.0's subprocess-per-rep harness measured the compile-avoidance contribution at 1.01-1.02× on non-distilled klein-base at 50 steps + CFG, so the wide range applies specifically to the distilled 8-step schedules; longer schedules show a much smaller compile-avoidance effect. See [Benchmarks](#benchmarks) → "How the speedup happens" for the full mechanism breakdown.
 
+## Which library do I need?
+
+**You want FLUX generation to be faster on Apple Silicon?** You're in the right place. `mlx-teacache` skips redundant denoising steps on FLUX.1 and non-distilled FLUX.2 Klein — measured 1.44× on FLUX.1-dev at 25 steps. Drops into mflux via one line.
+
+**You want live previews while generating, or low-memory latent decode?** You want [`mlx-taef`](https://github.com/IonDen/mlx-taef) — tiny TAESD-family decoders in MLX.
+
+**You want both?** They compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 26% less peak memory vs vanilla.
+
 ## What it does
 
 Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.44× speedup.

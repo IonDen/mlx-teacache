@@ -20,3 +20,4 @@ tests/_artifacts/
 # committed comparison images for COMPARISON.md and the recoverable
 # comparison_report.json. Keep them tracked.
 src/mlx_teacache/_version.py
+  docs/superpowers/

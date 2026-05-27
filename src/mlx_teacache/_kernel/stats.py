@@ -1,5 +1,5 @@
 # src/mlx_teacache/_kernel/stats.py
-"""Canonical home for stats types (extracted in v0.6.0). See docs/superpowers/specs/2026-05-19-per-variant-cores-design.md.
+"""Canonical home for stats types (extracted in v0.6.0).
 
 Public stats with a private staging buffer.
 

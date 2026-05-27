@@ -3,9 +3,7 @@
 
 Pure-math gating module. No mflux imports; only mlx.core for tensor ops.
 Returns a structured GateDecision so the caller can drive both the compute
-path AND the cache-update path explicitly (per spec §5.3 v2.5).
-
-See docs/superpowers/specs/2026-05-19-per-variant-cores-design.md."""
+path AND the cache-update path explicitly."""
 
 from __future__ import annotations
 

@@ -18,8 +18,7 @@ from typing import Any
 # empirical y range starts at 0.25 (every adjacent-step body_out change
 # exceeds the threshold). Apply does not raise or warn at this state;
 # the wrapper is still useful through `mx.compile` avoidance on chips
-# that compile `_predict`. See docs/superpowers/notes/ for the
-# 2026-05-16 postmortem and the v0.4 FLUX.2 research task.
+# that compile `_predict`.
 #
 # Stored verbatim; do not hand-edit. New calibrations bump revision.
 COEFFICIENTS: tuple[float, float, float, float, float] = (

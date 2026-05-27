@@ -1,6 +1,5 @@
 # src/mlx_teacache/_kernel/cache.py
 """Canonical home for the TeaCacheState dataclass (extracted in v0.6.0).
-See docs/superpowers/specs/2026-05-19-per-variant-cores-design.md.
 
 Per-handle mutable cache state. Pure data; methods only for reset.
 

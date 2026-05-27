@@ -219,7 +219,6 @@ def flux2_forward_with_gate(
     # never consumed. Skip building mod_in, body_in_concat, and the
     # cached_residual subtraction to avoid keeping body intermediates alive
     # past the tail and shrink the numerical surface area we test against.
-    # See docs/superpowers/notes/2026-05-14-task-25-fast-path-measurement.md.
     if handle.rel_l1_thresh <= 0.0:
         body_out_concat = _flux2_run_body(
             inner,

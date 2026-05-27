@@ -1,11 +1,11 @@
 """FLUX.1 parity tests — paired same-process methodology.
 
-Per the Task 25 investigation (docs/superpowers/notes/2026-05-14-task-25-*.md
-and 2026-05-15-task-25-fast-path-measurement-audit.md), MLX/Metal on Apple
-Silicon does not promise byte-identical output across Python runs even with
-the same model, seed, prompt, and config. Comparing wrapper output to a
-committed `.safetensors` fixture is therefore not a correctness gate for
-wrapper math — the saved bytes encode "MLX dispatch in the script that
+Per the Task 25 cross-process non-determinism investigation, MLX/Metal on
+Apple Silicon does not promise byte-identical output across Python runs
+even with the same model, seed, prompt, and config. Comparing wrapper
+output to a committed `.safetensors` fixture is therefore not a
+correctness gate for wrapper math — the saved bytes encode "MLX dispatch
+in the script that
 generated them", not "the correct denoising result."
 
 Within a single Python process, however, MLX is deterministic. We exploit

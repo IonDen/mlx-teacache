@@ -171,8 +171,7 @@ This release ships `flux2-klein-9b` support and corrects misleading performance 
   the package default threshold on Klein 9B's 8-step schedule; wall-clock
   improvement (~1.5-2.0× measured) comes from `mx.compile`-path avoidance
   rather than caching. See README "Benchmarks → How the speedup happens"
-  and the postmortem at
-  `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md`.
+  for the full mechanism breakdown.
 - **`scripts/bench_speedup.py`** — committed reproducer for all benchmark
   numbers in the README. Pins seed, prompt, image dimensions, step count;
   warmup + 3 timed reps; reports median wall-clock and per-rep skip

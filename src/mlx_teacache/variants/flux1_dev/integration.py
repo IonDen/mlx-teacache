@@ -237,9 +237,7 @@ def flux1_forward_with_gate(
     of MLX allocation/refcount perturbation (the cached_residual array
     holding refs to body intermediates past the tail). Empirically this did
     NOT restore cross-process byte parity with vanilla mflux, but it does
-    shrink the numerical surface area we're testing. See
-    docs/superpowers/notes/2026-05-14-task-25-{mlx-nondeterminism,fast-path-measurement}.md
-    and the 2026-05-15 audit addendum for the measurement detail.
+    shrink the numerical surface area we're testing.
     """
     state = handle._state.cache
     stats = handle._state.stats

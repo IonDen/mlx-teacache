@@ -7,6 +7,22 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-05-27
+
+Discoverability sweep. No runtime behavior changed; this release is a docs + metadata patch.
+
+### Added
+- `examples/` directory with three runnable scripts:
+  - `mflux_teacache_flux1.py` — Flux1.from_name("dev") + apply_teacache, 25 steps. Headline 1.44× recipe.
+  - `mflux_teacache_flux2_base.py` — Flux2Klein with base-4b model_config, 50 steps + g=4.0. Where step-skipping actually engages on FLUX.2.
+  - `mflux_combined_with_taef.py` — symmetric counterpart to mlx-taef's combined-use example; same generation, just discoverable from this repo.
+- README "Which library do I need?" section under the intro. Three-paragraph decision tree cross-linking `mlx-taef`.
+
+### Changed
+- PyPI `keywords` expanded 5 → 12 (added `apple-silicon`, `flux1`, `flux2`, `mflux`, `inference-acceleration`, `step-skipping`, `image-generation`, `cfg`) so need-based PyPI search returns this package.
+- PyPI `project.urls` adds `Source`, `Changelog`, `Comparison`, and `Roadmap` entries pointing at the committed docs on `main`.
+- Trove classifier `Development Status :: 3 - Alpha` → `4 - Beta`. The v0.6.x line ships with measured benchmarks and the subprocess-per-rep harness; Alpha was no longer an honest signal.
+
 ## [0.6.1] — 2026-05-26
 
 Docs-only fast-follow. No code or behavior changes. Corrects stale and self-contradictory claims across README, COMPARISON, and the distilled-klein per-variant docs after the v0.6.0 release shipped.

@@ -286,3 +286,7 @@ Apache-2.0. See `LICENSE` and `NOTICE`.
 - [ali-vilab/TeaCache](https://github.com/ali-vilab/TeaCache) — upstream method and FLUX.1 coefficients.
 - [filipstrand/mflux](https://github.com/filipstrand/mflux) — MLX FLUX runner this library integrates with.
 - [Apple ML Explore](https://github.com/ml-explore/mlx) — MLX.
+
+---
+
+By Denis Ineshin · [ineshin.space](https://ineshin.space)

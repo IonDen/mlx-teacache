@@ -92,3 +92,7 @@ When picking up new work:
 4. **Out of scope is durable.** Items under `## Out of scope (deliberate)` represent intentional non-goals, not deferred work. Re-opening one requires evidence that the original reasoning no longer holds.
 
 When closing a release, move its Active entry to Released with a one-line summary and pull the next Active item into the top slot.
+
+---
+
+By Denis Ineshin · [ineshin.space](https://ineshin.space)

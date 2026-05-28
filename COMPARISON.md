@@ -96,3 +96,7 @@ uv run python scripts/bench_comparison.py --machine-label "Apple M3 Max" --ram-g
 ```
 
 To re-run a single variant after a partial bench_comparison.py run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`).
+
+---
+
+By Denis Ineshin · [ineshin.space](https://ineshin.space)

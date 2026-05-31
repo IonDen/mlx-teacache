@@ -92,6 +92,7 @@ _VARIANT_SLUG_TO_ID: dict[str, str] = {
     "klein-base-9b": "flux2-klein-base-9b",
     "flux1-dev": "flux1-dev",
     "flux1-schnell": "flux1-schnell",
+    "z-image": "z-image-base",
 }
 
 # Default bench recipe per variant (num_inference_steps, guidance).
@@ -102,6 +103,19 @@ _VARIANT_RECIPE: dict[str, dict[str, Any]] = {
     "klein-base-9b": {"num_inference_steps": 50, "guidance": 4.0},
     "flux1-dev": {"num_inference_steps": 25, "guidance": 3.5},
     "flux1-schnell": {"num_inference_steps": 4, "guidance": 1.0},
+    "z-image": {"num_inference_steps": 50, "guidance": 4.0},
+}
+
+# Quantization bits per variant. FLUX variants bench at q4; Z-Image at q8 (its
+# pinned recipe — findings 2026-05-31). Reported in the bench JSON hardware block.
+_VARIANT_QUANTIZE: dict[str, int] = {
+    "klein-4b": 4,
+    "klein-9b": 4,
+    "klein-base-4b": 4,
+    "klein-base-9b": 4,
+    "flux1-dev": 4,
+    "flux1-schnell": 4,
+    "z-image": 8,
 }
 
 # Default soft memory cap (GB) per variant when _REGISTRY META is absent.
@@ -132,6 +146,11 @@ def _load_flux(variant: str) -> Any:
 
         name = "dev" if variant == "flux1-dev" else "schnell"
         flux = Flux1.from_name(name, quantize=4)
+    elif variant == "z-image":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.z_image.variants.z_image import ZImage
+
+        flux = ZImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.z_image())
     else:
         raise ValueError(f"unsupported variant: {variant!r}")
     flux.freeze()
@@ -303,7 +322,7 @@ def _macos_sysctl(key: str) -> str | None:
         return None
 
 
-def _detect_hardware() -> dict[str, Any]:
+def _detect_hardware(*, quantize: int) -> dict[str, Any]:
     chip = _macos_sysctl("machdep.cpu.brand_string") or platform.processor() or "Apple Silicon"
     ram_bytes_str = _macos_sysctl("hw.memsize")
     ram_gb: int | None = None
@@ -319,7 +338,7 @@ def _detect_hardware() -> dict[str, Any]:
         "os": f"{platform.system()} {platform.release()}",
         "mlx_teacache_version": _mlx_teacache_version(),
         "mflux_version": _mflux_version(),
-        "quantize": 4,
+        "quantize": quantize,
         "dtype": "bf16",
     }
 
@@ -601,7 +620,7 @@ def main() -> None:
             "height": HEIGHT,
             "width": WIDTH,
             "reps": reps,
-            "hardware": _detect_hardware(),
+            "hardware": _detect_hardware(quantize=_VARIANT_QUANTIZE[variant]),
             "vanilla_seconds": vanilla_times,
             "wrapper_seconds": wrapper_times,
             "vanilla_median": vanilla_med,

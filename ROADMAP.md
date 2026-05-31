@@ -62,7 +62,7 @@ Pick A or C after measuring vanilla compile-loss on representative M3/M4/M5 hard
 
 ## Future model coverage (no fixed release)
 
-Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` shipped in v0.4.0 (see "Released"). `FLUX.2-klein-base-9B` is committed to v0.5.0 (see "Active"). Don't pick from this table while Active items are in flight.
+Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` shipped in v0.4.0 (see "Released"). `FLUX.2-klein-base-9B` shipped in v0.5.0 (see "Released"). Don't pick from this table while Active items are in flight.
 
 | # | Model | Effort | License | Why it matters | Risks |
 |---|---|---|---|---|---|

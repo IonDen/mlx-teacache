@@ -97,9 +97,10 @@ def test_bench_headline_rounds_speedup_to_two_dp():
 
 
 def test_bench_headline_uses_median_skip_not_max():
+    # [5, 6, 9]: median 6, max 9 — a buggy max() would return 9, not 6.
     report = {
         "speedup_median": 1.40,
-        "skipped_counts": [5, 6, 6],
+        "skipped_counts": [5, 6, 9],
         "num_inference_steps": 25,
         "vanilla_median": 100.0,
         "wrapper_median": 71.4,
@@ -138,7 +139,7 @@ def test_readme_benchmark_row_matches_committed_artifact():
     cells = _flux1_dev_benchmark_row()
     # cells: [variant, steps, vanilla, wrapper, speedup, skipped, mechanism]
     assert int(cells[1]) == h["steps"]
-    assert cells[2].replace("s", "") == f"{h['vanilla_s']:.1f}"
-    assert cells[3].replace("s", "") == f"{h['wrapper_s']:.1f}"
+    assert cells[2].endswith("s") and cells[2][:-1] == f"{h['vanilla_s']:.1f}"
+    assert cells[3].endswith("s") and cells[3][:-1] == f"{h['wrapper_s']:.1f}"
     assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
     assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"

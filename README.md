@@ -7,13 +7,13 @@
 
 **TeaCache step-skipping for FLUX diffusion on Apple Silicon, in pure MLX.**
 
-`mlx-teacache` is the first MLX port of TeaCache, a training-free inference optimization that predicts which denoising steps add little to the final image and reuses the previous step's output instead of running the full transformer. On FLUX.1-dev at 25 steps the polynomial gate skips 6 of 25 steps and produces a measured 1.44× wall-clock speedup with visually-equivalent output (SSIM ≥ 0.80 across a 5-prompt suite, ≥ 0.90 on the PR-gate prompt).
+`mlx-teacache` is the first MLX port of TeaCache, a training-free inference optimization that predicts which denoising steps add little to the final image and reuses the previous step's output instead of running the full transformer. On FLUX.1-dev at 25 steps the polynomial gate skips 6 of 25 steps and produces a measured 1.46× wall-clock speedup with visually-equivalent output (SSIM ≥ 0.80 across a 5-prompt suite, ≥ 0.90 on the PR-gate prompt).
 
 On FLUX.2 Klein at the distilled 4-8 step defaults the polynomial gate does not trigger any skips. Every adjacent-step body output change already exceeds the default threshold, so the gate signals "compute" every time. The wrapper still runs faster than vanilla mflux on distilled Klein on M1 Max — measured ~1.5-2.0× in v0.4-era same-process benches, with high thermal variance — but the win comes from sidestepping mflux's `mx.compile` of `_predict` rather than from caching. v0.6.0's subprocess-per-rep harness measured the compile-avoidance contribution at 1.01-1.02× on non-distilled klein-base at 50 steps + CFG, so the wide range applies specifically to the distilled 8-step schedules; longer schedules show a much smaller compile-avoidance effect. See [Benchmarks](#benchmarks) → "How the speedup happens" for the full mechanism breakdown.
 
 ## Which library do I need?
 
-**You want FLUX generation to be faster on Apple Silicon?** You're in the right place. `mlx-teacache` skips redundant denoising steps on FLUX.1 and non-distilled FLUX.2 Klein — measured 1.44× on FLUX.1-dev at 25 steps. Drops into mflux via one line.
+**You want FLUX generation to be faster on Apple Silicon?** You're in the right place. `mlx-teacache` skips redundant denoising steps on FLUX.1 and non-distilled FLUX.2 Klein — measured 1.46× on FLUX.1-dev at 25 steps. Drops into mflux via one line.
 
 **You want live previews while generating, or low-memory latent decode?** You want [`mlx-taef`](https://github.com/IonDen/mlx-taef) — tiny TAESD-family decoders in MLX.
 
@@ -21,7 +21,7 @@ On FLUX.2 Klein at the distilled 4-8 step defaults the polynomial gate does not 
 
 ## What it does
 
-Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.44× speedup.
+Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.46× speedup.
 
 ```python
 from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
@@ -92,7 +92,7 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 |---|---|---|---|---|
 | 0.10 | 0 / 25 | 1.07× | 1.0000 | Cache never engages |
 | 0.15 | 0 / 25 | 1.13× | 1.0000 | Cache never engages |
-| **0.20 (default)** | **6 / 25** | **1.44×** | **≥ 0.80 (5-prompt suite)** | **Visually-lossless sweet spot** |
+| **0.20 (default)** | **6 / 25** | **1.46×** | **≥ 0.80 (5-prompt suite)** | **Visually-lossless sweet spot** |
 | 0.25 | 11 / 25 | 1.96× | 0.57-0.93 | Visible style changes on text/synthetic prompts |
 
 0.20 was picked after side-by-side visual comparison. At 0.25, text prompts that vanilla renders as neon tubes can come out as dot-matrix. At 0.20, the output is indistinguishable from vanilla and the cache still skips around 25% of steps. SSIM is conservative on high-frequency-detail prompts like text and synthetic patterns, which is why the suite floor (0.80) is lower than the PR-gate floor (0.90) on the red-apple prompt.
@@ -183,13 +183,15 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 
 | Variant | Steps | Vanilla | Wrapper | Speedup | Skipped | Mechanism |
 |---|---|---|---|---|---|---|
-| `flux1-dev` | 25 | 103.7s | 71.8s | **1.44×** | **6 / 25** | TeaCache step-skipping |
+| `flux1-dev` | 25 | 103.8s | 71.0s | **1.46×** | **6 / 25** | TeaCache step-skipping¹ |
 | `flux1-schnell` | — | — | — | — | — | shares dev's coefficients; gate behaves like dev at long schedules, like Klein at the 4-step distilled default (no benefit) |
 | `flux2-klein-4b`† | 8 | 28.1s | 22.3s | 1.26× | **0 / 8** | `mx.compile` avoidance only |
 | `flux2-klein-9b`† | 8 | 119.0s | 61.8s | 1.93× | **0 / 8** | `mx.compile` avoidance only |
 | `flux2-klein-base-4b`³ | 25 | 77.5s | 55.1s | **1.41×** | **3 / 25** | step-skipping + `mx.compile` avoidance |
 | `flux2-klein-base-4b` (CFG)⁴ | 50 | 236.2s | 191.8s | **1.23×** | **9 / 50** | step-skipping (compile-avoidance ≈ noise) |
 | `flux2-klein-base-9b` (CFG)⁵ | 50 | 517.6s | 380.6s | **1.36×** | **13 / 50** | step-skipping + small compile-avoidance |
+
+¹ `flux1-dev` at 25 steps, `guidance=3.5`, 512×512, default `rel_l1_thresh=0.20`. Measured 2026-05-31 under the subprocess-per-rep harness: **1.46× combined**, and the three-way split puts the whole win on gating: 1.47× from step-skipping, 1.00× from `mx.compile`-path avoidance (the eager wrapper and vanilla run neck-and-neck on this recipe). 6/25 skips across all three reps. Full report: `_artifacts/v0.6.3_bench_flux1_dev.json`. Reproduce with `uv run python scripts/bench_speedup.py --variant flux1-dev --three-way --reps 3 --report out.json`.
 
 † Distilled klein rows are v0.4-era same-process measurements with high thermal variance. The klein-9b 1.93× median combined a thermally-throttled vanilla rep (227s) with a recovered wrapper rep (46s); the steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps. These rows are pending a re-bench under the v0.6.0 subprocess-per-rep harness; v0.6.0's measurement on klein-base CFG showed the compile-avoidance contribution at 1.01-1.02× on 50-step schedules, so the distilled 1.5-2.0× figure is specific to the 8-step distilled path and may be smaller under cold-isolation conditions.
 
@@ -216,7 +218,7 @@ For the three-way decomposition (vanilla / wrapped-no-gate / wrapped-gated), add
 
 The wall-clock improvement above comes from two distinct mechanisms; they fire independently depending on variant and schedule.
 
-**1. TeaCache step-skipping.** This is the headline feature. The polynomial gate predicts how much the transformer body output will change since the last actual compute step. When the accumulated predicted change stays below `rel_l1_thresh`, the wrapper reuses the cached residual instead of running the body again. On FLUX.1-dev at 25 steps, 6 of 25 steps are skippable and this is where the 1.44× speedup on FLUX.1-dev comes from. On non-distilled FLUX.2 Klein at 50 steps + CFG, the same mechanism produces 9-13 skips per generation and dominates the wall-clock win (the v0.6.0 three-way bench attributes 1.22-1.34× to gating on base-4b/9b).
+**1. TeaCache step-skipping.** This is the headline feature. The polynomial gate predicts how much the transformer body output will change since the last actual compute step. When the accumulated predicted change stays below `rel_l1_thresh`, the wrapper reuses the cached residual instead of running the body again. On FLUX.1-dev at 25 steps, 6 of 25 steps are skippable and this is where the 1.46× speedup on FLUX.1-dev comes from. On non-distilled FLUX.2 Klein at 50 steps + CFG, the same mechanism produces 9-13 skips per generation and dominates the wall-clock win (the v0.6.0 three-way bench attributes 1.22-1.34× to gating on base-4b/9b).
 
 **2. `mx.compile` avoidance on FLUX.2.** mflux wraps `Flux2Klein._predict` in `mx.compile` on every chip *except* base + Pro M1/M2 — i.e., compilation is active on M1/M2 Max + Ultra and on every M3, M4, M5 chip. mlx-teacache replaces the compiled `_predict` with an eager Python closure so the gate can run live per step. The magnitude of this effect varies by schedule and chip. v0.4-era same-process benches on M1 Max at quantize=4 showed the eager closure running 1.5-2.0× faster than the compiled path on distilled klein's 8-step schedule even with zero gate-engagements. v0.6.0's subprocess-per-rep harness re-measured the same mechanism on the 50-step klein-base CFG recipe and found it contributing only 1.01-1.02× — kernel-dispatch round-trips drop slightly, but with 50 steps per generation that gain is small relative to the per-step compute. The distilled schedules likely benefit more because each step is a larger fraction of the wall-clock, so per-step dispatch overhead matters more. The distilled klein rows are still measured under same-process conditions and pending a re-bench. On chips where mflux is already eager (base + Pro M1/M2), this mechanism does not fire: the wrapper just adds per-step gate overhead, and Klein with mlx-teacache on those chips is approximately neutral or slightly slower than vanilla.
 
@@ -244,7 +246,7 @@ mflux 0.17.5 wraps `_predict` in `mx.compile` on every Apple Silicon chip *excep
 |---|---|---|
 | Apple M1 / M2 (base) | eager | ≈ pure skip fraction (~1.5–1.6×) |
 | M1 Pro / M2 Pro | eager | ≈ pure skip fraction — same as base |
-| M1 Max / Ultra, M2 Max / Ultra | compiled | **1.44× measured** on M1 Max FLUX.1-dev / 25 steps; 1.23× on klein-base-4b 50-step CFG; 1.36× on klein-base-9b 50-step CFG |
+| M1 Max / Ultra, M2 Max / Ultra | compiled | **1.46× measured** on M1 Max FLUX.1-dev / 25 steps; 1.23× on klein-base-4b 50-step CFG; 1.36× on klein-base-9b 50-step CFG |
 | M3 / M3 Pro / M3 Max / Ultra | compiled | Likely 1.1–1.3× — untested |
 | M4 / M4 Pro / M4 Max | compiled | Likely 1.1–1.3× — untested |
 | M5+ (Neural Accelerators / TensorOps) | compiled + accelerator | May approach 1.0×. The eager wrapper can lose some or all of the M5 TensorOps advantage. Confirm with a profiler before treating as fact. |
@@ -261,7 +263,7 @@ FLUX.2 with CFG (`guidance > 1.0`) runs through the gated path as of v0.4.1. The
 
 `flux2-klein-base-9b` reuses base-4b's polynomial coefficients verbatim (same architecture family, same calibration recipe). v0.6.0's subprocess-per-rep bench at the canonical 50-step / guidance=4.0 recipe measures **1.36× combined wall-clock** (1.34× gating + 1.02× compile-avoidance), 13/48 active steps skipped at `rel_l1_thresh=0.17`, SSIM 0.986 vs vanilla. v0.5.0 advertised 2.68× on this variant — that number was inflated by same-process MLX state leakage and is corrected here. Same FLUX Non-Commercial license + BFL safety-filter obligations as `flux2-klein-9b` — see [License obligations](#license-obligations).
 
-The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exchange for live per-step gating. Vanilla mflux compiles `_predict` on every chip except base + Pro M1/M2 (the `is_m1_or_m2()` predicate only excludes Max + Ultra). The 1.44× measurement is from M1 Max / FLUX.1-dev / 25 steps; speedup on M3 and newer is plausible but untested locally. On M5, the GPU Neural Accelerators (Metal 4 TensorOps) are only reachable through the compiled path, so the eager wrapper can lose some or all of that advantage. Output stays correct either way. See `docs/m3-plus-tradeoff.md` for the per-chip recipe; PRs with measurements welcome.
+The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exchange for live per-step gating. Vanilla mflux compiles `_predict` on every chip except base + Pro M1/M2 (the `is_m1_or_m2()` predicate only excludes Max + Ultra). The 1.46× measurement is from M1 Max / FLUX.1-dev / 25 steps; speedup on M3 and newer is plausible but untested locally. On M5, the GPU Neural Accelerators (Metal 4 TensorOps) are only reachable through the compiled path, so the eager wrapper can lose some or all of that advantage. Output stays correct either way. See `docs/m3-plus-tradeoff.md` for the per-chip recipe; PRs with measurements welcome.
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 

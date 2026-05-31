@@ -1,11 +1,10 @@
 # tests/conftest.py
 """Shared pytest fixtures and marker handling.
 
-The `mflux` marker is auto-applied to any test that lives in a test file
-named test_integration*, test_parity*, test_flux1*, test_flux2*, test_forward_*,
-test_lifecycle.py, or test_api.py — these all import the integration layer
-and therefore require mflux. The test-pure-core CI job skips them via
-`-m "not mflux"`.
+The `mflux` marker is auto-applied to every test whose file name is in the
+explicit `_MFLUX_FILES` allowlist below (matched exactly, not by glob) — these
+all import the integration layer and therefore require mflux. The
+test-pure-core CI job skips them via `-m "not mflux"`.
 
 Memory guardrail: at session start we install a hard cap on MLX wired
 (non-pageable Metal) memory via `mx.set_wired_limit`. Without this cap,

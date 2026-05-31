@@ -63,4 +63,4 @@ On 32 GB Apple Silicon machines running the canonical 50-step + g=4.0 recipe, pe
 1. `tests/conftest.py` installs a session-level `mx.set_wired_limit(20 GB)` + `mx.set_memory_limit(22 GB)` for the test suite.
 2. `scripts/bench_speedup.py` workers apply the same caps before model load, derived from this variant's `memory_cap_hint_gb`.
 
-If you allocate over the wired cap, MLX raises an exception rather than the kernel panicking. See [`CLAUDE.md` "Memory guardrails for heavy generations on 32 GB"](../../docs/superpowers/standards/) and [ml-explore/mlx-lm#883](https://github.com/ml-explore/mlx-lm/issues/883) for upstream context.
+If you allocate over the wired cap, MLX raises an exception rather than the kernel panicking. See [ml-explore/mlx-lm#883](https://github.com/ml-explore/mlx-lm/issues/883) for upstream context on why the wired limit (not the soft memory limit) is what prevents the panic.

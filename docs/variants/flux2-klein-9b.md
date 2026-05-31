@@ -27,7 +27,7 @@ Derived in-repo by `scripts/calibrate_flux2.py --variant klein-9b --fit-mode ori
 - Origin-constrained least-squares fit (forces `poly(0)=0` for physical sensibility at small input rel-L1), R² = 0.4710
 - Stored verbatim in `src/mlx_teacache/variants/flux2_klein_9b/config.py::COEFFICIENTS`
 
-See `scripts/_calibration_flux2_klein_9b.json` for the full report and `docs/superpowers/notes/2026-05-16-flux2-teacache-non-engagement-postmortem.md` for why the distilled gate doesn't engage.
+See `scripts/_calibration_flux2_klein_9b.json` for the full report. The distilled gate doesn't engage because the empirical adjacent-step body-output rel-L1 (≈0.25) exceeds the default `rel_l1_thresh`, so Klein's wall-clock win comes from `mx.compile`-path avoidance rather than caching.
 
 ## License
 

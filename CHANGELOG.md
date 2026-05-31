@@ -7,6 +7,13 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `_artifacts/v0.6.3_bench_flux1_dev.json` — committed three-way `bench_speedup.py` report (3 reps, subprocess-per-rep) for the FLUX.1-dev headline, so the README's headline row ships with the artifact that produced it, the way the klein rows already do.
+- `tests/test_bench_artifacts.py` — pins the README FLUX.1-dev row (speedup, skip count, per-condition seconds) to that committed JSON so the headline can't drift from its artifact again.
+
+### Changed
+- FLUX.1-dev headline corrected **1.44× → 1.46×** across the README, `docs/m3-plus-tradeoff.md`, and the `mflux_teacache_flux1.py` example. The figure now comes from `_artifacts/v0.6.3_bench_flux1_dev.json` (vanilla 103.8s → wrapper 71.0s median, 6/25 skips). v0.6.1's changelog called 1.44× "the reproducible `bench_speedup.py` number" before any JSON was committed; the three-way run measures 1.46× and puts the entire win on gating (1.47× gating × 1.00× compile-avoidance), which confirms step-skipping as the cause on this recipe.
+
 ## [0.6.2] — 2026-05-27
 
 Discoverability sweep. No runtime behavior changed; this release is a docs + metadata patch.

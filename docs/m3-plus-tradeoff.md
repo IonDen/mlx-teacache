@@ -31,8 +31,8 @@ To keep TeaCache's gating live on every chip where mflux compiles, `mlx-teacache
 replaces `flux._predict` with an **uncompiled** eager-Python closure. Users on
 those chips lose mflux's compile gain on this code path. The tradeoff: when the
 gate actually engages we skip ~25% of steps, which more than compensates on
-M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.44× on FLUX.1-dev / 25 steps
-on M1 Max, 2026-05-16). The magnitude of the compile-loss tax grows on newer
+M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.46× on FLUX.1-dev / 25 steps
+on M1 Max, 2026-05-31). The magnitude of the compile-loss tax grows on newer
 hardware.
 
 On chips that mflux already runs eager (base + Pro M1/M2), the wrapper does

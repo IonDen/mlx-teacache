@@ -1,0 +1,144 @@
+"""Doc-to-artifact consistency for the committed FLUX.1-dev benchmark.
+
+CLAUDE.md requires every user-facing speedup claim to be backed by a committed
+benchmark. This module pins the README's FLUX.1-dev headline row (speedup, skip
+count, per-condition seconds) to the committed ``bench_speedup.py`` report so the
+number can never drift from the artifact that produced it.
+
+Guards the v0.6.x design-review H1 finding: the FLUX.1-dev headline was repeated
+in several places and called "the reproducible ``bench_speedup.py`` number" while
+no committed JSON actually produced it.
+
+The numeric/rounding rules live in the pure ``bench_headline`` helper so they are
+unit-testable without touching the filesystem; the consistency tests read the
+real committed files.
+"""
+
+import json
+import statistics
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_FLUX1_DEV_BENCH = _REPO_ROOT / "_artifacts" / "v0.6.3_bench_flux1_dev.json"
+_README = _REPO_ROOT / "README.md"
+
+_RUN_HINT = (
+    "uv run python scripts/bench_speedup.py --variant flux1-dev "
+    "--three-way --reps 3 --report _artifacts/v0.6.3_bench_flux1_dev.json"
+)
+
+
+# --- pure helper -------------------------------------------------------------
+
+
+def bench_headline(report: dict) -> dict:
+    """Canonical headline figures derived from a ``bench_speedup.py`` report.
+
+    Pure so the rounding/median rules are testable without the filesystem.
+    Returns the exact values the README prints:
+      ``speedup_x``  median wall-clock ratio, 2 dp (the ``1.46`` in ``1.46×``)
+      ``skipped``    median per-rep skipped-step count (the ``6`` in ``6 / 25``)
+      ``steps``      ``num_inference_steps`` (the ``25`` denominator)
+      ``vanilla_s``  median vanilla seconds, 1 dp (the ``103.8`` in ``103.8s``)
+      ``wrapper_s``  median wrapper seconds, 1 dp (the ``71.0`` in ``71.0s``)
+    """
+    return {
+        "speedup_x": round(float(report["speedup_median"]), 2),
+        "skipped": int(statistics.median(report["skipped_counts"])),
+        "steps": int(report["num_inference_steps"]),
+        "vanilla_s": round(float(report["vanilla_median"]), 1),
+        "wrapper_s": round(float(report["wrapper_median"]), 1),
+    }
+
+
+# --- file readers ------------------------------------------------------------
+
+
+def _load_bench() -> dict:
+    assert _FLUX1_DEV_BENCH.exists(), (
+        f"Committed FLUX.1-dev bench missing: {_FLUX1_DEV_BENCH}\n  Run: {_RUN_HINT}"
+    )
+    return json.loads(_FLUX1_DEV_BENCH.read_text())
+
+
+def _flux1_dev_benchmark_row() -> list[str]:
+    """Cells of the README Benchmarks-table row for ``flux1-dev``.
+
+    Disambiguated from the Supported-models table row (same leading cell) by
+    requiring the 7-column shape with a numeric Steps cell.
+    """
+    for line in _README.read_text().splitlines():
+        s = line.strip()
+        if s.startswith("| `flux1-dev`"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) >= 7 and cells[1].isdigit():
+                return cells
+    raise AssertionError("No `flux1-dev` row found in the README Benchmarks table")
+
+
+# --- pure-helper unit tests (RED first: bench_headline is undefined) ---------
+
+
+def test_bench_headline_rounds_speedup_to_two_dp():
+    report = {
+        "speedup_median": 1.4438,
+        "skipped_counts": [6, 6, 6],
+        "num_inference_steps": 25,
+        "vanilla_median": 103.74,
+        "wrapper_median": 71.81,
+    }
+    assert bench_headline(report) == {
+        "speedup_x": 1.44,
+        "skipped": 6,
+        "steps": 25,
+        "vanilla_s": 103.7,
+        "wrapper_s": 71.8,
+    }
+
+
+def test_bench_headline_uses_median_skip_not_max():
+    report = {
+        "speedup_median": 1.40,
+        "skipped_counts": [5, 6, 6],
+        "num_inference_steps": 25,
+        "vanilla_median": 100.0,
+        "wrapper_median": 71.4,
+    }
+    assert bench_headline(report)["skipped"] == 6
+
+
+def test_bench_headline_median_skip_picks_middle_value():
+    report = {
+        "speedup_median": 1.10,
+        "skipped_counts": [4, 5, 9],
+        "num_inference_steps": 25,
+        "vanilla_median": 100.0,
+        "wrapper_median": 90.9,
+    }
+    assert bench_headline(report)["skipped"] == 5
+
+
+# --- consistency tests (RED until the artifact exists + README reconciled) ---
+
+
+def test_flux1_dev_bench_artifact_is_committed_and_valid():
+    report = _load_bench()
+    assert report["schema_version"] == 2
+    assert report["variant"] == "flux1-dev"
+    assert report["num_inference_steps"] == 25
+    reps = report["reps"]
+    assert reps >= 3, f"need >=3 reps for a credible median, got {reps}"
+    assert len(report["vanilla_seconds"]) == reps
+    assert len(report["wrapper_seconds"]) == reps
+    assert len(report["skipped_counts"]) == reps, "per-rep skip telemetry required"
+
+
+def test_readme_benchmark_row_matches_committed_artifact():
+    h = bench_headline(_load_bench())
+    cells = _flux1_dev_benchmark_row()
+    # cells: [variant, steps, vanilla, wrapper, speedup, skipped, mechanism]
+    assert int(cells[1]) == h["steps"]
+    assert cells[2].replace("s", "") == f"{h['vanilla_s']:.1f}"
+    assert cells[3].replace("s", "") == f"{h['wrapper_s']:.1f}"
+    assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
+    assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"

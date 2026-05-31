@@ -6,7 +6,7 @@ Target search query: "mflux TeaCache FLUX.1", "speed up FLUX dev Mac",
 Expected output: writes `flux1_teacache.webp` next to this script.
 Prints the TeaCache skip counts at the end so users can see the
 gate actually firing (FLUX.1-dev at 25 steps + default threshold
-skips ~6 of 25 steps for a measured 1.44× wall-clock on M1 Max).
+skips ~6 of 25 steps for a measured 1.46× wall-clock on M1 Max).
 
 Run with:
     uv run python examples/mflux_teacache_flux1.py

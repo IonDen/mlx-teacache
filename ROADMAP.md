@@ -14,7 +14,9 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Active
 
-(v0.5.1's clean three-way attribution work was folded into v0.6.0 — the subprocess-per-rep refactor that makes the bench memory-safe at 9B on 32 GB shipped as part of the per-variant cores release. The triage of two remaining `test_paired_parity_at_threshold_zero_klein_pr_gate[*-0.7]` parity failures from the v0.6.0 release run is the open item.)
+Nothing in flight. (v0.5.1's clean three-way attribution work was folded into v0.6.0 — the subprocess-per-rep refactor that makes the bench memory-safe at 9B on 32 GB shipped as part of the per-variant cores release.)
+
+The two `test_paired_parity_at_threshold_zero_klein_pr_gate[*-0.7]` failures flagged from the v0.6.0 release run were triaged and resolved: they were the distilled klein 4B/9B cases. At `image_strength=0.7` the 8-step schedule leaves ~3 active steps, so the default skip-window allows 0 skips and `TeaCacheNoBenefitWarning` fires — correct production behavior that predates v0.6.0, surfaced as a failure only by pytest's `-W error`. Both are now `xfail(strict)`; the non-distilled base-4b/base-9b cases pass the cosine ≥ 0.97 gate at strength 0.7.
 
 ---
 

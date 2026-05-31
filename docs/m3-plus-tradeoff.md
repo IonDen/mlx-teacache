@@ -38,9 +38,8 @@ hardware.
 On chips that mflux already runs eager (base + Pro M1/M2), the wrapper does
 not gain anything from compile avoidance — it only helps when the gate fires.
 For FLUX.2 Klein at the distilled 4-8 step defaults the gate does not fire at
-all (see the v0.3.0 postmortem in `docs/superpowers/notes/`), so Klein on
-M1/M2 base + Pro with mlx-teacache is approximately neutral or slightly slower
-than vanilla.
+all, so Klein on M1/M2 base + Pro with mlx-teacache is approximately neutral or
+slightly slower than vanilla.
 
 ## M5 specifically: Neural Accelerators
 

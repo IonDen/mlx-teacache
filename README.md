@@ -1,5 +1,9 @@
 # mlx-teacache
 
+<p align="center">
+  <img src="docs/assets/mlx-teacache-logo.png" alt="mlx-teacache" width="640">
+</p>
+
 [![PyPI version](https://img.shields.io/pypi/v/mlx-teacache.svg)](https://pypi.org/project/mlx-teacache/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mlx-teacache.svg)](https://pypi.org/project/mlx-teacache/)
 [![License: Apache 2.0](https://img.shields.io/pypi/l/mlx-teacache.svg)](https://github.com/IonDen/mlx-teacache/blob/main/LICENSE)
@@ -44,7 +48,7 @@ uv add "mlx-teacache[mflux]"
 Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17,<0.18`.
 
 ```bash
-pip install "mlx-teacache==0.6.1[mflux]"  # pin for reproducibility
+pip install "mlx-teacache==0.7.0[mflux]"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -110,6 +114,7 @@ The table below is generated from the variant registry — see `docs/_generate_s
 | `flux2-klein-9b` | FLUX.2 Klein 9B | yes | 8 steps, g=1.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
 | `flux2-klein-base-4b` | FLUX.2 Klein base 4B | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) |
 | `flux2-klein-base-9b` | FLUX.2 Klein base 9B | no | 50 steps, g=4.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) |
+| `z-image-base` | Z-Image base | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Tongyi-MAI/Z-Image) |
 <!-- SUPPORTED_MODELS_END -->
 
 ### Per-variant notes
@@ -126,13 +131,17 @@ Each variant has its own page under [`docs/variants/`](docs/variants) — mflux 
 
 See `_artifacts/v0.6.0_bench_klein_base_9b.json` for the full report and `tests/_artifacts/bench_images/klein-base-9b/` for side-by-side images.
 
+**[`z-image-base`](docs/variants/z-image-base.md)** — Z-Image base (Tongyi-MAI, Apache-2.0), a single-stream DiT and the first non-FLUX model with a TeaCache mini-kernel (added in v0.7.0). Its adaLN modulation is timestep-only, so there is no cheap caption-independent modulation input to gate on; the gate signal is the first-main-layer residual (calibrated in-repo as "Signal B", R² 0.400 — in line with the shipped FLUX.2 fits, and the threshold sweep rather than the fit R² sets the quality bar here; the caption-independent noise-refiner tap was tried and rejected at R² 0.069). Per-variant default `rel_l1_thresh=0.12`, set at the SSIM knee. At the 512×512 red-apple recipe (subprocess-per-rep, q8, 50 steps, g=4.0): **1.17× combined wall-clock** (245.3 s → 209.4 s; 15/48 active steps skipped), the win entirely from gating — `mx.compile`-path avoidance is not a tailwind on Z-Image. Peak memory drops 17.2 GB → 11.9 GB (from the eager wrapper bypassing mflux's compiled `_predict`, not from gating). SSIM 0.991 vs vanilla at this recipe. The [COMPARISON.md](COMPARISON.md) portrait row is a separate 640×896 generation at 1.33×.
+
+See `scripts/_bench_z_image_v0_7_0.json` for the full report.
+
 ## When to use mlx-teacache
 
 The wrapper helps when the underlying schedule actually has cacheable redundancy. That is the case for non-distilled FLUX schedules with enough denoising steps for adjacent transformer outputs to look similar, which is what TeaCache's gate exploits.
 
 In practice, that means:
 
-- Use mlx-teacache for **`flux1-dev`** at 20-50 steps and the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps, with or without CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
+- Use mlx-teacache for **`flux1-dev`** at 20-50 steps, the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps with or without CFG, and **`z-image-base`** at 50 steps with CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
 - Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux.
 
 There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.
@@ -179,7 +188,7 @@ mlx-teacache implements this for mflux on Apple Silicon. For FLUX.1 we replace `
 
 ## Benchmarks
 
-All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 26.x, mflux 0.17.5, bf16, quantize=4, 512×512, `seed=42`, red-apple prompt; default `rel_l1_thresh=0.20` (per-variant default `0.17` on base-4b rows). Measurement dates: pre-v0.4.1 rows measured 2026-05-16; base-4b 25-step row measured 2026-05-17 (v0.4.0 harness); base-4b CFG row re-measured 2026-05-26 under v0.6.0's subprocess-per-rep harness (column footnote ⁴). Subprocess-per-rep means every (variant, condition, rep) gets a fresh Python interpreter so each timing starts from a cold MLX allocator; older same-process rows are flagged with their measurement era.
+All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 26.x, mflux 0.17.5, bf16, quantize=4 (q8 on the `z-image-base` row — its pinned recipe), 512×512, `seed=42`, red-apple prompt; default `rel_l1_thresh=0.20` (per-variant default `0.17` on base-4b rows, `0.12` on z-image-base). Measurement dates: pre-v0.4.1 rows measured 2026-05-16; base-4b 25-step row measured 2026-05-17 (v0.4.0 harness); base-4b CFG row re-measured 2026-05-26 under v0.6.0's subprocess-per-rep harness (column footnote ⁴). Subprocess-per-rep means every (variant, condition, rep) gets a fresh Python interpreter so each timing starts from a cold MLX allocator; older same-process rows are flagged with their measurement era.
 
 | Variant | Steps | Vanilla | Wrapper | Speedup | Skipped | Mechanism |
 |---|---|---|---|---|---|---|
@@ -190,6 +199,7 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 | `flux2-klein-base-4b`³ | 25 | 77.5s | 55.1s | **1.41×** | **3 / 25** | step-skipping + `mx.compile` avoidance |
 | `flux2-klein-base-4b` (CFG)⁴ | 50 | 236.2s | 191.8s | **1.23×** | **9 / 50** | step-skipping (compile-avoidance ≈ noise) |
 | `flux2-klein-base-9b` (CFG)⁵ | 50 | 517.6s | 380.6s | **1.36×** | **13 / 50** | step-skipping + small compile-avoidance |
+| `z-image-base` (CFG)⁶ | 50 | 245.3s | 209.4s | **1.17×** | **15 / 50** | step-skipping (q8; compile-avoidance not a tailwind) |
 
 ¹ `flux1-dev` at 25 steps, `guidance=3.5`, 512×512, default `rel_l1_thresh=0.20`. Measured 2026-05-31 under the subprocess-per-rep harness: **1.46× combined**, and the three-way split puts the whole win on gating: 1.47× from step-skipping, 1.00× from `mx.compile`-path avoidance (the eager wrapper and vanilla run neck-and-neck on this recipe). 6/25 skips across all three reps. Full report: `_artifacts/v0.6.3_bench_flux1_dev.json`. Reproduce with `uv run python scripts/bench_speedup.py --variant flux1-dev --three-way --reps 3 --report out.json`.
 
@@ -201,6 +211,8 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 
 ⁵ `flux2-klein-base-9b` under CFG at the canonical 50-step + g=4.0 recipe. Measured under v0.6.0's subprocess-per-rep harness: **1.36× combined** = 1.34× gating × 1.02× compile-avoidance. 13/50 skips stable across reps; SSIM 0.986 vs vanilla. Replaces v0.5.0's advertised 2.68× headline, which was inflated by same-process MLX state leakage in the v0.5.x harness (see [Per-variant notes](#per-variant-notes) → klein-base-9b correction blockquote, and `_artifacts/v0.6.0_bench_klein_base_9b.json` for the full report). Wrapper peak memory ~10 GB vs vanilla's ~22 GB. Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`.
 
+⁶ `z-image-base` under CFG at 50 steps, `guidance=4.0`, 512×512, **q8** (its pinned recipe — the rest of the table is q4), per-variant default `rel_l1_thresh=0.12`. Measured under the subprocess-per-rep harness: **1.17× combined** (vanilla 245.3 s → wrapper 209.4 s median), entirely from step-skipping at 15 of the 48 active steps (the table's `15 / 50` is over nominal steps; 48 active = 50 minus the skip-first/skip-last windows), stable across all three reps. `mx.compile`-path avoidance is not a tailwind here — the no-gate wrapper measured no faster than vanilla, though the three-way decomposition is thermally confounded (conditions run in blocks, the no-gate block ran hotter), so only the net 1.17× is reported. Peak memory 17.2 GB → 11.9 GB, from the eager wrapper bypassing mflux's compiled `_predict` (the no-gate wrapper shows the same ~11.9 GB), not from gating. SSIM 0.991 vs vanilla. [COMPARISON.md](COMPARISON.md) reports a higher 1.33× for this variant at the 640×896 portrait recipe (14 skips) — the larger resolution amortizes the per-step gating overhead better. Full report: `scripts/_bench_z_image_v0_7_0.json`. Reproduce with `uv run python scripts/bench_speedup.py --variant z-image --three-way --reps 3 --report out.json`.
+
 Reproduce any row:
 
 ```bash
@@ -210,6 +222,7 @@ uv run python scripts/bench_speedup.py --variant klein-9b       # 8-step Klein 9
 uv run python scripts/bench_speedup.py --variant klein-base-4b  # 50-step base-4B under CFG (g=4.0, v0.4.1+ default)
 uv run python scripts/bench_speedup.py --variant klein-base-4b --guidance 1.0 --num-inference-steps 25  # v0.4.0 row
 uv run python scripts/bench_speedup.py --variant klein-base-9b  # 50-step base-9B under CFG (g=4.0, v0.5.0+ default)
+uv run python scripts/bench_speedup.py --variant z-image        # 50-step Z-Image base under CFG (g=4.0, q8)
 ```
 
 For the three-way decomposition (vanilla / wrapped-no-gate / wrapped-gated), add `--three-way --reps 3 --report out.json`. This is how the v0.6.0 base-4b and base-9b numbers were produced.

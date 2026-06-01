@@ -97,6 +97,51 @@
         "vanilla": "_artifacts/comparison/klein-base-4b-cfg/vanilla.webp",
         "wrapper": "_artifacts/comparison/klein-base-4b-cfg/wrapper.webp"
       }
+    },
+    "z-image": {
+      "variant_id": "z-image-base",
+      "num_inference_steps": 50,
+      "guidance": 4.0,
+      "height": 896,
+      "width": 640,
+      "quantize": 8,
+      "vanilla": {
+        "rep_seconds": [
+          530.3882517910097,
+          550.208780416986,
+          576.3461245000362
+        ],
+        "cold_seconds": 530.3882517910097,
+        "warm_median_seconds": 563.2774524585111,
+        "peak_memory_gb": 18.711246106773615
+      },
+      "wrapper": {
+        "rep_seconds": [
+          414.98582854197593,
+          425.0204505419824,
+          424.6363683340023
+        ],
+        "cold_seconds": 414.98582854197593,
+        "warm_median_seconds": 424.8284094379924,
+        "skipped_per_rep": [
+          14,
+          14,
+          14
+        ],
+        "computed_per_rep": [
+          34,
+          34,
+          34
+        ],
+        "rel_l1_thresh_used": 0.12,
+        "peak_memory_gb": 13.062947861850262
+      },
+      "speedup_warm": 1.3258940314365362,
+      "speedup_cold": 1.2780876244726047,
+      "image_paths": {
+        "vanilla": "_artifacts/comparison/z-image/vanilla.webp",
+        "wrapper": "_artifacts/comparison/z-image/wrapper.webp"
+      }
     }
   }
 }

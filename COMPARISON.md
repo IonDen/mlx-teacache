@@ -2,22 +2,22 @@
 
 Visual showcase of what the wrapper does on real generations. Two harnesses contribute to this page:
 
-- The `flux1-dev` and `flux2-klein-base-4b` rows are from `scripts/bench_comparison.py` (subprocess-per-condition, three reps per subprocess; cold = rep 1, warm = median of reps 2 and 3). Full report: `_artifacts/comparison_report.json`. Committed images alongside this file under `_artifacts/comparison/<variant>/`.
+- The `flux1-dev`, `flux2-klein-base-4b`, and `z-image-base` rows are from `scripts/bench_comparison.py` (subprocess-per-condition, three reps per subprocess; cold = rep 1, warm = median of reps 2 and 3). Full report: `_artifacts/comparison_report.json`. Committed images alongside this file under `_artifacts/comparison/<variant>/`. All three share the portrait prompt and seed below; `z-image-base` renders at 640×896 q8 (rather than 768×1024 q4) because its 8-bit weights at full resolution would cross the 32 GB ceiling.
 - The `flux2-klein-base-9b` row is from `scripts/bench_speedup.py --three-way --reps 3` (subprocess-per-rep — every rep gets a fresh interpreter, fully cold). Full report: `_artifacts/v0.6.0_bench_klein_base_9b.json`. Images under `tests/_artifacts/bench_images/klein-base-9b/`.
 
-The two harnesses use different prompts and resolutions (the bench_comparison row is the 768×1024 portrait listed below; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
+The two harnesses use different prompts and resolutions (the bench_comparison rows use the 768×1024 portrait listed below, except z-image-base at 640×896; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
 
 Only non-distilled variants are listed here. Distilled schedules (`flux1-schnell`, `flux2-klein-4b`, `flux2-klein-9b`) skip zero steps and gain nothing from the wrapper. See the "When to use mlx-teacache" section in the README for the recommendation.
 
 ## Test machine
 
-Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5. mlx-teacache 0.6.1.
+Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5 (q8 for the `z-image-base` row — its pinned recipe). mlx-teacache 0.7.0.
 
 Shared inputs across every cell:
 
 - **Prompt:** *"Portrait of a young woman with auburn hair and green eyes, soft golden-hour window light, photorealistic, shallow depth of field, 50mm prime lens, subtle freckles, neutral background, cinematic color grading."*
 - **Seed:** 42
-- **Resolution:** 768 × 1024 (portrait)
+- **Resolution:** 768 × 1024 (portrait) — `z-image-base` is the exception at 640 × 896 (q8 memory; see its section)
 - **Image format on disk:** webp, quality 88, method 6
 
 ## FLUX.1 family
@@ -66,6 +66,27 @@ This is the canonical FLUX.2 Klein base setting from Black Forest Labs: 50 steps
 
 `flux2-klein-base-9b` is the non-distilled FLUX.2 Klein 9B variant (FLUX Non-Commercial license — see [README License obligations](README.md#license-obligations) and accept on the [Hugging Face model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) before downloading). Reuses base-4b's polynomial coefficients verbatim — same FLUX.2 Klein architecture family, same calibration recipe. The 1.36× combined speedup decomposes into 1.34× from gating (the v0.4.1 effect) and 1.02× from `mx.compile`-path avoidance (the v0.4 effect; small on M1 Max for this recipe — the peak-memory drop from 22 GB to 10 GB is the tell that the wrapper bypasses mflux's compiled `_predict`).
 
+## Z-Image
+
+### `z-image-base` — 50 steps, guidance=4.0, q8, 640×896
+
+|  | Vanilla mflux | mlx-teacache |
+|---|---|---|
+| Time (cold) | 530.4 s | 415.0 s |
+| Time (warm median) | 563.3 s | 424.8 s |
+| Warm speedup | — | **1.33×** |
+| Steps skipped | 0 of 48 active | 14 of 48 active |
+| Threshold | — | rel_l1 = 0.12 |
+| Peak memory | 18.7 GB | 13.1 GB |
+| SSIM vs vanilla | — | **0.957** |
+| Image | ![vanilla](_artifacts/comparison/z-image/vanilla.webp) | ![wrapper](_artifacts/comparison/z-image/wrapper.webp) |
+
+This row uses the shared portrait prompt and seed, but at **640×896 q8** rather than the page's 768×1024. Z-Image's weights are 8-bit, and at full 768×1024 the peak crosses the 32 GB unified-memory ceiling on this machine; 640×896 keeps the peak under control (18.7 GB vanilla) while staying the same portrait subject as the FLUX rows.
+
+Z-Image (Tongyi-MAI, Apache-2.0) is a single-stream DiT, not a FLUX model, so it gets its own TeaCache mini-kernel and a separately calibrated gate. Its adaLN modulation is timestep-only, so there is no cheap caption-independent prelude signal to gate on; the calibration taps the first-main-layer residual instead (the caption-independent noise-refiner tap was tried and rejected — its rel-L1 range was too compressed to track the body). At the quality-first threshold of 0.12 the wrapper skips 14 of the 48 active transformer evaluations, each skip avoiding both CFG branches' 30-layer bodies. SSIM is 0.957 — lower than the 0.991 a simpler scene gets at the same threshold, because a detailed face shows the skipped-step softening more readily. The two portraits are perceptually equivalent at output size, with slightly softer microtexture in the wrapped version on close inspection.
+
+Two notes on the numbers. The warm 1.33× here is larger than the 1.17× the README cites for this variant, because the README figure comes from the 512×512 red-apple bench recipe; at 640×896 each skipped step saves more compute, so the per-step gating overhead amortizes better. Both are honest measured wins on their own recipe. The wall-clock speedup is all gating — `mx.compile`-path avoidance is at best neutral on Z-Image. The peak-memory drop from 18.7 GB to 13.1 GB is a separate benefit of the eager wrapper, not of gating: the 512² three-way bench shows the no-gate wrapper landing at the same ~11.9 GB as the gated one (vanilla 17.2 GB), so the drop comes from bypassing mflux's compiled `_predict`, the same effect seen on klein-base-9b.
+
 ## What is excluded and why
 
 - `flux1-schnell` and `flux2-klein-4b` / `flux2-klein-9b` distilled schedules: the residual change between adjacent steps is too large for the gate to engage at any reasonable threshold. They skip zero steps and the wrapper would only add a ~1-2% gating tax. Run them through vanilla mflux instead.
@@ -73,13 +94,13 @@ This is the canonical FLUX.2 Klein base setting from Black Forest Labs: 50 steps
 
 ## Reproducing these numbers
 
-The `flux1-dev` and `klein-base-4b` rows above:
+The `flux1-dev`, `klein-base-4b`, and `z-image-base` rows above:
 
 ```bash
 uv run python scripts/bench_comparison.py
 ```
 
-Writes images into `_artifacts/comparison/<variant>/{vanilla,wrapper}.webp` and the full JSON to `_artifacts/comparison_report.json`. Expect about 42 minutes total wall time on an M1 Max: roughly 12 minutes for flux1-dev (six 25-step reps) and 30 minutes for klein-base-4b at the CFG schedule (six 50-step reps with CFG doubling the per-step cost).
+Writes images into `_artifacts/comparison/<variant>/{vanilla,wrapper}.webp` and the full JSON to `_artifacts/comparison_report.json`. Expect about 90 minutes total wall time on an M1 Max: roughly 12 minutes for flux1-dev (six 25-step reps), 30 minutes for klein-base-4b at the CFG schedule (six 50-step CFG reps), and 50 minutes for z-image-base (six 50-step CFG reps at 640×896 q8, the slowest per-step recipe).
 
 The `klein-base-9b` row:
 
@@ -95,7 +116,7 @@ Override the hardware label in the bench_comparison.py JSON if you are running o
 uv run python scripts/bench_comparison.py --machine-label "Apple M3 Max" --ram-gb 64
 ```
 
-To re-run a single variant after a partial bench_comparison.py run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`).
+To re-run a single variant after a partial bench_comparison.py run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`, `z-image`).
 
 ---
 

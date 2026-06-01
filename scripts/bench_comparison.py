@@ -67,7 +67,22 @@ class VariantConfig:
     variant_id: str  # registry id (used only for reporting clarity)
     num_inference_steps: int
     guidance: float
-    loader: str  # "flux1-dev" or "klein-base-4b"
+    loader: str  # "flux1-dev" / "klein-base-4b" / "z-image"
+    # Per-variant overrides. Defaults preserve the shared portrait recipe used by
+    # the q4 FLUX rows (768x1024 q4). Z-Image is q8, so it drops resolution to
+    # stay under the 32 GB unified-memory ceiling — same PROMPT + SEED, only the
+    # resolution changes (per the COMPARISON shared-prompt rule).
+    height: int = 1024
+    width: int = 768
+    quantize: int = 4
+    wired_cap_gb: int = (
+        22  # mx.set_wired_limit; must stay < max_recommended_working_set_size (25 on M1 Max 32GB)
+    )
+    # Free the MLX buffer cache between reps. Off for the q4 FLUX rows (their warm
+    # reps intentionally reuse the warm allocator). On for q8 Z-Image at 640x896,
+    # where a single gen peaks ~18.7 GB but the cache accumulates across reps in
+    # one process and OOMs the Metal command buffer on rep 2 without this.
+    clear_cache_between_reps: bool = False
 
 
 VARIANTS: tuple[VariantConfig, ...] = (
@@ -85,6 +100,18 @@ VARIANTS: tuple[VariantConfig, ...] = (
         guidance=4.0,
         loader="klein-base-4b",
     ),
+    VariantConfig(
+        slug="z-image",
+        variant_id="z-image-base",
+        num_inference_steps=50,
+        guidance=4.0,
+        loader="z-image",
+        height=896,
+        width=640,
+        quantize=8,
+        wired_cap_gb=24,  # 640x896 q8 peaks higher than the q4 rows; 24 < 25 recommended
+        clear_cache_between_reps=True,  # single gen ~18.7 GB; cache accumulation OOMs rep 2 without this
+    ),
 )
 
 
@@ -93,24 +120,30 @@ VARIANTS: tuple[VariantConfig, ...] = (
 # ---------------------------------------------------------------------------
 
 
-def _load_flux(loader: str) -> Any:
+def _load_flux(loader: str, quantize: int) -> Any:
     from mflux.models.common.config.model_config import ModelConfig
 
     if loader == "flux1-dev":
         from mflux.models.flux.variants.txt2img.flux import Flux1
 
-        flux = Flux1.from_name("dev", quantize=4)
+        flux = Flux1.from_name("dev", quantize=quantize)
     elif loader == "klein-base-4b":
         from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
-        flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+        flux = Flux2Klein(quantize=quantize, model_config=ModelConfig.flux2_klein_base_4b())
+    elif loader == "z-image":
+        from mflux.models.z_image.variants.z_image import ZImage
+
+        flux = ZImage(quantize=quantize, model_config=ModelConfig.z_image())
     else:
         raise ValueError(f"unknown loader: {loader!r}")
     flux.freeze()
     return flux
 
 
-def _generate(flux: Any, *, num_inference_steps: int, guidance: float) -> tuple[float, Any]:
+def _generate(
+    flux: Any, *, num_inference_steps: int, guidance: float, height: int, width: int
+) -> tuple[float, Any]:
     """Time one flux.generate_image call. Flushes GPU before stopping clock."""
     import mlx.core as mx
 
@@ -119,8 +152,8 @@ def _generate(flux: Any, *, num_inference_steps: int, guidance: float) -> tuple[
         prompt=PROMPT,
         seed=SEED,
         num_inference_steps=num_inference_steps,
-        height=HEIGHT,
-        width=WIDTH,
+        height=height,
+        width=width,
         guidance=guidance,
     )
     mx.eval(mx.zeros(1))  # flush GPU work before stopping the clock
@@ -148,21 +181,37 @@ def _save_as_webp(image: Any, dest_webp: Path) -> None:
 
 
 def _run_worker_vanilla(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
-    flux = _load_flux(cfg.loader)
+    import mlx.core as mx
+
+    flux = _load_flux(cfg.loader, cfg.quantize)
     times: list[float] = []
     for i in range(REPS):
-        elapsed, image = _generate(flux, num_inference_steps=cfg.num_inference_steps, guidance=cfg.guidance)
+        elapsed, image = _generate(
+            flux,
+            num_inference_steps=cfg.num_inference_steps,
+            guidance=cfg.guidance,
+            height=cfg.height,
+            width=cfg.width,
+        )
         times.append(elapsed)
         if i == 0:
             _save_as_webp(image, save_to)
-        print(f"  vanilla rep {i + 1}: {elapsed:.2f}s", flush=True)
-    return {"condition": "vanilla", "rep_seconds": times}
+        print(
+            f"  vanilla rep {i + 1}: {elapsed:.2f}s (peak {mx.get_peak_memory() / 1024**3:.2f} GB)",
+            flush=True,
+        )
+        del image
+        if cfg.clear_cache_between_reps:
+            mx.clear_cache()
+    return {"condition": "vanilla", "rep_seconds": times, "peak_memory_gb": mx.get_peak_memory() / 1024**3}
 
 
 def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
+    import mlx.core as mx
+
     from mlx_teacache import apply_teacache
 
-    flux = _load_flux(cfg.loader)
+    flux = _load_flux(cfg.loader, cfg.quantize)
     times: list[float] = []
     skipped: list[int] = []
     computed: list[int] = []
@@ -172,7 +221,11 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
             if i == 0:
                 thresh_used = handle.rel_l1_thresh
             elapsed, image = _generate(
-                flux, num_inference_steps=cfg.num_inference_steps, guidance=cfg.guidance
+                flux,
+                num_inference_steps=cfg.num_inference_steps,
+                guidance=cfg.guidance,
+                height=cfg.height,
+                width=cfg.width,
             )
             times.append(elapsed)
             skipped.append(handle.stats.skipped_count)
@@ -180,22 +233,40 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
             if i == 0:
                 _save_as_webp(image, save_to)
         print(
-            f"  wrapper rep {i + 1}: {elapsed:.2f}s (skipped {skipped[-1]}/{cfg.num_inference_steps})",
+            f"  wrapper rep {i + 1}: {elapsed:.2f}s (skipped {skipped[-1]}/{cfg.num_inference_steps}, "
+            f"peak {mx.get_peak_memory() / 1024**3:.2f} GB)",
             flush=True,
         )
+        del image
+        if cfg.clear_cache_between_reps:
+            mx.clear_cache()
     return {
         "condition": "wrapper",
         "rep_seconds": times,
         "skipped_per_rep": skipped,
         "computed_per_rep": computed,
         "rel_l1_thresh_used": thresh_used,
+        "peak_memory_gb": mx.get_peak_memory() / 1024**3,
     }
 
 
 def _worker_main(args: argparse.Namespace) -> None:
     """Subprocess entrypoint. Runs one (variant, condition) pair and prints
     a single JSON line prefixed by WORKER_RESULT_SENTINEL on stdout."""
+    import mlx.core as mx
+
     cfg = next(v for v in VARIANTS if v.slug == args.variant)
+    # Memory guardrail — before any model load. wired must stay strictly below
+    # max_recommended_working_set_size (25 GB on M1 Max 32GB) so the worst case
+    # is a clean MLX OOM, never a kernel watchdog panic.
+    wired = cfg.wired_cap_gb
+    mx.set_wired_limit(int(wired * 1024**3))
+    mx.set_memory_limit(int((wired + 1) * 1024**3))
+    print(
+        f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired} GB soft={wired + 1} GB, "
+        f"res={cfg.width}x{cfg.height} q{cfg.quantize}",
+        flush=True,
+    )
     save_to: Path = Path(args.save_to)
     if args.condition == "vanilla":
         result = _run_worker_vanilla(cfg, save_to)
@@ -329,10 +400,14 @@ def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
         "variant_id": cfg.variant_id,
         "num_inference_steps": cfg.num_inference_steps,
         "guidance": cfg.guidance,
+        "height": cfg.height,
+        "width": cfg.width,
+        "quantize": cfg.quantize,
         "vanilla": {
             "rep_seconds": vanilla_times,
             "cold_seconds": vanilla_cold,
             "warm_median_seconds": vanilla_warm,
+            "peak_memory_gb": vanilla.get("peak_memory_gb"),
         },
         "wrapper": {
             "rep_seconds": wrapper_times,
@@ -341,6 +416,7 @@ def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
             "skipped_per_rep": wrapper["skipped_per_rep"],
             "computed_per_rep": wrapper["computed_per_rep"],
             "rel_l1_thresh_used": wrapper["rel_l1_thresh_used"],
+            "peak_memory_gb": wrapper.get("peak_memory_gb"),
         },
         "speedup_warm": speedup_warm,
         "speedup_cold": speedup_cold,

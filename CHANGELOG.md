@@ -7,6 +7,20 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-01
+
+### Added
+- **Z-Image base support** (`z-image-base`) — the first non-FLUX variant; unlike the FLUX variants, its gate is calibrated on a latent-dependent internal signal rather than a modulation input. Z-Image (Tongyi-MAI, Apache-2.0) is a single-stream DiT whose adaLN modulation is timestep-only, so there is no cheap caption-independent signal to gate on the way the FLUX variants do. The gate taps the first-main-layer residual rel-L1, calibrated in-repo with `scripts/calibrate_z_image.py` (Signal B, origin-constrained R² = 0.400 / held-out 0.179). A caption-independent noise-refiner tap (Signal A) was tried and rejected at R² = 0.069 — its rel-L1 range is too compressed to track the body. Per-variant default `rel_l1_thresh=0.12`, set at the SSIM knee from `scripts/sweep_threshold_z_image.py`.
+- Self-contained mini-kernel at `src/mlx_teacache/variants/z_image_base/{config,detect,integration}.py`. It re-walks `ZImageTransformer.__call__` with the gate, caches `main_out - unified_in` per CFG branch, and reconstructs `unified_in + cached_residual` on a skipped step. No sibling-variant imports — the variant defines its own internal handle and depends only on `_kernel/`, the public handle, and the shared mflux lifecycle. CFG combine matches mflux's `noise + guidance * (noise - negative_noise)`.
+- `docs/variants/z-image-base.md`; a Z-Image row in `COMPARISON.md` (640×896 q8 portrait); committed artifacts `scripts/_calibration_z_image.json` and `scripts/_bench_z_image_v0_7_0.json`.
+- Scripts and tests: `scripts/calibrate_z_image.py`, `scripts/sweep_threshold_z_image.py`, `tests/test_forward_z_image.py` (pure detect/config/registry), `tests/test_calibrate_z_image.py` (fit helper), `tests/test_parity_z_image.py` (threshold-0 cosine parity + skip-path engagement, mflux-marked).
+
+### Changed
+- `scripts/bench_speedup.py` and `scripts/bench_comparison.py` now carry a per-variant quantize (q8 for Z-Image) and resolution. `bench_comparison.py` adds a per-variant wired-memory cap and optional buffer-cache clearing between reps, needed for q8 at 640×896 where a single generation peaks ~18.7 GB but the cache otherwise accumulates across reps and OOMs the Metal command buffer.
+
+### Performance
+- `z-image-base` at the 512×512 red-apple bench recipe (subprocess-per-rep, q8, 50 steps, g=4.0): **1.17× combined**, 15 of 48 active steps skipped, SSIM 0.991, peak memory 17.2 GB → 11.9 GB. The wall-clock win is entirely gating; `mx.compile`-path avoidance is not a tailwind on Z-Image (the no-gate wrapper measured no faster than vanilla). The memory drop comes from the eager wrapper bypassing mflux's compiled `_predict`, not from gating. At the 640×896 COMPARISON portrait recipe: 1.33× warm, SSIM 0.957.
+
 ## [0.6.3] — 2026-05-31
 
 ### Added

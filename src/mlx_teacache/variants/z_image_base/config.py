@@ -30,11 +30,13 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
-# PROVISIONAL — to be set at the SSIM knee by scripts/sweep_threshold_z_image.py
-# (post-Phase-3 sweep). 0.15 is the mid-range estimate: the Signal B polynomial
-# predicts ~0.09-0.22 per step over the operating range x in [0.03, 0.10], so a
-# 0.15 accumulator threshold engages without over-skipping. Confirm + refine.
-DEFAULT_THRESH: float = 0.15
+# Set at the SSIM knee from scripts/sweep_threshold_z_image.py
+# (tests/_artifacts/sweep_z_image/results_z_image.json, 2026-06-01 sweep):
+# SSIM holds >= 0.99 through 0.12 (15/48 steps skipped, SSIM 0.9913) then cliffs
+# to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first default — just before
+# the cliff, near-indistinguishable from vanilla. Skip counts are deterministic;
+# the headline speedup is the 3-rep bench (scripts/_bench_z_image_*.json).
+DEFAULT_THRESH: float = 0.12
 
 RECIPES: dict[str, dict[str, Any]] = {
     "default": {"num_inference_steps": 50, "guidance": 4.0},

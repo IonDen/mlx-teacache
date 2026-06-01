@@ -1,7 +1,7 @@
 # mlx-teacache
 
 <p align="center">
-  <img src="docs/assets/mlx-teacache-logo.png" alt="mlx-teacache" width="640">
+  <img src="docs/assets/mlx-teacache-logo.png" alt="mlx-teacache" width="100%">
 </p>
 
 [![PyPI version](https://img.shields.io/pypi/v/mlx-teacache.svg)](https://pypi.org/project/mlx-teacache/)

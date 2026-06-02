@@ -15,9 +15,7 @@ A non-binding sketch of where the library is headed beyond the shipped v0.1.x li
 
 ## Active
 
-Nothing in flight. (v0.5.1's clean three-way attribution work was folded into v0.6.0 — the subprocess-per-rep refactor that makes the bench memory-safe at 9B on 32 GB shipped as part of the per-variant cores release.)
-
-The two `test_paired_parity_at_threshold_zero_klein_pr_gate[*-0.7]` failures flagged from the v0.6.0 release run were triaged and resolved: they were the distilled klein 4B/9B cases. At `image_strength=0.7` the 8-step schedule leaves ~3 active steps, so the default skip-window allows 0 skips and `TeaCacheNoBenefitWarning` fires — correct production behavior that predates v0.6.0, surfaced as a failure only by pytest's `-W error`. Both are now `xfail(strict)`; the non-distilled base-4b/base-9b cases pass the cosine ≥ 0.97 gate at strength 0.7.
+Nothing in flight.
 
 ---
 
@@ -63,16 +61,15 @@ Pick A or C after measuring vanilla compile-loss on representative M3/M4/M5 hard
 
 ## Future model coverage (no fixed release)
 
-Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` shipped in v0.4.0 (see "Released"). `FLUX.2-klein-base-9B` shipped in v0.5.0 (see "Released"). Don't pick from this table while Active items are in flight.
+Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` shipped in v0.4.0, `FLUX.2-klein-base-9B` in v0.5.0, and `Z-Image base` in v0.7.0 (all under "Released"). Don't pick from this table while Active items are in flight.
 
 | # | Model | Effort | License | Why it matters | Risks |
 |---|---|---|---|---|---|
-| 1 | **Z-Image base** (Tongyi-MAI, full step schedule) | 3–5 days | Apache-2.0 | Already in mflux 0.17.5 as `ZImage` with a compile-gated `_predict`. Apache-2.0 license. Recommended 28–50 steps → high skip ceiling. Popular on Apple Silicon. | Different architecture from FLUX (single-stream DiT with cross-attention) — needs a fresh polynomial fit, not coefficient reuse. Integration is short; calibration is the long pole. |
-| 2 | **Chroma1-HD** (lodestones community FLUX-schnell fine-tune) | Week | Apache-2.0 | Popular community model; FLUX-architecture-compatible in spirit. | **Not in mflux 0.17.5** — exposed upstream as `ChromaPipeline` in Diffusers. Requires either a mflux integration request or a custom weight-loading path that maps Chroma's safetensors onto mflux's `Flux1` mapping. Prove loadability first; if mflux's `Flux1` accepts Chroma weights with no custom mapping, drops to 1–2 days. |
-| 3 | **SD3.5 medium** (Stability AI, 2.5B DiT) | Week+ | Stability AI Community License | DiT-family, runs on `mlx-stable-diffusion` rather than mflux. Different upstream. | Less actively maintained upstream; may require upstream patches. |
-| 4 | **SDXL** | Week+ | OpenRAIL-M | Largest installed base on Apple Silicon, but standard step counts (30–40) are lower than FLUX — speedup ceiling is lower. | Same upstream issue as SD3.5. |
-| 5 | **AuraFlow** (~6B DiT) | 1–2 weeks | Apache-2.0 | Open license, FLUX-like, room for community uptake. | Not in mflux — needs a new mflux variant first. |
-| 6 | **HunyuanVideo / Mochi / CogVideoX** | — | varies (see below) | Video diffusion: TeaCache concept is even more valuable (30+ steps, very expensive per step). | Doesn't fit 32 GB unified memory on this machine — needs a 64 GB+ M-series chip to develop and test. License notes: Mochi 1 preview Apache-2.0 (42 GB VRAM Diffusers / 60 GB reference); CogVideoX-2B Apache-2.0; CogVideoX-5B "other"; HunyuanVideo / HunyuanVideo 1.5 "other". |
+| 1 | **Chroma1-HD** (lodestones community FLUX-schnell fine-tune) | Week | Apache-2.0 | Popular community model; FLUX-architecture-compatible in spirit. | **Not in mflux 0.17.5** — exposed upstream as `ChromaPipeline` in Diffusers. Requires either a mflux integration request or a custom weight-loading path that maps Chroma's safetensors onto mflux's `Flux1` mapping. Prove loadability first; if mflux's `Flux1` accepts Chroma weights with no custom mapping, drops to 1–2 days. |
+| 2 | **SD3.5 medium** (Stability AI, 2.5B DiT) | Week+ | Stability AI Community License | DiT-family, runs on `mlx-stable-diffusion` rather than mflux. Different upstream. | Less actively maintained upstream; may require upstream patches. |
+| 3 | **SDXL** | Week+ | OpenRAIL-M | Largest installed base on Apple Silicon, but standard step counts (30–40) are lower than FLUX — speedup ceiling is lower. | Same upstream issue as SD3.5. |
+| 4 | **AuraFlow** (~6B DiT) | 1–2 weeks | Apache-2.0 | Open license, FLUX-like, room for community uptake. | Not in mflux — needs a new mflux variant first. |
+| 5 | **HunyuanVideo / Mochi / CogVideoX** | — | varies (see below) | Video diffusion: TeaCache concept is even more valuable (30+ steps, very expensive per step). | Doesn't fit 32 GB unified memory on this machine — needs a 64 GB+ M-series chip to develop and test. License notes: Mochi 1 preview Apache-2.0 (42 GB VRAM Diffusers / 60 GB reference); CogVideoX-2B Apache-2.0; CogVideoX-5B "other"; HunyuanVideo / HunyuanVideo 1.5 "other". |
 
 ### Process / infra items
 

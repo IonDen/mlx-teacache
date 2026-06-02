@@ -52,12 +52,8 @@ def _all_variant_coefficients() -> list[tuple[str, tuple[float, ...]]]:
 _VARIANT_COEFFS = _all_variant_coefficients()
 
 
-@pytest.mark.parametrize(
-    "variant_id,coeffs", _VARIANT_COEFFS, ids=[vid for vid, _ in _VARIANT_COEFFS]
-)
-def test_builtin_coefficients_are_length5_and_finite(
-    variant_id: str, coeffs: tuple[float, ...]
-) -> None:
+@pytest.mark.parametrize("variant_id,coeffs", _VARIANT_COEFFS, ids=[vid for vid, _ in _VARIANT_COEFFS])
+def test_builtin_coefficients_are_length5_and_finite(variant_id: str, coeffs: tuple[float, ...]) -> None:
     assert len(coeffs) == 5, f"{variant_id}: expected 5 coefficients, got {len(coeffs)}"
     assert all(isinstance(c, float) for c in coeffs), f"{variant_id}: coefficients must be floats"
     assert all(math.isfinite(c) for c in coeffs), f"{variant_id}: non-finite coefficient in {coeffs}"

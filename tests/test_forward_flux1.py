@@ -207,3 +207,16 @@ def test_positive_threshold_first_step_seeds_cache():
     _run_one_step(handle, t=0)
     assert handle._state.cache.cached_residual is not None
     assert handle._state.cache.previous_mod_input is not None
+
+
+def test_slow_path_raises_on_mod_input_shape_drift():
+    """The defensive shape check (integration.py:315) catches a cached mod_in
+    whose shape no longer matches the current step's — e.g. a resolution change
+    mid-generation. Seed a previous_mod_input with a clearly different shape than
+    the fake's mod_in (1, img_seq=4, dim=8) and run one slow-path step."""
+    from mlx_teacache.errors import TransformerShapeError
+
+    handle = _make_handle(rel_l1_thresh=0.25)
+    handle._state.cache.previous_mod_input = mx.zeros((1, 99, 8))
+    with pytest.raises(TransformerShapeError):
+        _run_one_step(handle, t=0)

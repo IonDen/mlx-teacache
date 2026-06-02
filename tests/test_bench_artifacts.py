@@ -143,3 +143,28 @@ def test_readme_benchmark_row_matches_committed_artifact():
     assert cells[3].endswith("s") and cells[3][:-1] == f"{h['wrapper_s']:.1f}"
     assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
     assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"
+
+
+def test_flux1_dev_bench_artifact_is_meaningful():
+    """Schema validity (the sibling test) is not enough — a corrupt artifact with
+    a sub-1 speedup or all-zero skips would pass that. Pin the *meaning*: the
+    headline speedup is real and the cache actually engages.
+
+    Note: ``skipped + computed`` is 23, not 25 — the forced first/last-window
+    steps are in neither count and there is no ``forced_counts`` field, so we
+    assert the sound bound (sum cannot exceed total steps) rather than an
+    identity we cannot reconstruct from this artifact.
+    """
+    report = _load_bench()
+    steps = int(report["num_inference_steps"])
+    skipped = report["skipped_counts"]
+    computed = report["computed_counts"]
+
+    assert float(report["speedup_median"]) > 1.0, "headline speedup must be > 1x to be a speedup"
+    assert 0 < statistics.median(skipped) < steps, (
+        "cache must engage (median skips > 0) without skipping every step"
+    )
+    assert len(computed) == len(skipped), "per-rep computed/skipped telemetry must align"
+    for i, (sk, cp) in enumerate(zip(skipped, computed, strict=True)):
+        assert sk >= 0 and cp > 0, f"rep {i}: counts must be non-negative / computed>0 ({sk}, {cp})"
+        assert sk + cp <= steps, f"rep {i}: skipped+computed {sk + cp} exceeds {steps} steps"

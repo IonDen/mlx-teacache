@@ -129,9 +129,9 @@ Full evidence: `_artifacts/v0.6.0_bench_klein_base_9b.json`, `_artifacts/v0.6.0_
 
 ### Why this refactor
 
-In v0.5.0, adding a new FLUX variant required edits to four cross-cutting files (`detect.py`, `coefficients.py::_REGISTRY`, `forward.py`, `api.py::apply_teacache`) plus the matching test plumbing. The per-variant layout reduces that to a directory copy: a new FLUX variant lands as `variants/<new-id>/{__init__,config,detect,integration}.py` plus `tests/variants/<new-id>/`. The plan amendment after the kernel-boundary audit (T14) confirmed no `gate_step` / `poly_eval` / `mean_abs_rel_l1` redefinitions snuck into the per-variant integrations; the kernel functions live in `_kernel/` and stay there.
+In v0.5.0, adding a new FLUX variant required edits to four cross-cutting files (`detect.py`, `coefficients.py::_REGISTRY`, `forward.py`, `api.py::apply_teacache`) plus the matching test plumbing. The per-variant layout reduces that to a directory copy: a new FLUX variant lands as `variants/<new-id>/{__init__,config,detect,integration}.py` plus `tests/variants/<new-id>/`. The kernel functions (`gate_step`, `poly_eval`, `mean_abs_rel_l1`) live in `_kernel/` and are not redefined in the per-variant integrations.
 
-The architectural pieces also flush a v0.5.1 backlog item (subprocess-per-rep bench) into this release because the memory-safety story for 9B + CFG on 32 GB depends on it.
+The architectural pieces also bring the subprocess-per-rep bench into this release, because the memory-safety story for 9B + CFG on 32 GB depends on it.
 
 ## [0.5.0] — 2026-05-19
 

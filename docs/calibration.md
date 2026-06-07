@@ -33,9 +33,10 @@ uv run python scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin
 
 # Klein base-4B (origin-constrained polyfit; shipped since v0.4.0). Non-distilled
 # variant designed for 20-50 step generation; this calibration uses 25 steps.
-# The per-variant default rel_l1_thresh is shipped via Provenance.default_thresh
-# in coefficients.py — if you re-calibrate, re-run scripts/sweep_threshold_klein_base_4b.py
-# afterwards to confirm or re-tune that default.
+# The per-variant default rel_l1_thresh lives in variants/flux2_klein_base_4b/
+# (DEFAULT_THRESH in config.py + Provenance.default_thresh in integration.py); if
+# you re-calibrate, re-run scripts/sweep_threshold_klein_base_4b.py afterwards to
+# confirm or re-tune that default.
 uv run python scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin
 uv run python scripts/sweep_threshold_klein_base_4b.py   # tune the per-variant default
 
@@ -62,9 +63,10 @@ step. It runs 10 prompts at seed=42 (8 steps for the distilled klein variants,
 both signals, fits a degree-4 polynomial, and writes
 `scripts/_calibration_flux2_<variant>.json` with the full report.
 
-To bake the result back into `coefficients.py`, replace the tuple value
-under the appropriate variant id and update the Provenance dataclass with
-the new `revision`, `calibration_dataset`, and `fit_metric_value`.
+To bake the result back, replace the `COEFFICIENTS` tuple in the variant's
+`variants/<id>/config.py` and update the `_PROVENANCE` record in that variant's
+`integration.py` with the new `revision`, `calibration_dataset`, and
+`fit_metric_value`.
 
 ## Custom user-supplied coefficients
 

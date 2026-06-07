@@ -119,5 +119,8 @@ source = ["mlx_teacache"]
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:"]
 # fail_under is intentionally NOT set globally — the per-PR `coverage` CI job
-# (see ci.yml) enforces 100% by combining results across test-core + test-mflux.
-# Per-task TDD runs should NOT trigger a package-wide coverage gate.
+# (see ci.yml) combines results across test-core + test-mflux and gates against
+# a FLOOR (currently 58%), not 100%: ~35% of the package is only reachable with
+# real weights (the parity lane), so 100% combined is structurally impossible
+# off that lane. The real release-quality gate is the manual parity run that
+# must pass before tagging. Per-task TDD runs should NOT trigger a global gate.

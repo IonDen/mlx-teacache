@@ -320,7 +320,7 @@ def main() -> None:
         "--variant",
         required=True,
         choices=sorted(_VARIANTS.keys()),
-        help="Which variant to calibrate. v0.3.0 wires klein-4b and klein-9b.",
+        help="Which variant to calibrate. Wired variants: klein-4b, klein-9b, klein-base-4b, klein-base-9b.",
     )
     parser.add_argument(
         "--fit-mode",

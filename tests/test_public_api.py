@@ -81,3 +81,16 @@ def test_base_import_without_mflux() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
     assert "OK" in result.stdout, f"stderr={result.stderr}"
     assert result.returncode == 0
+
+
+def test_apply_teacache_docstring_documents_per_variant_defaults():
+    from mlx_teacache import apply_teacache
+
+    doc = apply_teacache.__doc__
+    assert doc is not None
+    # per-variant default resolution is spelled out
+    assert "0.17" in doc  # base-4b / base-9b default
+    assert "0.12" in doc  # z-image-base default
+    assert "0.20" in doc  # package fallback
+    # the resolved effective value is pointed at
+    assert "handle.rel_l1_thresh" in doc

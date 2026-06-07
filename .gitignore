@@ -21,3 +21,6 @@ tests/_artifacts/
 # comparison_report.json. Keep them tracked.
 src/mlx_teacache/_version.py
   docs/superpowers/
+
+# Local Claude working layer — a thin pointer to ../CLAUDE.md. Not committed.
+/CLAUDE.md

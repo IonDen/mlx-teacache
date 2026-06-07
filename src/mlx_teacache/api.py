@@ -21,10 +21,24 @@ def apply_teacache(
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,
 ) -> TeaCacheHandle:
-    """Enable TeaCache step-skipping. Walks the variant registry; the
-    first variant whose matches(flux) returns True wins. Loads that
-    variant's integration module lazily and dispatches with all four
-    public kwargs."""
+    """Enable TeaCache step-skipping on an mflux Flux1 / Flux2Klein instance.
+
+    Walks the variant registry; the first variant whose matches(flux) returns
+    True wins, then its integration module is loaded lazily and dispatched with
+    all four public kwargs.
+
+    When rel_l1_thresh is left as None it resolves to the variant's default:
+      - flux1-dev, flux1-schnell ......... 0.20 (the package fallback)
+      - flux2-klein-base-4b, -base-9b .... 0.17
+      - z-image-base ..................... 0.12
+      - flux2-klein-4b, flux2-klein-9b ... no per-variant default; fall back to
+        0.20 (these distilled 4-8 step schedules skip 0 steps at any reasonable
+        threshold — see the "When to use" section of the README).
+    Pass rel_l1_thresh=<float> to override. The resolved effective threshold is
+    available afterwards as handle.rel_l1_thresh.
+
+    Returns a TeaCacheHandle (context-manager compatible; handle.restore()
+    undoes the patch)."""
     # --- Static validation (model-independent) ---
     if skip_first_n_steps < 0:
         raise ValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")

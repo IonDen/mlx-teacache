@@ -99,6 +99,8 @@ Measured on M1 Max 32GB, FLUX.1-dev @ 25 steps, bf16, `seed=42`, `guidance=3.5`,
 | **0.20 (default)** | **6 / 25** | **1.46×** | **≥ 0.80 (5-prompt suite)** | **Visually-lossless sweet spot** |
 | 0.25 | 11 / 25 | 1.96× | 0.57-0.93 | Visible style changes on text/synthetic prompts |
 
+The committed benchmark `_artifacts/v0.6.3_bench_flux1_dev.json` validates the 0.20 default row; the other rows show single-run measurements, not a committed multi-rep sweep.
+
 0.20 was picked after side-by-side visual comparison. At 0.25, text prompts that vanilla renders as neon tubes can come out as dot-matrix. At 0.20, the output is indistinguishable from vanilla and the cache still skips around 25% of steps. SSIM is conservative on high-frequency-detail prompts like text and synthetic patterns, which is why the suite floor (0.80) is lower than the PR-gate floor (0.90) on the red-apple prompt.
 
 ## Supported models

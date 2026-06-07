@@ -55,7 +55,7 @@ PR_TIME_PROMPT = "a red apple on a wooden table"
 #   threshold   skipped   speedup   SSIM
 #   0.10        0         1.07x     1.0000   (cache never engages)
 #   0.15        0         1.13x     1.0000   (cache never engages)
-#   0.20        6         1.48x     0.81-0.95+ (visually near-identical, sweet spot)
+#   0.20        6         1.46x     0.81-0.95+ (visually near-identical, sweet spot)
 #   0.25        11        1.96x     0.57-0.93 (visible style changes on text/synthetic prompts)
 # The 0.25 -> 0.20 default change was made because text-heavy prompts at 0.25
 # rendered as dot-matrix when vanilla rendered neon tubes. SSIM is a conservative

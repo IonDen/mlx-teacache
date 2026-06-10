@@ -61,18 +61,36 @@ def apply(
     # 4. Save original transformer for rollback.
     original_transformer = flux.transformer
 
+    import contextlib
+
+    # Eager rollback list for the transactional patch (per audit medium #3):
+    # if any mutation raises after the first, all preceding mutations are reversed.
+    _rollbacks_so_far: list[Any] = []
+
     # 5. Build proxy and swap onto flux.transformer.
     proxy = ProxyFlux1Transformer(inner=original_transformer, handle=internal)
     flux.transformer = proxy
+    _rollbacks_so_far.append(lambda: setattr(flux, "transformer", original_transformer))
 
     # 6. Register lifecycle callback via wrap_generate_image. This registers
     #    GenerationContextCallback and wraps flux.generate_image.
-    from mlx_teacache.integrations.mflux.lifecycle import GenerationContextCallback
+    from mlx_teacache.integrations.mflux.lifecycle import (
+        GenerationContextCallback,
+        _remove_callback_by_identity,
+    )
 
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
     flux.callbacks.register(callback)
-    wrap_generate_image(flux, internal)
+    _rollbacks_so_far.append(lambda: _remove_callback_by_identity(flux.callbacks, callback))
+
+    try:
+        wrap_generate_image(flux, internal)
+    except BaseException:
+        for _undo in reversed(_rollbacks_so_far):
+            with contextlib.suppress(Exception):
+                _undo()
+        raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
     #    callback + restores generate_image. NO stats finalize call (audit F2).

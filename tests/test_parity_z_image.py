@@ -17,12 +17,14 @@ Phase-4 bench + SSIM gates, not here.
 
 from __future__ import annotations
 
+import warnings as _w
 from typing import Any
 
 import mlx.core as mx
 import pytest
 
 from mlx_teacache import apply_teacache
+from mlx_teacache.errors import TeaCacheDisabledWarning
 
 pytestmark = pytest.mark.parity
 
@@ -96,7 +98,10 @@ def test_cfg_parity_at_threshold_zero(zimage_base: Any) -> None:
     flux = zimage_base
 
     vanilla_before = _capture(flux, **_GEN_KW)
-    with apply_teacache(flux, rel_l1_thresh=0.0) as h:
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux, rel_l1_thresh=0.0)
+    with ctx as h:
         wrapper = _capture(flux, **_GEN_KW)
         skipped = h.stats.skipped_count
     vanilla_after = _capture(flux, **_GEN_KW)

@@ -6,11 +6,12 @@ skip_first_n_steps, skip_last_n_steps) is preserved exactly from v0.5.x.
 Each variant's apply() accepts all four; the dispatcher forwards them.
 """
 
+import warnings
 from collections.abc import Sequence
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import validate_custom
-from mlx_teacache.errors import IncompatibleModelError, TeaCacheValueError
+from mlx_teacache.errors import IncompatibleModelError, TeaCacheDisabledWarning, TeaCacheValueError
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.variants import _REGISTRY
 
@@ -39,6 +40,10 @@ def apply_teacache(
     Pass rel_l1_thresh=<float> to override. The resolved effective threshold is
     available afterwards as handle.rel_l1_thresh.
 
+    Higher rel_l1_thresh = more steps skipped (larger speedup, some quality
+    trade-off). rel_l1_thresh=0.0 disables caching entirely — every step
+    computes, no speedup is gained, and a TeaCacheDisabledWarning is emitted.
+
     coefficients: any 5-element sequence of finite floats (list, tuple, etc.),
     coerced to a tuple before dispatch. nan or inf raises TeaCacheValueError.
 
@@ -53,6 +58,13 @@ def apply_teacache(
         coefficients = validate_custom(coefficients)
     if rel_l1_thresh is not None and not (0.0 <= rel_l1_thresh <= 1.0):
         raise TeaCacheValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
+    if rel_l1_thresh == 0.0:
+        warnings.warn(
+            "rel_l1_thresh=0.0 disables TeaCache caching (every step computes; "
+            "no speedup). Higher threshold = more skips. Pass a positive value to enable.",
+            TeaCacheDisabledWarning,
+            stacklevel=2,
+        )
 
     # --- Already-patched sentinel check ---
     existing = getattr(flux, "_teacache_handle", None)

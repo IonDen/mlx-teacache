@@ -8,8 +8,6 @@ Per spec §5.3:
 - First step with previous_mod_input is None → 'computed', should_update_cache=True.
 - Skip path: predicted_distance clamped at 0 (monotonic non-decreasing accumulator)."""
 
-import math
-
 import mlx.core as mx
 import pytest
 
@@ -36,13 +34,14 @@ def test_poly_eval_negative_x_can_be_negative():
     assert poly_eval(neg_coeffs, 0.5) == pytest.approx(-0.5)
 
 
-def test_mean_abs_rel_l1_shape_dtype():
-    a = mx.ones((2, 4, 8))
-    b = mx.zeros((2, 4, 8))
-    val = mean_abs_rel_l1(a, b)
-    # b is all zeros → division by epsilon, but |a-b| = 1, |b| ≈ 0 ⇒ huge value
-    assert math.isfinite(val) is True  # mean_abs guards against div-by-zero
-    assert val > 0
+def test_mean_abs_rel_l1_value():
+    cur = mx.array([2.0, 2.0, 2.0, 2.0])
+    prev = mx.array([1.0, 1.0, 1.0, 1.0])
+    # mean(|cur-prev|)=1.0, mean(|prev|)=1.0 -> exactly 1.0
+    assert mean_abs_rel_l1(cur, prev) == pytest.approx(1.0, rel=1e-9)
+    # division-guard branch: prev all-zero -> denom clamps to 1e-12 -> 1e12
+    big = mean_abs_rel_l1(mx.array([1.0, 1.0]), mx.array([0.0, 0.0]))
+    assert big == pytest.approx(1e12, rel=1e-6)
 
 
 def test_mean_abs_rel_l1_identical_inputs_zero():

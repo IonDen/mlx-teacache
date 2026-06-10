@@ -30,10 +30,14 @@ def test_all_subclass_teacache_error():
         assert issubclass(cls, TeaCacheError)
 
 
-def test_internal_state_error_carries_message():
-    err = InternalStateError("cached_residual was None on a skipped step")
-    msg = str(err)
-    assert "cached_residual" in msg
+def test_internal_state_error_raised_on_length_invariant_violation():
+    """InternalStateError fires when staged decisions != num_inference_steps."""
+    from mlx_teacache._kernel.stats import TeaCacheStats
+    from mlx_teacache.errors import InternalStateError
+
+    stats = TeaCacheStats()
+    with pytest.raises(InternalStateError, match="length invariant"):
+        stats.finalize_last_generation(num_inference_steps=3, cfg_was_active=False)
 
 
 def test_incompatible_model_lists_supported_variants():

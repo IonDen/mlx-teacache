@@ -44,6 +44,9 @@ def test_threshold_zero_never_skips(coeffs):
 def test_forced_windows_honored(step_idx, skip_first, skip_last):
     num_steps = 100
     state = _fresh(num_steps=num_steps)
+    # Seed the anchor so out-of-window steps reach the threshold-compare path
+    # (poly(x)=1.0 >= thresh 0.5 -> "computed"), not just the seed branch.
+    state.previous_mod_input = mx.ones((1, 4, 8)) * 2.0
     mod_in = mx.ones((1, 4, 8))
     dec = gate_step(
         state,
@@ -59,3 +62,7 @@ def test_forced_windows_honored(step_idx, skip_first, skip_last):
     in_last_window = step_idx >= num_steps - skip_last
     if in_first_window or in_last_window:
         assert dec.kind == "forced"
+    else:
+        assert dec.kind != "forced"
+        # The threshold path was actually taken (not the seed branch).
+        assert dec.rel_l1 is not None

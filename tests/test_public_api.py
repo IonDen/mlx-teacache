@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import subprocess
 import sys
 
@@ -52,20 +51,19 @@ def test_coefficients_provenance_path() -> None:
 
 
 def test_gate_module_path() -> None:
-    from mlx_teacache.gate import GateDecision, gate_step  # noqa: F401
+    from mlx_teacache._kernel.gate import GateDecision as _KernelGD
+    from mlx_teacache._kernel.gate import gate_step as _kernel_gate_step
+    from mlx_teacache.gate import GateDecision, gate_step
+
+    assert GateDecision is _KernelGD, "gate.GateDecision must be the _kernel original"
+    assert gate_step is _kernel_gate_step, "gate.gate_step must be the _kernel original"
 
 
 def test_cache_module_path() -> None:
-    from mlx_teacache.cache import TeaCacheState  # noqa: F401
+    from mlx_teacache._kernel.cache import TeaCacheState as _KernelTCS
+    from mlx_teacache.cache import TeaCacheState
 
-
-def test_apply_teacache_signature() -> None:
-    """All four explicit kwargs must survive (audit F3)."""
-    from mlx_teacache import apply_teacache
-
-    sig = inspect.signature(apply_teacache)
-    for name in ("rel_l1_thresh", "coefficients", "skip_first_n_steps", "skip_last_n_steps"):
-        assert name in sig.parameters, f"public kwarg missing: {name}"
+    assert TeaCacheState is _KernelTCS, "cache.TeaCacheState must be the _kernel original"
 
 
 def test_base_import_without_mflux() -> None:

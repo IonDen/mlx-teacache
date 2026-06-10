@@ -40,10 +40,14 @@ def apply(
     # 1. Resolve rel_l1_thresh (caller > DEFAULT_THRESH).
     resolved_thresh: float = rel_l1_thresh if rel_l1_thresh is not None else DEFAULT_THRESH
 
-    # 2. Resolve coefficients (caller > COEFFICIENTS).
-    resolved_coeffs: tuple[float, float, float, float, float] = (
-        coefficients if coefficients is not None else COEFFICIENTS
-    )
+    # 2. Resolve coefficients and provenance (caller > COEFFICIENTS).
+    # User-supplied coefficients get a user provenance; builtin get _PROVENANCE.
+    if coefficients is not None:
+        resolved_coeffs: tuple[float, float, float, float, float] = coefficients
+        resolved_provenance = Provenance.for_user_supplied()
+    else:
+        resolved_coeffs = COEFFICIENTS
+        resolved_provenance = _PROVENANCE
 
     # 3. Build internal handle (carries state, gen context, and per-generation
     #    fields that lifecycle.py and the forward block reference).
@@ -96,7 +100,7 @@ def apply(
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,
-        provenance=_PROVENANCE,
+        provenance=resolved_provenance,
         rel_l1_thresh=resolved_thresh,
     )
     # Expose resolved coefficients and callback instance as dynamic attributes

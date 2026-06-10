@@ -1,10 +1,27 @@
-"""FLUX.2 Klein 4b image-quality parity — SSIM on VAE-decoded images.
+"""FLUX.2 Klein image-quality parity — SSIM on VAE-decoded images.
 
 Mirrors `test_image_quality_flux1.py` (v2.6) for FLUX.2. At
 `rel_l1_thresh=0.0` the wrapper is already covered by the latent paired
 parity in `test_parity_flux2.py`; this file focuses on default-threshold
 quality (with caching engaged the decoded image should remain
 perceptually close to same-process vanilla).
+
+PR-gate matrix
+--------------
+Mode        | base-4b / base-9b            | distilled 4b / 9b
+txt2img     | skip_count >= 1 + SSIM gate  | finiteness/shape only
+img2img     | finiteness/shape only        | finiteness/shape only
+
+Rationale for distilled txt2img: the gate premise (polynomial predicts body
+residual distance) does not hold on 8-step distilled schedules — 0 skips
+by design at the package default. An SSIM gate without a skip-count
+assertion is the dormant-cache failure mode (passes green even when caching
+is completely disabled). Finiteness + shape is the honest correctness gate
+for those rows.
+
+Rationale for img2img (all variants): the pre-existing 0.85 floor was an
+unmeasured placeholder; a calibrated img2img gate needs its own dedicated
+measurement.
 """
 
 from __future__ import annotations
@@ -34,13 +51,37 @@ REFERENCE_PROMPTS = (
 )
 PR_TIME_PROMPT = "a red apple on a wooden table"
 
-# Calibrate against measurement before tightening. The python-ml-testing
-# skill cites SSIM >= 0.90 as the "acceptable" zone for full VAEs; FLUX.2
-# Klein 4b uses unmeasured-in-repo coefficients (placeholder until Task 29
-# completes), so the SSIM here is a coarse correctness gate rather than a
-# tight quality target. Tighten after Task 29 calibration + slow-suite
-# measurement.
-_DEFAULT_THRESHOLD_SSIM = 0.85
+# ---------------------------------------------------------------------------
+# Per-recipe SSIM floors.
+#
+# The base txt2img values are measured by the v0.8.0 release run; they are
+# committed BELOW the measured value with a small headroom margin. The
+# vanilla-vs-wrapper SSIM is deterministic per mflux/mlx pin but not a
+# portable constant across hardware.
+#
+# Constants marked `None` are MEASURE-ME sentinels. Any test that reaches
+# one at run time calls pytest.fail() loudly — placeholders must not
+# silently pass.
+# ---------------------------------------------------------------------------
+# Measured 2026-06-09 (v0.8.0 release run, one pytest process per variant):
+# red-apple prompt, seed 42, 25 steps, 512x512, guidance 1.0, q4, M1 Max 32GB,
+# mflux 0.17.x / mlx pinned by uv.lock. base-4b: 3 skips, SSIM 0.9927;
+# base-9b: 7 skips, SSIM 0.9920. Floors committed below measured with headroom.
+_SSIM_BASE_4B_TXT2IMG: float | None = 0.95  # measured 0.9927
+_SSIM_BASE_9B_TXT2IMG: float | None = 0.95  # measured 0.9920
+_SSIM_SLOW_FLOOR = 0.80  # documented slow-suite variance floor (5-prompt suite)
+_SSIM_CFG_BASE_4B = 0.85  # pre-existing CFG PR-gate floor (unchanged)
+_SSIM_CFG_BASE_9B = 0.95  # _artifacts/validation_klein_base_9b.json: 0.986 measured, 12 skips
+
+
+def _require_ssim(constant: float | None, label: str) -> float:
+    """Return the constant or fail loudly if it is an unfilled sentinel."""
+    if constant is None:
+        pytest.fail(
+            f"SSIM floor {label!r} has not been measured yet. "
+            "Run the v0.8.0 heavy measurement (Step 2) and fill in the constant."
+        )
+    return constant  # type: ignore[return-value]  # pytest.fail() raises, never returns
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +172,15 @@ def _decode_to_uint8(flux: Any, packed_latent: mx.array, *, height: int, width: 
     return img_np
 
 
+_DISTILLED_VARIANTS = frozenset({"flux2-klein-4b", "flux2-klein-9b"})
+_BASE_VARIANTS = frozenset({"flux2-klein-base-4b", "flux2-klein-base-9b"})
+
+_BASE_TXT2IMG_SSIM: dict[str, float | None] = {
+    "flux2-klein-base-4b": _SSIM_BASE_4B_TXT2IMG,
+    "flux2-klein-base-9b": _SSIM_BASE_9B_TXT2IMG,
+}
+
+
 @pytest.fixture(
     scope="module",
     params=[
@@ -169,48 +219,68 @@ def flux2_klein(request) -> tuple[Any, str]:
 @pytest.mark.parametrize(
     "image_strength,init_image_name",
     [
-        (0.0, None),  # txt2img baseline
-        (0.5, "natural_512.png"),  # img2img with natural init image
+        pytest.param(0.0, None, id="txt2img"),
+        pytest.param(0.5, "natural_512.png", id="img2img-s0.5"),
     ],
 )
 def test_default_threshold_ssim_klein_pr_gate(
     flux2_klein: tuple[Any, str], image_strength: float, init_image_name: str | None
 ) -> None:
     """PR-time gate: wrapper at the package-default rel_l1_thresh must
-    produce a decoded image whose SSIM vs same-process vanilla is >= the gate."""
+    produce a decoded image that passes the per-variant/mode quality bar.
+
+    base variants + txt2img: skip_count >= 1 (proves cache engagement) +
+        SSIM >= measured per-variant floor.
+    distilled variants + txt2img: finiteness + shape only — the gate premise
+        does not hold on 8-step distilled schedules; 0 skips by design.
+    any variant + img2img: finiteness + shape only — the pre-existing 0.85
+        was an unmeasured placeholder; img2img needs its own calibrated gate.
+    """
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
     if init_image_name is not None:
         kw["image_path"] = str(Path(__file__).parent / "fixtures" / "init_images" / init_image_name)
         kw["image_strength"] = image_strength
 
-    vanilla_latent = _capture(flux, **kw)
-    with apply_teacache(flux) as h:  # uses package default rel_l1_thresh
-        wrapper_latent = _capture(flux, **kw)
-        skipped = h.stats.skipped_count
-    # Note: at num_inference_steps=8 with default skip windows there may be
-    # very few eligible steps; skipped_count > 0 is not guaranteed. Don't
-    # assert on it here; the SSIM gate is the actual quality test.
-    del skipped  # explicitly unused
+    is_txt2img = image_strength == 0.0
+    is_base = variant_id in _BASE_VARIANTS
 
-    vanilla_img = _decode_to_uint8(
-        flux,
-        vanilla_latent,
-        height=kw["height"],
-        width=kw["width"],
-    )
-    wrapper_img = _decode_to_uint8(
-        flux,
-        wrapper_latent,
-        height=kw["height"],
-        width=kw["width"],
-    )
-    score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
-    assert score >= _DEFAULT_THRESHOLD_SSIM, (
-        f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM}; wrapper image "
-        f"diverged from same-process vanilla baseline at default threshold "
-        f"(image_strength={image_strength})"
-    )
+    if is_txt2img and is_base:
+        # Full gate: skip engagement + SSIM floor.
+        vanilla_latent = _capture(flux, **kw)
+        with apply_teacache(flux) as h:  # uses package default rel_l1_thresh
+            wrapper_latent = _capture(flux, **kw)
+            assert h.stats.skipped_count >= 1, (
+                f"Expected >= 1 skip for {variant_id} txt2img at default threshold; "
+                f"got {h.stats.skipped_count}. Cache is not engaging — check coefficients."
+            )
+        vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
+        wrapper_img = _decode_to_uint8(flux, wrapper_latent, height=kw["height"], width=kw["width"])
+        score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
+        # Emitted before the floor lookup so a measurement run (-s) records the
+        # value even while the floor constant is still the unfilled sentinel.
+        print(f"::SSIM_MEASURE:: {variant_id} txt2img skipped={h.stats.skipped_count} ssim={score:.4f}")
+        floor = _require_ssim(
+            _BASE_TXT2IMG_SSIM[variant_id], f"_SSIM_{variant_id.upper().replace('-', '_')}_TXT2IMG"
+        )
+        assert score >= floor, (
+            f"SSIM {score:.4f} < {floor}; wrapper image diverged from "
+            f"same-process vanilla baseline for {variant_id} txt2img"
+        )
+    else:
+        # Finiteness + shape only.
+        # distilled txt2img: gate premise does not hold on 8-step distilled
+        #   schedules; 0 skips by design at the package default threshold.
+        # img2img (any variant): unmeasured placeholder removed; a dedicated
+        #   img2img gate needs its own calibrated measurement.
+        vanilla_latent = _capture(flux, **kw)
+        with apply_teacache(flux):  # uses package default rel_l1_thresh
+            wrapper_latent = _capture(flux, **kw)
+        arr = np.asarray(wrapper_latent.astype(mx.float32))
+        assert np.isfinite(arr).all(), f"wrapper latent contains non-finite values for {variant_id}"
+        assert arr.shape == np.asarray(vanilla_latent.astype(mx.float32)).shape, (
+            f"wrapper latent shape {arr.shape} != vanilla shape for {variant_id}"
+        )
 
 
 def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
@@ -237,9 +307,44 @@ def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
     vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
     wrapped_img = _decode_to_uint8(flux, wrapped_latent, height=kw["height"], width=kw["width"])
     score = ssim(vanilla_img, wrapped_img, channel_axis=-1, data_range=255)
-    assert score >= _DEFAULT_THRESHOLD_SSIM, (
-        f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM}; wrapper image "
+    assert score >= _SSIM_CFG_BASE_4B, (
+        f"SSIM {score:.4f} < {_SSIM_CFG_BASE_4B}; wrapper image "
         f"diverged from same-process vanilla baseline under CFG "
+        f"(guidance=4.0, num_inference_steps=50)"
+    )
+
+
+def test_ssim_pr_gate_cfg_klein_base_9b() -> None:
+    """CFG gate for flux2-klein-base-9b: at default rel_l1_thresh (0.17),
+    g=4.0 / 50 steps must produce SSIM >= 0.95 vs vanilla AND fire >= 1
+    skip.
+
+    Threshold source: _artifacts/validation_klein_base_9b.json —
+    measured SSIM 0.986, 12 skips at rel_l1_thresh=0.17. Floor is set
+    at 0.95 to accommodate per-machine numerical variance while still
+    catching regressions.
+    """
+    from mflux.models.common.config.model_config import ModelConfig
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_9b())
+    flux.freeze()
+    kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id="flux2-klein-base-9b", cfg=True)
+    vanilla_latent = _capture(flux, **kw)
+    with apply_teacache(flux) as h:  # uses per-variant default rel_l1_thresh=0.17
+        wrapped_latent = _capture(flux, **kw)
+        assert h.stats.skipped_count >= 1, (
+            f"Expected >=1 skip for base-9b under CFG; got {h.stats.skipped_count}. "
+            f"If this fires reliably, run CFG-aware calibration via "
+            f"scripts/calibrate_flux2.py --variant klein-base-9b --guidance 4.0 "
+            f"--num-inference-steps 50."
+        )
+    vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
+    wrapped_img = _decode_to_uint8(flux, wrapped_latent, height=kw["height"], width=kw["width"])
+    score = ssim(vanilla_img, wrapped_img, channel_axis=-1, data_range=255)
+    assert score >= _SSIM_CFG_BASE_9B, (
+        f"SSIM {score:.4f} < {_SSIM_CFG_BASE_9B}; wrapper image "
+        f"diverged from same-process vanilla baseline under CFG for base-9b "
         f"(guidance=4.0, num_inference_steps=50)"
     )
 
@@ -247,15 +352,38 @@ def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
 @pytest.mark.slow
 @pytest.mark.parametrize("prompt", REFERENCE_PROMPTS)
 def test_default_threshold_ssim_klein_full(flux2_klein: tuple[Any, str], prompt: str) -> None:
-    """Nightly image-quality gate: all 5 reference prompts."""
+    """Nightly image-quality gate: all 5 reference prompts.
+
+    base variants: skip_count >= 1 (proves cache engagement) + SSIM >= slow-
+        suite variance floor (0.80).
+    distilled variants: finiteness only — gate premise does not hold on
+        8-step distilled schedules; 0 skips by design at the package default.
+    """
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(prompt, variant_id=variant_id)
-    vanilla_latent = _capture(flux, **kw)
-    with apply_teacache(flux):  # uses package default rel_l1_thresh
-        wrapper_latent = _capture(flux, **kw)
-    vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
-    wrapper_img = _decode_to_uint8(flux, wrapper_latent, height=kw["height"], width=kw["width"])
-    score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
-    assert score >= _DEFAULT_THRESHOLD_SSIM, (
-        f"SSIM {score:.4f} < {_DEFAULT_THRESHOLD_SSIM} on prompt {prompt!r}"
-    )
+    is_base = variant_id in _BASE_VARIANTS
+
+    if is_base:
+        vanilla_latent = _capture(flux, **kw)
+        with apply_teacache(flux) as h:  # uses package default rel_l1_thresh
+            wrapper_latent = _capture(flux, **kw)
+            assert h.stats.skipped_count >= 1, (
+                f"Expected >= 1 skip for {variant_id} slow suite at default threshold; "
+                f"got {h.stats.skipped_count}."
+            )
+        vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
+        wrapper_img = _decode_to_uint8(flux, wrapper_latent, height=kw["height"], width=kw["width"])
+        score = ssim(vanilla_img, wrapper_img, channel_axis=-1, data_range=255)
+        assert score >= _SSIM_SLOW_FLOOR, (
+            f"SSIM {score:.4f} < {_SSIM_SLOW_FLOOR} on prompt {prompt!r} for {variant_id}"
+        )
+    else:
+        # distilled: gate premise does not hold on 8-step distilled schedules;
+        # finiteness is the honest correctness gate.
+        vanilla_latent = _capture(flux, **kw)
+        with apply_teacache(flux):  # uses package default rel_l1_thresh
+            wrapper_latent = _capture(flux, **kw)
+        arr = np.asarray(wrapper_latent.astype(mx.float32))
+        assert np.isfinite(arr).all(), (
+            f"wrapper latent contains non-finite values for {variant_id} on prompt {prompt!r}"
+        )

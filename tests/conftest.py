@@ -62,8 +62,6 @@ _MFLUX_FILES = {
     "test_lifecycle.py",
     "test_forward_flux1.py",
     "test_forward_flux2.py",
-    "test_flux1_proxy.py",
-    "test_flux2_predict.py",
     "test_api.py",
     "test_parity_flux1.py",
     "test_parity_flux2.py",

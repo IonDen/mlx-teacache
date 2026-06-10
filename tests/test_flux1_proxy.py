@@ -8,8 +8,6 @@ import mlx.nn as nn
 import pytest
 from mlx.utils import tree_flatten
 
-pytestmark = pytest.mark.parity
-
 
 class _TinyInnerTransformer(nn.Module):
     def __init__(self):

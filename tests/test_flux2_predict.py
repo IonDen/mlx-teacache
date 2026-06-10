@@ -18,7 +18,10 @@ from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
 from mlx_teacache.stats import TeaCacheStats
 from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_predict_factory
 
-pytestmark = pytest.mark.parity
+# NOTE: this file runs in the pure-core (no-mflux) CI lane. The current tests
+# all raise before reaching flux2_forward_with_gate, which does a function-local
+# `from mflux...` import. A future test that drives predict() past the
+# validation gates would ImportError in that lane — mark it mflux if so.
 
 
 @dataclass

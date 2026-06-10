@@ -26,19 +26,7 @@ from mlx_teacache.variants.z_image_base.integration import (
     _step_decision_from_gate,
     make_teacache_predict_factory,
 )
-
-
-class _FakeCallbackRegistry:
-    def __init__(self) -> None:
-        self.before_loop_callbacks: list = []
-        self.in_loop_callbacks: list = []
-        self.after_loop_callbacks: list = []
-        self.interrupt_callbacks: list = []
-
-    def register(self, cb) -> None:  # noqa: ANN001
-        self.before_loop_callbacks.append(cb)
-        self.after_loop_callbacks.append(cb)
-        self.interrupt_callbacks.append(cb)
+from tests._fakes import FaithfulCallbackRegistry
 
 
 def _fake_zimage() -> SimpleNamespace:
@@ -46,7 +34,7 @@ def _fake_zimage() -> SimpleNamespace:
     callbacks / generate_image / _predict. No mflux, no weights."""
     return SimpleNamespace(
         model_config=SimpleNamespace(aliases=["z-image", "zimage"]),
-        callbacks=_FakeCallbackRegistry(),
+        callbacks=FaithfulCallbackRegistry(),
         generate_image=lambda **kw: "image",
     )
 
@@ -63,12 +51,12 @@ def test_apply_and_restore_roundtrip():
     assert handle.rel_l1_thresh == 0.25
     assert "_predict" in vars(flux)  # patched
     assert flux.generate_image is not original_generate
-    assert handle._callback_instance in flux.callbacks.before_loop_callbacks
+    assert handle._callback_instance in flux.callbacks.before_loop
 
     handle.restore()
     assert "_predict" not in vars(flux)  # class staticmethod re-exposed
     assert flux.generate_image is original_generate
-    assert handle._callback_instance not in flux.callbacks.before_loop_callbacks
+    assert handle._callback_instance not in flux.callbacks.before_loop
 
 
 def test_default_threshold_is_variant_default():

@@ -220,3 +220,112 @@ def test_slow_path_raises_on_mod_input_shape_drift():
     handle._state.cache.previous_mod_input = mx.zeros((1, 99, 8))
     with pytest.raises(TransformerShapeError):
         _run_one_step(handle, t=0)
+
+
+# ---------------------------------------------------------------------------
+# Skip-reconstruction identity
+# ---------------------------------------------------------------------------
+
+
+class _FakeInnerWithOffset(_FakeInner):
+    """_FakeInner whose joint block adds a fill of 0.5 to hidden_states.
+
+    This makes body_out_concat != body_in_concat (the offset is +0.5 on the
+    image-token slice), so cached_residual is a non-zero tensor and the
+    skip-reconstruction identity can fail for the right reason if the
+    reconstruction formula is broken (e.g., `+` flipped to `-`).
+    """
+
+    def _apply_joint_transformer_block(
+        self,
+        *,
+        idx: int,
+        block: Any,
+        hidden_states: mx.array,
+        encoder_hidden_states: mx.array,
+        text_embeddings: mx.array,
+        image_rotary_embeddings: mx.array,
+        controlnet_block_samples: Any,
+    ) -> tuple[mx.array, mx.array]:
+        return encoder_hidden_states, hidden_states + mx.full(hidden_states.shape, 0.5)
+
+
+def test_skip_step_reconstructs_body_out_from_cached_residual():
+    """Step 1 skip path: body_out_concat = body_in_concat + cached_residual.
+
+    Uses coefficients=(0,0,0,0,0) so poly_eval always returns 0, new_acc=0
+    which is < rel_l1_thresh=0.5, forcing the gate to "skipped" on step 1.
+
+    Mutation check: flip `+` to `-` in the skip branch (integration.py line ~365)
+    and the assertion fails — the fake produces 0.5-nonzero residuals so the sign
+    change is observable. Revert the src change before committing.
+    """
+    # All-zero coefficients → poly_eval(x) = 0 for any x → accumulated = 0 < thresh → skip
+    zero_coeffs = (0.0, 0.0, 0.0, 0.0, 0.0)
+    handle = SimpleNamespace(
+        rel_l1_thresh=0.5,
+        coefficients=zero_coeffs,
+        skip_first_n_steps=0,
+        skip_last_n_steps=0,
+        _state=SimpleNamespace(
+            cache=TeaCacheState(),
+            stats=TeaCacheStats(),
+        ),
+        _gen_ctx=SimpleNamespace(active_num_steps=4),
+    )
+
+    inner = _FakeInnerWithOffset()
+    common_kwargs: dict[str, Any] = dict(
+        config=SimpleNamespace(num_inference_steps=4),
+        hidden_states=mx.zeros((1, 4, 4)),
+        prompt_embeds=mx.zeros((1, 2, 4)),
+        pooled_prompt_embeds=mx.zeros((1, 4)),
+    )
+
+    # Step 0 (seed): computes, caches residual = body_out_concat - body_in_concat.
+    flux1_forward_with_gate(inner, handle, t=0, **common_kwargs)
+    assert len(handle._state.stats._staging.decisions) == 1, "seed step must stage one decision"
+
+    # Capture cached_residual immediately after the seed step.
+    cached_residual = handle._state.cache.cached_residual
+    assert cached_residual is not None, "seed step must populate cached_residual"
+    # Pin the cache-WRITE formula against an independently derived reference:
+    # body_in_concat is all-zeros (both embedders return zeros) and the fake
+    # adds +0.5 to the image-token slice only, so
+    # residual = body_out - body_in = concat(zeros(text_seq), full(0.5, img_seq)).
+    # Deriving this from the fake's arithmetic (not from SUT state) means a
+    # sign-flip at the cache-write site reds here instead of cancelling out.
+    expected_residual = mx.concatenate(
+        [
+            mx.zeros((1, inner.text_seq, inner.dim)),
+            mx.full((1, inner.img_seq, inner.dim), 0.5),
+        ],
+        axis=1,
+    )
+    mx.eval(cached_residual)
+    assert bool(mx.all(mx.abs(cached_residual - expected_residual) < 1e-5)), (
+        "cached_residual does not match the independently derived seed residual: "
+        f"max abs diff = {float(mx.max(mx.abs(cached_residual - expected_residual)))}"
+    )
+
+    # Build expected skip output: (body_in_concat_step1 + cached_residual)[:, enc_dim:, :]
+    # x_embedder and context_embedder both return zeros, so body_in_concat_step1 = zeros.
+    enc_dim = inner.text_seq  # 2
+    body_in_concat_step1 = mx.zeros((1, inner.text_seq + inner.img_seq, inner.dim))
+    expected_body_out_concat = body_in_concat_step1 + cached_residual
+    # The tail slices off the encoder tokens and applies norm_out / proj_out (both identity).
+    expected = expected_body_out_concat[:, enc_dim:, ...]
+
+    # Step 1 (skip): gate should return "skipped"; forward reuses cached_residual.
+    actual = flux1_forward_with_gate(inner, handle, t=1, **common_kwargs)
+
+    # Verify skip was recorded.
+    staged = handle._state.stats._staging.decisions
+    assert len(staged) == 2, f"expected 2 staged decisions, got {len(staged)}"
+    assert staged[1].decision == "skipped", f"step 1 should be skipped, got {staged[1].decision!r}"
+
+    # Verify reconstruction identity (host-synced).
+    mx.eval(actual, expected)
+    assert bool(mx.all(mx.abs(actual - expected) < 1e-5)), (
+        f"skip reconstruction mismatch: max abs diff = {float(mx.max(mx.abs(actual - expected)))}"
+    )

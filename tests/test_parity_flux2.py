@@ -307,23 +307,6 @@ def test_paired_cfg_parity_at_threshold_zero_klein_base_4b_pr_gate() -> None:
     assert skipped == 0, f"threshold=0 should never skip; got skipped={skipped}"
 
 
-@pytest.mark.parity
-def test_diagnostic_cfg_gated_matches_in_repo_vanilla_helper() -> None:
-    """v0.4.1 diagnostic: gated CFG forward at rel_l1_thresh=0 must match
-    the in-repo _vanilla_flux2_cfg_predict reference (cosine >= 0.99). This
-    isolates 'gated function vs our helper' from 'helper vs real mflux'.
-    Useful when the release-blocker test fails — tells us whether the bug
-    is in the new function or in the helper that approximates mflux.
-
-    The full implementation is deferred to the release-gate run: if Task 11's
-    paired test passes, this diagnostic stays as a skipped placeholder. If
-    it fails, the diagnostic is fleshed out following the same paired-parity
-    pattern as the release-blocker test but with a tighter cosine bound."""
-    pytest.skip(
-        "Diagnostic scaffolding; fleshed out only if the release-blocker paired CFG parity test fails."
-    )
-
-
 @pytest.mark.slow
 @pytest.mark.parametrize("prompt", REFERENCE_PROMPTS)
 def test_paired_parity_klein_full(flux2_klein: tuple[Any, str], prompt: str) -> None:

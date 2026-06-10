@@ -160,17 +160,18 @@ def test_staging_cfg_was_active_clears_on_clear():
     assert st.cfg_was_active is False
 
 
-def test_finalize_records_cfg_was_active_from_staging():
-    """finalize_last_generation must propagate _staging.cfg_was_active to
-    GenerationStats.cfg_was_active. Replaces the v0.4.0 derivation from
-    cfg_fallback_steps > 0 which is no longer correct in v0.4.1+."""
+def test_finalize_records_cfg_was_active_from_parameter():
+    """finalize_last_generation must write the cfg_was_active ARGUMENT (not
+    _staging.cfg_was_active) into GenerationStats. The two are set to opposite
+    values so the test can tell which source won."""
     stats = TeaCacheStats()
+    # staging says True — argument says False — argument must win
     stats._staging.cfg_was_active = True
     stats.record(
         StepDecision(step_idx=0, timestep=1.0, rel_l1=None, accumulated_distance=0.0, decision="computed")
     )
-    stats.finalize_last_generation(num_inference_steps=1, cfg_was_active=True)
+    stats.finalize_last_generation(num_inference_steps=1, cfg_was_active=False)
     assert stats.last_generation is not None
-    assert stats.last_generation.cfg_was_active is True
+    assert stats.last_generation.cfg_was_active is False
     # cfg_fallback_steps stays at 0 in v0.4.1+ — feature is gone.
     assert stats.cfg_fallback_steps == 0

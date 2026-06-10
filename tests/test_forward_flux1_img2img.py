@@ -154,37 +154,3 @@ def test_skip_window_validated_against_active_num_steps_not_nominal():
         )
     # The error should mention the active count, not the nominal 25.
     assert "active_num_steps=4" in str(exc.value) or "active" in str(exc.value).lower()
-
-
-def test_forward_does_not_call_reset_directly():
-    """Sanity duplicate of the `test_forward_does_not_reset_cache_on_t_zero`
-    test above, asserting the broader property: forward.py is no longer the
-    reset owner. The actual safety property — that lifecycle DOES reset stale
-    state on a new generation — is asserted in
-    `tests/test_lifecycle_img2img.py::test_before_loop_resets_stale_cache_for_img2img`
-    (added in Task 8 alongside the lifecycle plumbing tests).
-    """
-    # The assertion is the same as the preceding step_counter test: forward
-    # advances state but never zeroes it. Keeping it small here so the file
-    # documents intent at the forward layer.
-    handle = _FakeHandle()
-    handle._gen_ctx.active_num_steps = 25
-    handle._state.cache.step_counter = 3
-    handle._state.cache.skip_window_validated = True
-
-    inner = _make_fake_inner()
-    config = _make_fake_config(25)
-    hidden_states = mx.zeros((1, 16, 4))
-    prompt_embeds = mx.zeros((1, 8, 4))
-    pooled = mx.zeros((1, 4))
-
-    flux1_forward_with_gate(
-        inner,
-        handle,
-        t=3,
-        config=config,
-        hidden_states=hidden_states,
-        prompt_embeds=prompt_embeds,
-        pooled_prompt_embeds=pooled,
-    )
-    assert handle._state.cache.step_counter == 4

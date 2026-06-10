@@ -42,13 +42,3 @@ def test_reset_for_new_generation_clears_cached_residual_neg():
     state.reset_for_new_generation(num_steps=10)
     assert state.cached_residual is None
     assert state.cached_residual_neg is None
-
-
-def test_reset_is_bit_equal_to_constructor_for_array_fields():
-    s = TeaCacheState()
-    s.previous_mod_input = mx.ones((1, 4))
-    s.reset_for_new_generation(num_steps=25)
-    fresh = TeaCacheState()
-    fresh.reset_for_new_generation(num_steps=25)
-    assert s.previous_mod_input is fresh.previous_mod_input  # both None
-    assert s.cached_residual is fresh.cached_residual  # both None

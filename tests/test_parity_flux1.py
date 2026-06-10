@@ -468,6 +468,19 @@ def test_flux1_callback_replacement_raises(flux1_dev: Any) -> None:
             h.restore()
 
 
+@pytest.mark.parity
+def test_flux1_dev_default_threshold_skip_count_band(flux1_dev: Any) -> None:
+    """The README headline (6/25 skips at the 0.20 default on the red-apple
+    recipe) is pinned by _artifacts/v0.6.3_bench_flux1_dev.json. A regression
+    dropping 6 -> 1 passes `skipped >= 1` but decays the advertised speedup;
+    this band reds it. Mutation: rel_l1_thresh=0.0 -> 0 skips -> red."""
+    kw = _gen_kwargs_dev(PR_TIME_PROMPT)  # red-apple, seed 42, 25 steps, 512x512, guidance 3.5
+    with apply_teacache(flux1_dev) as h:  # package default rel_l1_thresh (no kwarg)
+        _capture(flux1_dev, **kw)
+        skipped = h.stats.skipped_count
+    assert 5 <= skipped <= 7, f"default-threshold skip count {skipped} outside the 5-7 band"
+
+
 def test_composes_with_mlx_taef_live_preview(flux1_dev: Any, tmp_path: Any) -> None:
     """mlx-taef's LivePreviewCallback composes cleanly with TeaCache and
     fires the expected number of times."""

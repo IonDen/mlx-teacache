@@ -15,8 +15,6 @@ from mlx_teacache import (
     apply_teacache,
 )
 
-pytestmark = pytest.mark.parity
-
 
 class _FakeCallbackRegistry:
     def __init__(self):
@@ -239,6 +237,7 @@ def test_apply_teacache_explicit_thresh_overrides_per_variant_default():
         handle.restore()
 
 
+@pytest.mark.parity
 def test_apply_teacache_user_coefficients_skip_per_variant_default():
     """User-supplied coefficients on base-4b fall back to the package default 0.20,
     NOT the per-variant 0.17 (which was tuned for the bundled polynomial)."""

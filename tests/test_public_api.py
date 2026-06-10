@@ -18,6 +18,7 @@ def test_root_package_exports() -> None:
         "StepDecision",
         "Provenance",
         "TeaCacheError",
+        "TeaCacheValueError",
         "AlreadyPatchedError",
         "CalibrationError",
         "IncompatibleModelError",

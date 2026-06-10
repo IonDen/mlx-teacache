@@ -35,6 +35,7 @@ from mlx_teacache.errors import (
     MissingGenerationContextError,
     TeaCacheError,
     TeaCacheNoBenefitWarning,
+    TeaCacheValueError,
     TransformerShapeError,
 )
 from mlx_teacache.handle import TeaCacheHandle
@@ -55,6 +56,7 @@ __all__ = [
     "StatsFrozenError",
     "Provenance",
     "TeaCacheError",
+    "TeaCacheValueError",
     "TeaCacheNoBenefitWarning",
     "IncompatibleModelError",
     "AlreadyPatchedError",

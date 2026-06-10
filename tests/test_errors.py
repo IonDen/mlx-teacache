@@ -15,6 +15,7 @@ from mlx_teacache.errors import (
     TeaCacheError,
     TransformerShapeError,
 )
+from mlx_teacache.stats import StatsFrozenError
 
 
 def test_all_subclass_teacache_error():
@@ -26,6 +27,7 @@ def test_all_subclass_teacache_error():
         InvalidStepWindowError,
         MissingGenerationContextError,
         InternalStateError,
+        StatsFrozenError,
     ]:
         assert issubclass(cls, TeaCacheError)
 
@@ -115,3 +117,85 @@ def test_img2img_not_supported_error_removed_from_errors_module():
 def test_img2img_not_supported_error_removed_from_top_level():
     with pytest.raises(ImportError):
         from mlx_teacache import Img2ImgNotSupportedError  # noqa: F401
+
+
+def test_value_error_guard_is_catchable_as_teacache_error():
+    from mlx_teacache.errors import TeaCacheValueError
+
+    assert issubclass(TeaCacheValueError, TeaCacheError)
+    assert issubclass(TeaCacheValueError, ValueError)  # IS-A ValueError preserved
+
+
+def test_import_is_cycle_free():
+    import importlib
+
+    importlib.import_module("mlx_teacache")
+    importlib.import_module("mlx_teacache._kernel.stats")
+
+
+def test_apply_teacache_misuse_raises_teacache_value_error():
+    from mlx_teacache import apply_teacache
+    from mlx_teacache.errors import TeaCacheValueError
+
+    with pytest.raises(TeaCacheValueError):
+        apply_teacache(object(), skip_first_n_steps=-1)
+
+
+def test_stats_frozen_error_caught_by_teacache_error():
+    from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+
+    stats = TeaCacheStats()
+    stats._freeze()
+    frozen_decision = StepDecision(
+        step_idx=0,
+        timestep=1.0,
+        rel_l1=None,
+        accumulated_distance=0.0,
+        decision="computed",
+    )
+    with pytest.raises(TeaCacheError):
+        stats.record(frozen_decision)
+
+
+def test_builtin_coefficient_self_check_rejects_bad_tuple(monkeypatch):
+    """_build_registry validates COEFFICIENTS; corrupt data raises CalibrationError."""
+    import importlib
+    import types
+
+    from mlx_teacache.errors import CalibrationError
+    from mlx_teacache.variants import _build_registry
+
+    # Build a minimal fake config module with an invalid COEFFICIENTS tuple
+    bad_config = types.ModuleType("fake_config")
+    bad_config.META = {"variant_id": "fake-variant"}  # type: ignore[attr-defined]
+    bad_config.COEFFICIENTS = (1.0, float("nan"), 0.0, 0.0, 0.0)  # type: ignore[attr-defined]
+
+    bad_detect = types.ModuleType("fake_detect")
+    bad_detect.matches = lambda flux: False  # type: ignore[attr-defined]
+
+    # Patch importlib.import_module inside the variants package so one iter
+    # returns our bad config while all other real modules pass through.
+    real_import = importlib.import_module
+    call_count: list[int] = [0]
+
+    def patched_import(name: str, *args: object, **kwargs: object) -> types.ModuleType:
+        if name == "mlx_teacache.variants.fake_pkg.config":
+            return bad_config
+        if name == "mlx_teacache.variants.fake_pkg.detect":
+            return bad_detect
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    # Also patch pkgutil.iter_modules to inject our fake package
+    import pkgutil
+
+    def patched_iter(path: object, *args: object, **kwargs: object) -> object:
+        yield from [pkgutil.ModuleInfo(module_finder=None, name="fake_pkg", ispkg=True)]  # type: ignore[call-arg]
+        call_count[0] += 1
+
+    monkeypatch.setattr(pkgutil, "iter_modules", patched_iter)
+    monkeypatch.setattr(importlib, "import_module", patched_import)
+
+    with pytest.raises(CalibrationError) as exc_info:
+        _build_registry()
+
+    assert "fake-variant" in str(exc_info.value)

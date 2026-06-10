@@ -12,6 +12,8 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
+from mlx_teacache.errors import TeaCacheValueError
+
 
 @dataclass(frozen=True)
 class Provenance:
@@ -31,17 +33,19 @@ class Provenance:
 def validate_custom(coeffs: object) -> tuple[float, float, float, float, float]:
     """Coerce a user-supplied coefficient sequence into a length-5 tuple of finite floats.
 
-    Raises ValueError with a helpful message on any failure."""
+    Raises TeaCacheValueError (IS-A ValueError) with a helpful message on any failure."""
     try:
         items = list(coeffs)  # type: ignore[call-overload]
     except TypeError as e:
-        raise ValueError(f"coefficients must be a sequence of 5 floats, got {type(coeffs).__name__}") from e
+        raise TeaCacheValueError(
+            f"coefficients must be a sequence of 5 floats, got {type(coeffs).__name__}"
+        ) from e
     if len(items) != 5:
-        raise ValueError(f"coefficients must have length 5 (got {len(items)})")
+        raise TeaCacheValueError(f"coefficients must have length 5 (got {len(items)})")
     try:
         floats = tuple(float(x) for x in items)
     except (TypeError, ValueError) as e:
-        raise ValueError(f"coefficients must be convertible to float: {coeffs!r}") from e
+        raise TeaCacheValueError(f"coefficients must be convertible to float: {coeffs!r}") from e
     if not all(math.isfinite(x) for x in floats):
-        raise ValueError(f"coefficients must all be finite (no nan/inf): {floats!r}")
+        raise TeaCacheValueError(f"coefficients must all be finite (no nan/inf): {floats!r}")
     return floats  # type: ignore[return-value]

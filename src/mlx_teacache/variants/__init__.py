@@ -14,6 +14,9 @@ import pkgutil
 from collections.abc import Callable
 from typing import Any, TypedDict, cast
 
+from mlx_teacache._kernel.coefficients import validate_custom
+from mlx_teacache.errors import CalibrationError, TeaCacheValueError
+
 
 class _RegistryEntry(TypedDict):
     META: dict[str, Any]
@@ -42,6 +45,16 @@ def _build_registry() -> None:
         detect = importlib.import_module(f"{full}.detect")
         meta: dict[str, Any] = config.META
         variant_id = meta["variant_id"]
+        coeffs = getattr(config, "COEFFICIENTS", None)
+        if coeffs is None:
+            raise CalibrationError(
+                variant_id=variant_id,
+                reason="COEFFICIENTS attribute is missing from variant config",
+            )
+        try:
+            validate_custom(coeffs)
+        except TeaCacheValueError as e:
+            raise CalibrationError(variant_id=variant_id, reason=str(e)) from e
         _REGISTRY[variant_id] = _RegistryEntry(
             META=meta,
             matches=detect.matches,

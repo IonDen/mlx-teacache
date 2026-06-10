@@ -9,6 +9,11 @@ class TeaCacheError(Exception):
     """Base class — catch this to catch anything from mlx-teacache."""
 
 
+class TeaCacheValueError(TeaCacheError, ValueError):
+    """Raised for invalid arguments to apply_teacache / custom coefficients.
+    IS-A ValueError, so existing ``except ValueError`` callers still catch it."""
+
+
 class IncompatibleModelError(TeaCacheError):
     def __init__(self, *, actual_type: str, actual_model_name: str | None, supported: list[str]) -> None:
         super().__init__(

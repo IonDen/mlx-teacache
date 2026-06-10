@@ -8,7 +8,7 @@ Each variant's apply() accepts all four; the dispatcher forwards them.
 
 from typing import Any
 
-from mlx_teacache.errors import IncompatibleModelError
+from mlx_teacache.errors import IncompatibleModelError, TeaCacheValueError
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.variants import _REGISTRY
 
@@ -41,13 +41,13 @@ def apply_teacache(
     undoes the patch)."""
     # --- Static validation (model-independent) ---
     if skip_first_n_steps < 0:
-        raise ValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")
+        raise TeaCacheValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")
     if skip_last_n_steps < 0:
-        raise ValueError(f"skip_last_n_steps must be >= 0, got {skip_last_n_steps}")
+        raise TeaCacheValueError(f"skip_last_n_steps must be >= 0, got {skip_last_n_steps}")
     if coefficients is not None and len(coefficients) != 5:
-        raise ValueError(f"coefficients must have length 5, got {len(coefficients)}")
+        raise TeaCacheValueError(f"coefficients must have length 5, got {len(coefficients)}")
     if rel_l1_thresh is not None and not (0.0 <= rel_l1_thresh <= 1.0):
-        raise ValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
+        raise TeaCacheValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
 
     # --- Already-patched sentinel check ---
     existing = getattr(flux, "_teacache_handle", None)

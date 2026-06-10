@@ -25,8 +25,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from mlx_teacache.errors import TeaCacheError
 
-class StatsFrozenError(Exception):
+
+class StatsFrozenError(TeaCacheError):
     """Raised when attempting to mutate a frozen TeaCacheStats. Frozen by handle.restore()."""
 
 

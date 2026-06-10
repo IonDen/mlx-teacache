@@ -487,6 +487,8 @@ def apply(
         resolved_coeffs = COEFFICIENTS
         resolved_provenance = _PROVENANCE
 
+    import contextlib
+
     internal = _InternalHandle(
         rel_l1_thresh=resolved_thresh,
         coefficients=resolved_coeffs,
@@ -494,26 +496,44 @@ def apply(
         skip_last_n_steps=skip_last_n_steps,
     )
 
-    # 3. Register lifecycle callback + wrap generate_image.
+    # 3. Register lifecycle callback.
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
     flux.callbacks.register(callback)
-    wrap_generate_image(flux, internal)
+
+    # Eager rollback list for the transactional patch (per audit medium #3):
+    # if any mutation after callback registration raises, preceding mutations
+    # are reversed. Start with the callback unregister.
+    _rollbacks_so_far: list[Any] = [lambda: _remove_callback_by_identity(flux.callbacks, callback)]
+
+    # Wrap generate_image (records _generate_image_was_instance_attr, sets
+    # internal._original_generate_image).
+    try:
+        wrap_generate_image(flux, internal)
+    except BaseException:
+        for _undo in reversed(_rollbacks_so_far):
+            with contextlib.suppress(Exception):
+                _undo()
+        raise
+
+    # wrap_generate_image succeeded — add its rollback before the next mutation.
+    def _restore_generate_image() -> None:
+        if internal._generate_image_was_instance_attr:
+            flux.generate_image = internal._original_generate_image
+        elif "generate_image" in vars(flux):
+            del flux.generate_image
+
+    _rollbacks_so_far.append(_restore_generate_image)
 
     # 4. Patch flux._predict (called as self._predict(self.transformer) in generate_image).
     flux._predict = make_teacache_predict_factory(internal)
+    # No try needed: _predict assignment is the last mutation; fall through.
 
     # 5. VariantPatch: rollback deletes _predict + restores generate_image; finalizer
     #    unsubscribes the callback.
     def _restore_predict() -> None:
         if "_predict" in vars(flux):
             del flux._predict
-
-    def _restore_generate_image() -> None:
-        if internal._generate_image_was_instance_attr:
-            flux.generate_image = internal._original_generate_image
-        elif "generate_image" in vars(flux):
-            del flux.generate_image
 
     def _unsubscribe_callback() -> None:
         _remove_callback_by_identity(flux.callbacks, callback)

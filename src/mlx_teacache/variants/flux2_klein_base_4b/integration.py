@@ -614,26 +614,31 @@ def apply(
         skip_last_n_steps=skip_last_n_steps,
     )
 
+    import contextlib
+
     # 4. Register lifecycle callback.
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
     flux.callbacks.register(callback)
 
+    # Eager rollback list for the transactional patch (per audit medium #3):
+    # if any mutation after callback registration raises, preceding mutations
+    # are reversed. Start with the callback unregister.
+    from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+
+    _rollbacks_so_far: list[Any] = [lambda: _remove_callback_by_identity(flux.callbacks, callback)]
+
     # 5. Wrap generate_image (records _generate_image_was_instance_attr, sets
     #    internal._original_generate_image).
-    wrap_generate_image(flux, internal)
+    try:
+        wrap_generate_image(flux, internal)
+    except BaseException:
+        for _undo in reversed(_rollbacks_so_far):
+            with contextlib.suppress(Exception):
+                _undo()
+        raise
 
-    # 6. Patch flux._predict with the factory. FLUX.2 uses _predict replacement,
-    #    NOT flux.transformer — the factory is called as
-    #    predict = self._predict(self.transformer) inside generate_image.
-    flux._predict = make_teacache_predict_factory(internal)
-
-    # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
-    #    Finalizer unsubscribes the callback. NO stats finalize (audit F2).
-    def _restore_predict() -> None:
-        if "_predict" in vars(flux):
-            del flux._predict
-
+    # wrap_generate_image succeeded — add its rollback before the next mutation.
     def _restore_generate_image() -> None:
         if internal._generate_image_was_instance_attr:
             flux.generate_image = internal._original_generate_image
@@ -641,10 +646,24 @@ def apply(
             if "generate_image" in vars(flux):
                 del flux.generate_image
 
-    def _unsubscribe_callback() -> None:
-        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+    _rollbacks_so_far.append(_restore_generate_image)
 
-        _remove_callback_by_identity(flux.callbacks, callback)
+    # 6. Patch flux._predict with the factory. FLUX.2 uses _predict replacement,
+    #    NOT flux.transformer — the factory is called as
+    #    predict = self._predict(self.transformer) inside generate_image.
+    flux._predict = make_teacache_predict_factory(internal)
+    # No try needed: _predict assignment is the last mutation; fall through.
+
+    # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
+    #    Finalizer unsubscribes the callback. NO stats finalize (audit F2).
+    def _restore_predict() -> None:
+        if "_predict" in vars(flux):
+            del flux._predict
+
+    def _unsubscribe_callback() -> None:
+        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity as _rcbi
+
+        _rcbi(flux.callbacks, callback)
 
     patch = VariantPatch(
         rollbacks=[_restore_predict, _restore_generate_image],

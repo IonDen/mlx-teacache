@@ -14,19 +14,7 @@ from mlx_teacache import (
     IncompatibleModelError,
     apply_teacache,
 )
-
-
-class _FakeCallbackRegistry:
-    def __init__(self):
-        self.before_loop_callbacks = []
-        self.in_loop_callbacks = []
-        self.after_loop_callbacks = []
-        self.interrupt_callbacks = []
-
-    def register(self, cb):
-        self.before_loop_callbacks.append(cb)
-        self.after_loop_callbacks.append(cb)
-        self.interrupt_callbacks.append(cb)
+from tests._fakes import FaithfulCallbackRegistry
 
 
 class _FakeTransformer(nn.Module):
@@ -52,7 +40,7 @@ def _make_fake_flux1(alias="dev"):
         aliases=[alias],
     )
     flux.transformer = _FakeTransformer()
-    flux.callbacks = _FakeCallbackRegistry()
+    flux.callbacks = FaithfulCallbackRegistry()
     flux.generate_image = lambda **kw: "image"
     return flux
 
@@ -67,13 +55,13 @@ def test_apply_and_restore_roundtrip():
     assert flux.transformer is not original_transformer
     assert flux.generate_image is not original_generate
     assert flux._teacache_handle is handle
-    assert handle._callback_instance in flux.callbacks.before_loop_callbacks
+    assert handle._callback_instance in flux.callbacks.before_loop
     handle.restore()
     assert flux.transformer is original_transformer
     # generate_image: was an instance attr ⇒ should be restored to original
     assert flux.generate_image is original_generate
     assert getattr(flux, "_teacache_handle", None) is None
-    assert handle._callback_instance not in flux.callbacks.before_loop_callbacks
+    assert handle._callback_instance not in flux.callbacks.before_loop
 
 
 def test_double_apply_raises():
@@ -81,6 +69,16 @@ def test_double_apply_raises():
     apply_teacache(flux, rel_l1_thresh=0.25)
     with pytest.raises(AlreadyPatchedError):
         apply_teacache(flux, rel_l1_thresh=0.4)
+
+
+def test_double_apply_raises_already_patched_flux1():
+    flux = _make_fake_flux1()
+    h = apply_teacache(flux)
+    try:
+        with pytest.raises(AlreadyPatchedError):
+            apply_teacache(flux)
+    finally:
+        h.restore()
 
 
 def test_re_apply_after_restore_succeeds():
@@ -143,7 +141,7 @@ def test_transactional_apply_rollback_on_failure(monkeypatch):
     flux = _make_fake_flux1()
     original_transformer = flux.transformer
     original_generate = flux.generate_image
-    original_callback_count = len(flux.callbacks.before_loop_callbacks)
+    original_callback_count = len(flux.callbacks.before_loop)
 
     # Make wrap_generate_image raise.
     from mlx_teacache.integrations.mflux import lifecycle
@@ -159,7 +157,7 @@ def test_transactional_apply_rollback_on_failure(monkeypatch):
     # Full rollback: no leftover state.
     assert flux.transformer is original_transformer
     assert flux.generate_image is original_generate
-    assert len(flux.callbacks.before_loop_callbacks) == original_callback_count
+    assert len(flux.callbacks.before_loop) == original_callback_count
     assert getattr(flux, "_teacache_handle", None) is None
 
 

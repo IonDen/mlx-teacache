@@ -14,6 +14,7 @@ from mlx_teacache import (
     IncompatibleModelError,
     apply_teacache,
 )
+from mlx_teacache.errors import TeaCacheValueError
 from tests._fakes import FaithfulCallbackRegistry
 
 
@@ -132,6 +133,23 @@ def test_stats_initially_empty():
     assert h.stats.generations == 0
     assert h.stats.speedup_estimate == 1.0
     h.restore()
+
+
+def test_apply_teacache_rejects_nonfinite_coefficients_at_call_time():
+    flux = _make_fake_flux1()
+    with pytest.raises(TeaCacheValueError, match="finite"):
+        apply_teacache(flux, coefficients=(1.0, float("nan"), 0.0, 0.0, 0.0))
+
+
+def test_apply_teacache_coerces_list_coefficients_to_tuple():
+    flux = _make_fake_flux1()
+    h = apply_teacache(flux, coefficients=[1.0, -0.5, 0.1, 0.0, 0.0])
+    try:
+        assert h.coefficients == (1.0, -0.5, 0.1, 0.0, 0.0)
+        assert isinstance(h.coefficients, tuple)
+        assert h.provenance.source == "user"
+    finally:
+        h.restore()
 
 
 def test_transactional_apply_rollback_on_failure(monkeypatch):
@@ -308,5 +326,90 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
                 width=512,
                 guidance=4.0,
             )
+    finally:
+        handle.restore()
+
+
+@pytest.mark.parity
+@pytest.mark.parametrize(
+    "variant_id,make_flux",
+    [
+        (
+            "flux1-dev",
+            lambda: __import__("mflux.models.flux.variants.txt2img.flux", fromlist=["Flux1"]).Flux1.from_name(
+                "dev", quantize=4
+            ),
+        ),
+        (
+            "flux1-schnell",
+            lambda: __import__("mflux.models.flux.variants.txt2img.flux", fromlist=["Flux1"]).Flux1.from_name(
+                "schnell", quantize=4
+            ),
+        ),
+        (
+            "flux2-klein-4b",
+            lambda: __import__(
+                "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
+            ).Flux2Klein(
+                quantize=4,
+                model_config=__import__(
+                    "mflux.models.common.config.model_config", fromlist=["ModelConfig"]
+                ).ModelConfig.flux2_klein_4b(),
+            ),
+        ),
+        (
+            "flux2-klein-9b",
+            lambda: __import__(
+                "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
+            ).Flux2Klein(
+                quantize=4,
+                model_config=__import__(
+                    "mflux.models.common.config.model_config", fromlist=["ModelConfig"]
+                ).ModelConfig.flux2_klein_9b(),
+            ),
+        ),
+        (
+            "flux2-klein-base-4b",
+            lambda: __import__(
+                "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
+            ).Flux2Klein(
+                quantize=4,
+                model_config=__import__(
+                    "mflux.models.common.config.model_config", fromlist=["ModelConfig"]
+                ).ModelConfig.flux2_klein_base_4b(),
+            ),
+        ),
+        (
+            "flux2-klein-base-9b",
+            lambda: __import__(
+                "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
+            ).Flux2Klein(
+                quantize=4,
+                model_config=__import__(
+                    "mflux.models.common.config.model_config", fromlist=["ModelConfig"]
+                ).ModelConfig.flux2_klein_base_9b(),
+            ),
+        ),
+        (
+            "z-image-base",
+            lambda: __import__("mflux.models.z_image.variants.z_image", fromlist=["ZImage"]).ZImage(
+                quantize=8,
+                model_config=__import__(
+                    "mflux.models.common.config.model_config", fromlist=["ModelConfig"]
+                ).ModelConfig.z_image(),
+            ),
+        ),
+    ],
+)
+def test_user_coefficients_provenance_all_variants(variant_id: str, make_flux) -> None:
+    """All 7 variants: custom coefficients yield handle.provenance.source == 'user'."""
+    flux = make_flux()
+    flux.freeze()
+    custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
+    handle = apply_teacache(flux, coefficients=custom_coeffs)
+    try:
+        assert handle.variant_id == variant_id
+        assert handle.provenance.source == "user"
+        assert handle.coefficients == custom_coeffs
     finally:
         handle.restore()

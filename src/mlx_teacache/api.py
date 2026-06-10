@@ -6,8 +6,10 @@ skip_first_n_steps, skip_last_n_steps) is preserved exactly from v0.5.x.
 Each variant's apply() accepts all four; the dispatcher forwards them.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
+from mlx_teacache._kernel.coefficients import validate_custom
 from mlx_teacache.errors import IncompatibleModelError, TeaCacheValueError
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.variants import _REGISTRY
@@ -17,7 +19,7 @@ def apply_teacache(
     flux: Any,
     *,
     rel_l1_thresh: float | None = None,
-    coefficients: tuple[float, float, float, float, float] | None = None,
+    coefficients: Sequence[float] | None = None,
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,
 ) -> TeaCacheHandle:
@@ -37,6 +39,9 @@ def apply_teacache(
     Pass rel_l1_thresh=<float> to override. The resolved effective threshold is
     available afterwards as handle.rel_l1_thresh.
 
+    coefficients: any 5-element sequence of finite floats (list, tuple, etc.),
+    coerced to a tuple before dispatch. nan or inf raises TeaCacheValueError.
+
     Returns a TeaCacheHandle (context-manager compatible; handle.restore()
     undoes the patch)."""
     # --- Static validation (model-independent) ---
@@ -44,8 +49,8 @@ def apply_teacache(
         raise TeaCacheValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")
     if skip_last_n_steps < 0:
         raise TeaCacheValueError(f"skip_last_n_steps must be >= 0, got {skip_last_n_steps}")
-    if coefficients is not None and len(coefficients) != 5:
-        raise TeaCacheValueError(f"coefficients must have length 5, got {len(coefficients)}")
+    if coefficients is not None:
+        coefficients = validate_custom(coefficients)
     if rel_l1_thresh is not None and not (0.0 <= rel_l1_thresh <= 1.0):
         raise TeaCacheValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
 

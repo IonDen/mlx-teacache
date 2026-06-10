@@ -18,3 +18,24 @@ def test_kernel_subtree_imports_without_mflux(monkeypatch):
     importlib.reload(kernel_pkg)
     for _, name, _ in pkgutil.walk_packages(kernel_pkg.__path__, kernel_pkg.__name__ + "."):
         importlib.import_module(name)
+
+
+def test_kernel_has_no_mflux_import_nodes_ast():
+    """Catches function-local `from mflux import X` that importlib checks miss.
+    Immune to docstring mentions (AST inspects import nodes only)."""
+    import ast
+    from pathlib import Path
+
+    kernel = Path(__file__).resolve().parent.parent.parent / "src" / "mlx_teacache" / "_kernel"
+    assert kernel.is_dir(), f"kernel dir not found at {kernel}"
+    offenders = []
+    for py in kernel.rglob("*.py"):
+        tree = ast.parse(py.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("mflux"):
+                offenders.append(f"{py.name}:{node.lineno} from {node.module}")
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("mflux"):
+                        offenders.append(f"{py.name}:{node.lineno} import {alias.name}")
+    assert not offenders, f"mflux imports in _kernel/: {offenders}"

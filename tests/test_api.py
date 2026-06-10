@@ -14,7 +14,7 @@ from mlx_teacache import (
     IncompatibleModelError,
     apply_teacache,
 )
-from mlx_teacache.errors import TeaCacheValueError
+from mlx_teacache.errors import TeaCacheDisabledWarning, TeaCacheValueError
 from tests._fakes import FaithfulCallbackRegistry
 
 
@@ -132,6 +132,13 @@ def test_stats_initially_empty():
     assert h.stats.total_steps_seen == 0
     assert h.stats.generations == 0
     assert h.stats.speedup_estimate == 1.0
+    h.restore()
+
+
+def test_zero_threshold_emits_disable_warning():
+    flux = _make_fake_flux1()
+    with pytest.warns(TeaCacheDisabledWarning, match="disables"):
+        h = apply_teacache(flux, rel_l1_thresh=0.0)
     h.restore()
 
 

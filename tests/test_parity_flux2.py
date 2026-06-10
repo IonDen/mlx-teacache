@@ -30,6 +30,7 @@ pattern.
 
 from __future__ import annotations
 
+import warnings as _w
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ from mlx_teacache import (
     AlreadyPatchedError,
     apply_teacache,
 )
+from mlx_teacache.errors import TeaCacheDisabledWarning
 
 pytestmark = pytest.mark.parity
 
@@ -147,7 +149,13 @@ def _paired_parity(
     Returns (vanilla_before, wrapper, vanilla_after, skipped_count).
     """
     vanilla_before = _capture(flux, **gen_kwargs)
-    with apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs) as h:
+    with _w.catch_warnings():
+        # Suppress only when 0.0 actually warns; a positive threshold keeps
+        # the filterwarnings=error regime fully live inside the block.
+        if rel_l1_thresh == 0.0:
+            _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs)
+    with ctx as h:
         wrapper = _capture(flux, **gen_kwargs)
         skipped = h.stats.skipped_count
     vanilla_after = _capture(flux, **gen_kwargs)
@@ -250,7 +258,10 @@ def test_paired_parity_at_threshold_zero_klein_pr_gate(
         kw["image_strength"] = image_strength
 
     vanilla_latent = _capture(flux, **kw)
-    with apply_teacache(flux, rel_l1_thresh=0.0):
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux, rel_l1_thresh=0.0)
+    with ctx:
         wrapper_latent = _capture(flux, **kw)
 
     score = _cosine(vanilla_latent, wrapper_latent)
@@ -291,7 +302,9 @@ def test_paired_cfg_parity_at_threshold_zero_klein_base_4b_pr_gate() -> None:
     vanilla_latent = _capture(flux, **kw)
 
     # 2. Wrapped at threshold=0 (no skips). Same process, same flux instance.
-    handle = apply_teacache(flux, rel_l1_thresh=0.0)
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        handle = apply_teacache(flux, rel_l1_thresh=0.0)
     try:
         wrapper_latent = _capture(flux, **kw)
         skipped = handle.stats.skipped_count
@@ -324,7 +337,10 @@ def test_paired_parity_reverse_order_klein(flux2_klein: tuple[Any, str]) -> None
     """Reverse-order control: wrapper → restore → vanilla."""
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
-    with apply_teacache(flux, rel_l1_thresh=0.0):
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux, rel_l1_thresh=0.0)
+    with ctx:
         wrapper = _capture(flux, **kw)
     vanilla = _capture(flux, **kw)
     cos = _cosine(wrapper, vanilla)
@@ -367,11 +383,10 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: tuple[An
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
     pathological = (0.0, 0.0, 0.0, -1000.0, 0.0)
     vanilla = _capture(flux, **kw)
-    with apply_teacache(
-        flux,
-        rel_l1_thresh=0.0,
-        coefficients=pathological,
-    ) as h:
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux, rel_l1_thresh=0.0, coefficients=pathological)
+    with ctx as h:
         wrapper = _capture(flux, **kw)
         skipped = h.stats.skipped_count
     assert _cosine(vanilla, wrapper) >= _FLUX2_COSINE_GATE

@@ -26,6 +26,7 @@ def test_root_package_exports() -> None:
         "InvalidStepWindowError",
         "MissingGenerationContextError",
         "StatsFrozenError",
+        "TeaCacheDisabledWarning",
         "TeaCacheNoBenefitWarning",
         "TransformerShapeError",
     ]:

@@ -121,3 +121,12 @@ class TeaCacheNoBenefitWarning(UserWarning):
     Suppress via the standard `warnings` module:
         warnings.filterwarnings("ignore", category=TeaCacheNoBenefitWarning)
     """
+
+
+class TeaCacheDisabledWarning(UserWarning):
+    """Emitted once at apply time when rel_l1_thresh=0.0 — caching is disabled
+    (every step computes; no speedup). Higher threshold = MORE skips; 0.0 disables.
+
+    Suppress via the standard `warnings` module:
+        warnings.filterwarnings("ignore", category=TeaCacheDisabledWarning)
+    """

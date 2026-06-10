@@ -36,6 +36,7 @@ They are NOT the parity oracle.
 
 from __future__ import annotations
 
+import warnings as _w
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,7 @@ from mlx_teacache import (
     MissingGenerationContextError,
     apply_teacache,
 )
-from mlx_teacache.errors import InvalidStepWindowError
+from mlx_teacache.errors import InvalidStepWindowError, TeaCacheDisabledWarning
 
 pytestmark = pytest.mark.parity
 
@@ -144,7 +145,13 @@ def _paired_parity(
     Returns (vanilla_before, wrapper, vanilla_after, skipped_count).
     """
     vanilla_before = _capture(flux, **gen_kwargs)
-    with apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs) as h:
+    with _w.catch_warnings():
+        # Suppress only when 0.0 actually warns; a positive threshold keeps
+        # the filterwarnings=error regime fully live inside the block.
+        if rel_l1_thresh == 0.0:
+            _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs)
+    with ctx as h:
         wrapper = _capture(flux, **gen_kwargs)
         skipped = h.stats.skipped_count
     vanilla_after = _capture(flux, **gen_kwargs)
@@ -207,7 +214,10 @@ def test_paired_parity_at_threshold_zero_dev(flux1_dev: Any, image_strength: flo
         kwargs["image_strength"] = image_strength
 
     vanilla_latent = _capture(flux1_dev, **kwargs)
-    with apply_teacache(flux1_dev, rel_l1_thresh=0.0):
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux1_dev, rel_l1_thresh=0.0)
+    with ctx:
         wrapper_latent = _capture(flux1_dev, **kwargs)
 
     assert mx.array_equal(vanilla_latent, wrapper_latent), (
@@ -234,7 +244,10 @@ def test_paired_parity_reverse_order_dev(flux1_dev: Any) -> None:
     That would be a real warm-state ordering bug we'd need to address.
     """
     kw = _gen_kwargs_dev(PR_TIME_PROMPT)
-    with apply_teacache(flux1_dev, rel_l1_thresh=0.0):
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux1_dev, rel_l1_thresh=0.0)
+    with ctx:
         wrapper = _capture(flux1_dev, **kw)
     vanilla = _capture(flux1_dev, **kw)
     assert mx.array_equal(wrapper, vanilla), (
@@ -265,11 +278,10 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux1_dev: Any) -> No
     kw = _gen_kwargs_dev(PR_TIME_PROMPT)
     pathological = (0.0, 0.0, 0.0, -1000.0, 0.0)
     vanilla = _capture(flux1_dev, **kw)
-    with apply_teacache(
-        flux1_dev,
-        rel_l1_thresh=0.0,
-        coefficients=pathological,
-    ) as h:
+    with _w.catch_warnings():
+        _w.simplefilter("ignore", TeaCacheDisabledWarning)
+        ctx = apply_teacache(flux1_dev, rel_l1_thresh=0.0, coefficients=pathological)
+    with ctx as h:
         wrapper = _capture(flux1_dev, **kw)
         skipped = h.stats.skipped_count
     assert mx.array_equal(vanilla, wrapper)

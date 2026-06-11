@@ -1353,7 +1353,7 @@ wheels = [
 
 [[package]]
 name = "mlx-taef"
-version = "0.1.1"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1362,9 +1362,9 @@ dependencies = [
     { name = "numpy" },
     { name = "safetensors" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/51/b9a3a031c1bca22eb7d88e16d9052d2daa08f53f0546a1677366ebf3c88e/mlx_taef-0.1.1.tar.gz", hash = "sha256:c4639af5114cafdbc19a7ebffe26c88d02b9ef51b59248bfa9dac7841bb54199", size = 191293, upload-time = "2026-05-13T20:05:06.869Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/d2/be5954e58f834c636a02ce8976270cc43c3ba065d9826dd61105e3f8bffc/mlx_taef-0.3.1.tar.gz", hash = "sha256:42fcdc2b49402f3797b460a73584399348aac01e944e98f426720093c62c3eb8", size = 2221222, upload-time = "2026-06-08T19:14:32.471Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/2b/b6571d9eceecf8856e2a276dce8341395f004f4af4d2981694fe810c1a31/mlx_taef-0.1.1-py3-none-any.whl", hash = "sha256:e3983a23fa25ab7e97c906ba9ab74d483e0b22be3ca61737c6fbc9a6df0c7f49", size = 17519, upload-time = "2026-05-13T20:05:05.426Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/d0/8b34f5649e5d72c177c4a932d89b029941819dced3f0fd7e1c5cf15b8336/mlx_taef-0.3.1-py3-none-any.whl", hash = "sha256:14551c607ee5d8b949f18ac34884377ea01298c47630b0d243ebe66a6055fe83", size = 29713, upload-time = "2026-06-08T19:14:30.807Z" },
 ]
 
 [[package]]

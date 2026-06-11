@@ -48,7 +48,7 @@ uv add "mlx-teacache[mflux]"
 Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17,<0.18`.
 
 ```bash
-pip install "mlx-teacache==0.7.0[mflux]"  # pin for reproducibility
+pip install "mlx-teacache==0.8.0[mflux]"  # pin for reproducibility
 ```
 
 ## Quick start

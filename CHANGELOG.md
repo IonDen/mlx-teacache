@@ -7,6 +7,26 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-06-11
+
+Correctness release — no new models and no change to generated images or benchmark numbers (gate math and coefficients untouched). The work is error handling, input validation, and tests that turn red when the cache goes dormant.
+
+### Changed (behavior)
+- **Invalid custom coefficients now fail at the call site.** `apply_teacache(coefficients=...)` accepts any 5-element sequence of finite floats and normalizes it to a tuple, so `handle.coefficients` is always a `tuple`. Entries that are nan, inf, or non-numeric raise `TeaCacheValueError` immediately instead of producing a gate that never skips. The rejected inputs were never valid per the documented "all finite" contract; what changes is when you find out. All seven variants now report `handle.provenance.source == "user"` after an override — five of them previously kept the builtin attribution.
+- **`rel_l1_thresh=0.0` now warns.** Zero sits inside the valid range but hard-disables caching (every step computes, no speedup), which read as "safest setting" to anyone assuming lower = more conservative. A one-time `TeaCacheDisabledWarning` fires at apply time, and the `apply_teacache` docstring now states the direction: higher threshold = more skips. Zero stays accepted — it is the deliberate vanilla-equivalent reference mode the parity suite depends on. Suppress with `warnings.filterwarnings("ignore", category=TeaCacheDisabledWarning)`.
+
+### Fixed
+- **`apply()` is transactional on every variant.** Only flux1-dev guarded its install sequence; on the other six, a failure mid-apply (for example `wrap_generate_image` raising after the callback registered) left a registered callback, a swapped transformer or instance `_predict`, and no handle to restore with. All seven now reverse completed mutations in reverse install order before re-raising, and rollback-on-failure tests cover each one.
+- **`except TeaCacheError` now catches everything the package raises.** `StatsFrozenError` was rooted on bare `Exception`; argument validation raised bare `ValueError` (now `TeaCacheValueError`, which is still a `ValueError`, so existing handlers keep working); `CalibrationError` was exported but had no raise site — it now backs an import-time self-check that validates every builtin coefficient tuple, so a corrupt package fails loudly at `import mlx_teacache` instead of degrading silently.
+
+### Tests / CI
+- The fast fake-based integration tests (FLUX.1 proxy, FLUX.2 predict, the lifecycle/dispatch suite) sat behind the manual parity lane and never ran on a normal PR. They now run in the per-PR lanes, and a collection guard pins the routing so they cannot drift back.
+- The FLUX.2 image-quality oracle was rebuilt per recipe. It previously asserted a single unmeasured 0.85 SSIM across four variants at different step counts, and the distilled rows had dropped their skip assertion — a fully disabled cache passed green. Base txt2img rows now assert cache engagement plus floors measured at their own recipe (base-4b: 3/25 skips, SSIM 0.9927; base-9b: 7/25 skips, SSIM 0.9920 — 25 steps, seed 42, guidance 1.0, q4, M1 Max 32 GB; floors committed at 0.95 with headroom). Distilled and img2img rows keep finiteness checks only until a real measurement exists. flux1-dev's default-threshold skip count is pinned to the 5–7 band from the committed bench, so a quiet 6-to-1 decay in the advertised speedup turns the suite red.
+- Suite-honesty pass: the callback-registry fakes now mirror the real mflux contract (bare-name lists, conditional registration — the path production code actually takes); skip-step residual reconstruction and CFG per-branch cache independence are pinned against independently derived references; an AST gate catches function-local `mflux` imports in `_kernel/`; tautological and permanently-skipped tests were removed. Carried from earlier hardening on main: committed coefficient/calibration artifacts are value-pinned, the `TransformerShapeError` guard is covered, and the re-export shims are identity-asserted.
+
+### Docs
+- `apply_teacache` documents the per-variant default thresholds and `handle.rel_l1_thresh`. The calibration guide routes recalibration to `variants/<id>/config.py` and `integration.py` — the dead top-level `coefficients.py` shim is no longer presented as an edit target, with a regression guard to keep it that way. The stale 1.48× FLUX.1 figure is reconciled to the benched 1.46×, the README threshold table is labeled as single-run illustration, and the hero logo renders at full width.
+
 ## [0.7.0] — 2026-06-01
 
 ### Added

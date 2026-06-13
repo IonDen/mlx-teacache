@@ -7,6 +7,19 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-13
+
+Maintenance release — no new models and no change to generated images or benchmark numbers (gate math and coefficients untouched). Defensive cleanups and internal hygiene; a normal txt2img or img2img run behaves exactly as it did on 0.8.0.
+
+### Fixed
+- **Teardown restores a pre-existing instance `_predict` instead of deleting it.** The FLUX.2 and Z-Image variants patch `flux._predict` at the instance level, and `handle.restore()` used to delete that attribute unconditionally — which would discard a caller's own instance-level `_predict` if one had been set before `apply_teacache()`. Restore now records whether `_predict` was an instance attribute and puts the original back, the same way `generate_image` was already handled. On a stock model `_predict` is a class method, so the usual case is unchanged.
+- **A malformed variant now fails with a named error.** Building the variant registry wraps each variant's import and metadata, so a broken or incomplete variant raises a `CalibrationError` naming the offending subpackage instead of an opaque `ImportError` or `KeyError` at `import mlx_teacache`.
+- **FLUX.1 img2img window check uses the active step count.** A defensive fallback in the FLUX.1 forward — reached only if the per-generation step count was never set up — validated the skip window against the nominal schedule length instead of the active denoising count (`num_inference_steps - init_time_step`). It now uses the active count, matching the lifecycle. Normal generations never reach this path.
+
+### Internal
+- The package root imports its public types (`Provenance` and the stats types) from the canonical kernel modules rather than the deprecated top-level compatibility shims; the shims stay in place, so importing from them still works.
+- Removed `from __future__ import annotations` across the package, with a guard test to keep it from returning. Added comments on the gate's `max(0.0, ...)` clamp (an intentional divergence from upstream) and the FLUX.2 active-step-count invariant.
+
 ## [0.8.0] — 2026-06-11
 
 Correctness release — no new models and no change to generated images or benchmark numbers (gate math and coefficients untouched). The work is error handling, input validation, and tests that turn red when the cache goes dormant.

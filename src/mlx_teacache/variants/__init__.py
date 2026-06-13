@@ -35,31 +35,68 @@ def _make_lazy_loader(module_name: str) -> Callable[[], Callable[..., Any]]:
     return _load
 
 
+_REQUIRED_META_KEYS = ("variant_id", "display_name", "license")
+
+
+def _validate_meta(meta: object, *, subname: str) -> dict[str, Any]:
+    """Validate a variant's META mapping, raising a CalibrationError that names
+    the subpackage so a malformed variant can't fail `import mlx_teacache` with an
+    opaque AttributeError/KeyError (per 0031 #4)."""
+    if not isinstance(meta, dict):
+        raise CalibrationError(
+            variant_id=subname,
+            reason=f"variant {subname!r} has a missing or non-dict META",
+        )
+    missing = [key for key in _REQUIRED_META_KEYS if key not in meta]
+    if missing:
+        raise CalibrationError(
+            variant_id=str(meta.get("variant_id", subname)),
+            reason=f"variant {subname!r} META is missing required key(s): {missing}",
+        )
+    return meta
+
+
+def _build_one(full: str, subname: str) -> tuple[str, _RegistryEntry]:
+    """Import + validate a single variant subpackage. Any failure is surfaced as
+    a CalibrationError naming the subpackage, so one broken variant can't take
+    down the whole registry with an opaque error (per 0031 #4)."""
+    try:
+        config = importlib.import_module(f"{full}.config")
+        detect = importlib.import_module(f"{full}.detect")
+    except Exception as e:
+        raise CalibrationError(
+            variant_id=subname,
+            reason=f"failed to import variant subpackage {subname!r}: {type(e).__name__}: {e}",
+        ) from e
+
+    meta = _validate_meta(getattr(config, "META", None), subname=subname)
+    variant_id = str(meta["variant_id"])
+
+    coeffs = getattr(config, "COEFFICIENTS", None)
+    if coeffs is None:
+        raise CalibrationError(
+            variant_id=variant_id,
+            reason="COEFFICIENTS attribute is missing from variant config",
+        )
+    try:
+        validate_custom(coeffs)
+    except TeaCacheValueError as e:
+        raise CalibrationError(variant_id=variant_id, reason=str(e)) from e
+
+    return variant_id, _RegistryEntry(
+        META=meta,
+        matches=detect.matches,
+        load_integration=_make_lazy_loader(full),
+    )
+
+
 def _build_registry() -> None:
     package = importlib.import_module(__name__)
     for _, subname, ispkg in pkgutil.iter_modules(package.__path__):
         if not ispkg:
             continue
-        full = f"{__name__}.{subname}"
-        config = importlib.import_module(f"{full}.config")
-        detect = importlib.import_module(f"{full}.detect")
-        meta: dict[str, Any] = config.META
-        variant_id = meta["variant_id"]
-        coeffs = getattr(config, "COEFFICIENTS", None)
-        if coeffs is None:
-            raise CalibrationError(
-                variant_id=variant_id,
-                reason="COEFFICIENTS attribute is missing from variant config",
-            )
-        try:
-            validate_custom(coeffs)
-        except TeaCacheValueError as e:
-            raise CalibrationError(variant_id=variant_id, reason=str(e)) from e
-        _REGISTRY[variant_id] = _RegistryEntry(
-            META=meta,
-            matches=detect.matches,
-            load_integration=_make_lazy_loader(full),
-        )
+        variant_id, entry = _build_one(f"{__name__}.{subname}", subname)
+        _REGISTRY[variant_id] = entry
 
 
 _build_registry()

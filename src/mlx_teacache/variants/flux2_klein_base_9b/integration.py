@@ -5,8 +5,6 @@ path (both no-CFG at low_step recipe and CFG-per-branch at the canonical
 hint differ.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import Provenance

@@ -15,8 +15,6 @@ skip_window_validated : bool
 num_steps             : int | None
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import mlx.core as mx

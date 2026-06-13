@@ -1,7 +1,5 @@
 """FLUX.1 schnell configuration. mflux-free."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from mlx_teacache.variants.flux1_dev.config import COEFFICIENTS as _DEV_COEFFS

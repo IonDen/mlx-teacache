@@ -5,8 +5,6 @@ Pure-math gating module. No mflux imports; only mlx.core for tensor ops.
 Returns a structured GateDecision so the caller can drive both the compute
 path AND the cache-update path explicitly."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
 

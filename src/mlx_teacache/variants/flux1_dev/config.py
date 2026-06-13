@@ -1,7 +1,5 @@
 """FLUX.1 dev configuration. mflux-free."""
 
-from __future__ import annotations
-
 from typing import Any
 
 # Vendored from https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py

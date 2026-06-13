@@ -1,7 +1,5 @@
 """FLUX.2 Klein 4B (distilled) configuration. mflux-free."""
 
-from __future__ import annotations
-
 from typing import Any
 
 # Derived in-repo by scripts/calibrate_flux2.py --variant klein-4b on 2026-05-15:

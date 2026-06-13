@@ -21,8 +21,6 @@ v0.4.1 changes:
   _staging.cfg_was_active (set by the predict closure on first CFG branch entry)
   instead of the obsolete cfg_fallback > 0 derivation."""
 
-from __future__ import annotations
-
 import warnings
 from dataclasses import dataclass
 from typing import Any

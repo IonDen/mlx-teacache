@@ -7,8 +7,6 @@ calls it after detect picks the winning variant. This is the contract
 that keeps `import mlx_teacache` working without the [mflux] extra.
 """
 
-from __future__ import annotations
-
 import importlib
 import pkgutil
 from collections.abc import Callable

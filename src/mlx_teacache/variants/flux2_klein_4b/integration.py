@@ -3,8 +3,6 @@
 g=1.0 uses only the no-CFG forward path; CFG forward is not exercised.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import Provenance

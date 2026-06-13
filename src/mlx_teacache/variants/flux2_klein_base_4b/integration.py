@@ -14,8 +14,6 @@ mflux is imported only inside this module. The registry loads this
 lazily, after detect.matches() wins.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any
 

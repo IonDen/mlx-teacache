@@ -7,8 +7,6 @@ mflux is imported only inside this module. The package registry loads
 this lazily, after detect.matches() wins.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any, cast
 

@@ -16,8 +16,6 @@ the rescale-poly + accumulator threshold is, and the threshold sweep is the
 real go/no-go.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 # Origin-constrained polyfit (trailing 0.0 = poly(0) = 0). Stored verbatim;

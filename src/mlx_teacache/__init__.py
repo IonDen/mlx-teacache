@@ -23,9 +23,15 @@ Public API:
 
 from __future__ import annotations
 
+from mlx_teacache._kernel.coefficients import Provenance
+from mlx_teacache._kernel.stats import (
+    GenerationStats,
+    StatsFrozenError,
+    StepDecision,
+    TeaCacheStats,
+)
 from mlx_teacache._version import __version__
 from mlx_teacache.api import apply_teacache
-from mlx_teacache.coefficients import Provenance
 from mlx_teacache.errors import (
     AlreadyPatchedError,
     CalibrationError,
@@ -40,12 +46,6 @@ from mlx_teacache.errors import (
     TransformerShapeError,
 )
 from mlx_teacache.handle import TeaCacheHandle
-from mlx_teacache.stats import (
-    GenerationStats,
-    StatsFrozenError,
-    StepDecision,
-    TeaCacheStats,
-)
 
 __all__ = [
     "__version__",

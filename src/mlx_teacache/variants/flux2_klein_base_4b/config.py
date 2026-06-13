@@ -1,7 +1,5 @@
 """FLUX.2 Klein base 4B configuration. mflux-free."""
 
-from __future__ import annotations
-
 from typing import Any
 
 # Origin-constrained polyfit, derived in-repo on 2026-05-17 from

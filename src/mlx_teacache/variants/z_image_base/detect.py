@@ -7,8 +7,6 @@ Base and Turbo are the SAME `ZImage` Python class, distinguished only by
 as an element, so it correctly falls through to IncompatibleModelError.
 """
 
-from __future__ import annotations
-
 
 def matches(flux: object) -> bool:
     model_config = getattr(flux, "model_config", None)

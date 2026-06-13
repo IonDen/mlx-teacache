@@ -2,8 +2,6 @@
 """Typed exception hierarchy for mlx-teacache. Every error names the parameter
 and actual value; messages include remediation pointers where applicable."""
 
-from __future__ import annotations
-
 
 class TeaCacheError(Exception):
     """Base class — catch this to catch anything from mlx-teacache."""

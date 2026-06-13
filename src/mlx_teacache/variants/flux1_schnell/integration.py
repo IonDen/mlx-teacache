@@ -3,8 +3,6 @@ verbatim; same transformer architecture. Only the public-facing
 metadata (provenance) and the apply() defaults differ.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import Provenance

@@ -6,8 +6,6 @@ per-variant config.py files in Phase C (Task 18). The legacy
 src/mlx_teacache/coefficients.py is now a Provenance re-export shim.
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass
 from typing import Literal
@@ -26,7 +24,7 @@ class Provenance:
     default_thresh: float | None = None
 
     @classmethod
-    def for_user_supplied(cls) -> Provenance:
+    def for_user_supplied(cls) -> "Provenance":
         return cls(source="user")
 
 

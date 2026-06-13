@@ -21,8 +21,6 @@ Public API:
         Typed exception hierarchy. Catch TeaCacheError to handle anything.
 """
 
-from __future__ import annotations
-
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.stats import (
     GenerationStats,

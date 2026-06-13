@@ -5,8 +5,6 @@ family, same calibration recipe. v0.5.0 validated this reuse with
 SSIM 0.986 at 50 steps + g=4.0; see scripts/validate_klein_base_9b.py
 and _artifacts/validation_klein_base_9b.json for the evidence."""
 
-from __future__ import annotations
-
 from typing import Any
 
 # Cross-import to preserve object identity with base-4b's COEFFICIENTS.

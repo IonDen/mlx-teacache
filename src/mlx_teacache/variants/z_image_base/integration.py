@@ -19,8 +19,6 @@ threshold=0 parity vs vanilla is therefore cosine, not bit-exact (see
 tests/test_parity_z_image.py).
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any
 

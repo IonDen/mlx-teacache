@@ -20,8 +20,6 @@ v0.4.1 changes:
   decision kind has been retired. Use GenerationStats.cfg_was_active instead.
   Slated for removal in v1.0."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Literal
 

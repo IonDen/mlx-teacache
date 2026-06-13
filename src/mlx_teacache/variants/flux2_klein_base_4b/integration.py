@@ -259,7 +259,11 @@ def flux2_forward_with_gate(
             actual=mod_in.shape,
         )
 
-    # 4. Gate.
+    # 4. Gate. `active_num_steps` is guaranteed non-None here: the predict closure
+    #    consumes + validates the generation context before any forward call (see
+    #    make_teacache_predict_factory). FLUX.2's forward has no `config` to fall
+    #    back to the way FLUX.1 does, so that closure check is the SOLE guarantee —
+    #    don't add a None-coalesce here expecting a nominal fallback.
     decision = gate_step(
         state,
         rel_l1_thresh=handle.rel_l1_thresh,
@@ -411,6 +415,8 @@ def flux2_cfg_forward_with_gate(
             actual=mod_in.shape,
         )
 
+    # active_num_steps is non-None by the predict-closure guarantee (see the note
+    # at the non-CFG gate above) — FLUX.2 has no nominal fallback.
     decision = gate_step(
         state,
         rel_l1_thresh=handle.rel_l1_thresh,

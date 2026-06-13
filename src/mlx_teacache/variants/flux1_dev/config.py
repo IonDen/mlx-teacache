@@ -18,6 +18,11 @@ from typing import Any
 # default rel_l1_thresh=0.25 from ever skipping a step on FLUX.1-dev. Fixed
 # 2026-05-15; verified via the test_image_quality_flux1.py SSIM gate that
 # the cache now engages at the documented threshold.
+#
+# The constant term c0=0.264 (poly(0)≈0.264) is the vendored upstream intercept,
+# not a normalization bug — gate.py additionally clamps negative predictions with
+# `max(0.0, ...)`, an intentional divergence from the raw upstream polynomial.
+# Don't "correct" poly(0) to 0.
 COEFFICIENTS: tuple[float, float, float, float, float] = (
     498.651651244,
     -283.781631,

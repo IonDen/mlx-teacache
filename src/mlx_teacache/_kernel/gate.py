@@ -110,7 +110,11 @@ def gate_step(  # type: ignore[no-untyped-def]
         )
 
     # Compute rel_l1 and predicted distance; clamp at 0 so the accumulator is
-    # monotonic non-decreasing within a generation.
+    # monotonic non-decreasing within a generation. The `max(0.0, ...)` clamp is an
+    # INTENTIONAL divergence from upstream ali-vilab TeaCache (which uses the raw
+    # polynomial): it keeps the accumulator monotonic for origin-constrained FLUX.2
+    # fits and arbitrary user coefficients whose polynomial can dip negative near
+    # the origin. Don't remove it to "match upstream".
     rel_l1 = mean_abs_rel_l1(mod_in, state.previous_mod_input)
     predicted = max(0.0, poly_eval(coefficients, rel_l1))
     new_acc = state.accumulated_distance + predicted

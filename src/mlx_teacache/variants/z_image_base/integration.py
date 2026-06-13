@@ -526,14 +526,19 @@ def apply(
     _rollbacks_so_far.append(_restore_generate_image)
 
     # 4. Patch flux._predict (called as self._predict(self.transformer) in generate_image).
+    _predict_was_instance_attr = "_predict" in vars(flux)
+    _original_predict = flux.__dict__.get("_predict")
     flux._predict = make_teacache_predict_factory(internal)
     # No try needed: _predict assignment is the last mutation; fall through.
 
     # 5. VariantPatch: rollback deletes _predict + restores generate_image; finalizer
     #    unsubscribes the callback.
     def _restore_predict() -> None:
-        if "_predict" in vars(flux):
-            del flux._predict
+        if _predict_was_instance_attr:
+            flux._predict = _original_predict
+        else:
+            if "_predict" in vars(flux):
+                del flux._predict
 
     def _unsubscribe_callback() -> None:
         _remove_callback_by_identity(flux.callbacks, callback)

@@ -111,14 +111,19 @@ def apply(
     # 6. Patch flux._predict with the factory. FLUX.2 uses _predict replacement,
     #    NOT flux.transformer — the factory is called as
     #    predict = self._predict(self.transformer) inside generate_image.
+    _predict_was_instance_attr = "_predict" in vars(flux)
+    _original_predict = flux.__dict__.get("_predict")
     flux._predict = make_teacache_predict_factory(internal)
     # No try needed: _predict assignment is the last mutation; fall through.
 
     # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
     #    Finalizer unsubscribes the callback. NO stats finalize (audit F2).
     def _restore_predict() -> None:
-        if "_predict" in vars(flux):
-            del flux._predict
+        if _predict_was_instance_attr:
+            flux._predict = _original_predict
+        else:
+            if "_predict" in vars(flux):
+                del flux._predict
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity as _rcbi

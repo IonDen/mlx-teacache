@@ -20,6 +20,7 @@ from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
 from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
+from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 
 from .config import COEFFICIENTS, DEFAULT_THRESH
 
@@ -249,9 +250,10 @@ def flux1_forward_with_gate(
     if state.step_counter == 0 and not state.skip_window_validated:
         active_num_steps = handle._gen_ctx.active_num_steps
         if active_num_steps is None:
-            # Defensive: lifecycle should have set this. Fall back to nominal
-            # so we still validate something rather than silently passing.
-            active_num_steps = config.num_inference_steps
+            # Defensive: lifecycle should have set this. Fall back to the ACTIVE
+            # window (num_inference_steps - init_time_step), not the nominal
+            # schedule, so an img2img run validates against the real denoising count.
+            active_num_steps = _active_step_count(config)
         if handle.skip_first_n_steps + handle.skip_last_n_steps >= active_num_steps:
             raise InvalidStepWindowError(
                 skip_first=handle.skip_first_n_steps,
@@ -326,7 +328,7 @@ def flux1_forward_with_gate(
     #    actual end of denoising, not the nominal schedule.
     active_num_steps = handle._gen_ctx.active_num_steps
     if active_num_steps is None:
-        active_num_steps = config.num_inference_steps  # defensive fallback
+        active_num_steps = _active_step_count(config)  # defensive: active window, not nominal
     decision = gate_step(
         state,
         rel_l1_thresh=handle.rel_l1_thresh,

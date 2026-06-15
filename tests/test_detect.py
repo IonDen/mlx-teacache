@@ -77,6 +77,17 @@ def test_identify_flux2_klein_base_9b():
     assert _dispatch(_FakeFlux2Klein("flux2-klein-base-9b")) == "flux2-klein-base-9b"
 
 
+def test_identify_qwen_image():
+    """v0.9.0 added Qwen-Image (base) as a supported variant."""
+
+    class _FakeQwenImage:
+        class model_config:
+            model_name = "fake/qwen-image"
+            aliases = ["qwen-image", "qwen"]
+
+    assert _dispatch(_FakeQwenImage()) == "qwen-image"
+
+
 def test_unknown_flux1_model_raises():
     with pytest.raises(IncompatibleModelError) as exc:
         _dispatch(_FakeFlux1("something-weird"))

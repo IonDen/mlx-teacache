@@ -13,8 +13,11 @@ import mlx.nn as nn
 
 from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
-from mlx_teacache._kernel.stats import TeaCacheStats
+from mlx_teacache._kernel.gate import gate_step
+from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache.errors import InternalStateError, InvalidStepWindowError, TransformerShapeError
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
+from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 
 from .config import COEFFICIENTS, DEFAULT_THRESH
 from .pairing import CfgBranchPairer
@@ -109,8 +112,214 @@ class ProxyQwenTransformer(nn.Module):  # type: ignore[misc,name-defined]
             return getattr(inner, name)
 
 
-def qwen_forward_with_gate(inner: Any, handle: Any, **call_kwargs: Any) -> Any:
-    raise NotImplementedError("qwen_forward_with_gate is implemented in a later task")
+def _step_decision_from_gate(decision: Any, *, step_idx: int, timestep: float) -> StepDecision:
+    return StepDecision(
+        step_idx=step_idx,
+        timestep=timestep,
+        rel_l1=decision.rel_l1,
+        accumulated_distance=decision.accumulated_distance,
+        decision=decision.kind,
+    )
+
+
+class _Prelude:
+    """Per-step prelude: the image-stream residual base + the timestep-only
+    text embedding. Rope + encoder prep are NOT here — they're body-only inputs
+    (computed in _qwen_run_body), so a skip step avoids them."""
+
+    __slots__ = ("h_in", "text_embeddings")
+
+    def __init__(self, *, h_in: mx.array, text_embeddings: mx.array) -> None:
+        self.h_in = h_in
+        self.text_embeddings = text_embeddings
+
+
+def _qwen_prelude(inner: Any, t: int, config: Any, hidden_states: mx.array) -> _Prelude:
+    """img_in + timestep-only text embedding. Mirrors qwen_transformer.py:47-53
+    (the img_in + _compute_timestep + time_text_embed portion only)."""
+    h_in = inner.img_in(hidden_states)
+    timestep = inner._compute_timestep(t, config)
+    timestep = mx.broadcast_to(timestep, (h_in.shape[0],)).astype(h_in.dtype)
+    text_embeddings = inner.time_text_embed(timestep, h_in)
+    return _Prelude(h_in=h_in, text_embeddings=text_embeddings)
+
+
+def _qwen_signal_a(inner: Any, pre: _Prelude) -> mx.array:
+    """FLUX-canonical modulated block-0 image input (the gate signal). Two-stage
+    modulation split; _modulate returns (modulated, gate) → take [0].
+    qwen_transformer_block.py:36-43,73-76."""
+    block0 = inner.transformer_blocks[0]
+    img_mod_params = block0.img_mod_linear(block0.img_mod_silu(pre.text_embeddings))
+    img_mod1, _img_mod2 = mx.split(img_mod_params, 2, axis=-1)
+    img_modulated_0, _gate = block0._modulate(block0.img_norm1(pre.h_in), img_mod1)
+    out: mx.array = img_modulated_0
+    return out
+
+
+def _qwen_run_body(
+    inner: Any,
+    pre: _Prelude,
+    *,
+    config: Any,
+    encoder_hidden_states: mx.array,
+    encoder_hidden_states_mask: mx.array,
+    cond_image_grid: Any,
+) -> mx.array:
+    """All 60 dual-stream blocks over the image stream; returns the image stream
+    pre-tail (the residual = this − pre.h_in). Encoder prep + rope are computed
+    HERE (compute-only) so skip steps don't pay them. Mirrors qwen_transformer.py
+    :51-69."""
+    encoder = inner.txt_in(inner.txt_norm(encoder_hidden_states))
+    image_rotary_embeddings = inner._compute_rotary_embeddings(
+        encoder_hidden_states_mask=encoder_hidden_states_mask,
+        pos_embed=inner.pos_embed,
+        config=config,
+        cond_image_grid=cond_image_grid,
+    )
+    hidden_states = pre.h_in
+    for idx, block in enumerate(inner.transformer_blocks):
+        encoder, hidden_states = inner._apply_transformer_block(
+            idx=idx,
+            block=block,
+            hidden_states=hidden_states,
+            encoder_hidden_states=encoder,
+            encoder_hidden_states_mask=encoder_hidden_states_mask,
+            text_embeddings=pre.text_embeddings,
+            image_rotary_embeddings=image_rotary_embeddings,
+        )
+    return hidden_states
+
+
+def _qwen_tail(inner: Any, body_out: mx.array, pre: _Prelude) -> mx.array:
+    """norm_out + proj_out. Uses only the image stream + timestep text_embeddings
+    (the evolved text stream is discarded). qwen_transformer.py:70-71."""
+    out = inner.norm_out(body_out, pre.text_embeddings)
+    proj: mx.array = inner.proj_out(out)
+    return proj
+
+
+def qwen_forward_with_gate(
+    inner: Any,
+    handle: Any,
+    *,
+    t: int,
+    config: Any,
+    hidden_states: mx.array,
+    encoder_hidden_states: mx.array,
+    encoder_hidden_states_mask: mx.array,
+    qwen_image_ids: Any = None,
+    cond_image_grid: Any = None,
+) -> Any:
+    """Gated proxy forward. Qwen calls the transformer twice per step (positive
+    then negative); one shared gate decision (computed on the positive branch's
+    branch-independent Signal A) drives both, with two cached residuals."""
+    state = handle._state.cache
+    stats = handle._state.stats
+    pairer = handle._pairer
+    pairer.on_generation_token(handle._gen_ctx.token)
+    positive = pairer.is_positive()
+
+    # Resolve the active denoising window once — needed by both the skip-window
+    # validation below and the gate's forced-window indexing (slow path).
+    active_num_steps = handle._gen_ctx.active_num_steps
+    if active_num_steps is None:
+        active_num_steps = _active_step_count(config)
+
+    # Per-generation skip-window validation (once, on the first call). Mirrors
+    # FLUX.1 / FLUX.2 / Z-Image: an over-wide skip window raises rather than
+    # silently running at vanilla speed. Reset each generation by the lifecycle's
+    # reset_for_new_generation (skip_window_validated=False).
+    if state.step_counter == 0 and not state.skip_window_validated:
+        if handle.skip_first_n_steps + handle.skip_last_n_steps >= active_num_steps:
+            raise InvalidStepWindowError(
+                skip_first=handle.skip_first_n_steps,
+                skip_last=handle.skip_last_n_steps,
+                num_steps=active_num_steps,
+                nominal_num_inference_steps=config.num_inference_steps,
+            )
+        state.skip_window_validated = True
+
+    pre = _qwen_prelude(inner, t, config, hidden_states)
+
+    # thresh<=0: never cache (mirrors gate_step's short-circuit); step recorded+advanced once per step, like the slow path.
+    # Fast path: thresh <= 0 ⇒ always compute, never cache. Record + advance
+    # ONCE per step (on the positive branch) to keep len(decisions)==num_steps.
+    if handle.rel_l1_thresh <= 0.0:
+        body_out = _qwen_run_body(
+            inner, pre, config=config,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states_mask=encoder_hidden_states_mask,
+            cond_image_grid=cond_image_grid,
+        )
+        if positive:
+            # Fast path mirrors the gate's threshold-0 contract: always compute, never cache (see _kernel/gate.py).
+            stats._staging.cfg_was_active = True
+            stats.record(StepDecision(
+                step_idx=state.step_counter, timestep=float(t), rel_l1=None,
+                accumulated_distance=state.accumulated_distance, decision="computed"))
+        out = _qwen_tail(inner, body_out, pre)
+        if not positive:
+            state.step_counter += 1
+        pairer.advance()
+        return out
+
+    if positive:
+        stats._staging.cfg_was_active = True
+        mod_in = _qwen_signal_a(inner, pre)
+        if state.previous_mod_input is not None and mod_in.shape != state.previous_mod_input.shape:
+            raise TransformerShapeError(
+                step_idx=state.step_counter,
+                expected=state.previous_mod_input.shape,
+                actual=mod_in.shape,
+            )
+        decision = gate_step(
+            state, rel_l1_thresh=handle.rel_l1_thresh, coefficients=handle.coefficients,
+            skip_first=handle.skip_first_n_steps, skip_last=handle.skip_last_n_steps,
+            num_steps=active_num_steps, step_idx=state.step_counter, mod_in=mod_in)
+        pairer.shared_decision = decision
+        stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=float(t)))
+        if decision.should_compute:
+            body_out = _qwen_run_body(
+                inner, pre, config=config,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states_mask=encoder_hidden_states_mask,
+                cond_image_grid=cond_image_grid,
+            )
+            if decision.should_update_cache:
+                state.cached_residual = body_out - pre.h_in
+                state.previous_mod_input = mod_in
+        else:
+            if state.cached_residual is None:
+                raise InternalStateError(
+                    "cached_residual is None on a skipped positive step (qwen); gate logic bug.")
+            body_out = pre.h_in + state.cached_residual
+        out = _qwen_tail(inner, body_out, pre)
+        pairer.advance()
+        return out
+
+    # Negative branch: reuse the shared decision; cache the NEGATIVE residual.
+    decision = pairer.shared_decision
+    if decision is None:
+        raise InternalStateError(
+            "negative branch with no shared decision (qwen pairing bug).")
+    if decision.should_compute:
+        body_out = _qwen_run_body(
+            inner, pre, config=config,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states_mask=encoder_hidden_states_mask,
+            cond_image_grid=cond_image_grid,
+        )
+        if decision.should_update_cache:
+            state.cached_residual_neg = body_out - pre.h_in
+    else:
+        if state.cached_residual_neg is None:
+            raise InternalStateError(
+                "cached_residual_neg is None on a skipped negative step (qwen); gate logic bug.")
+        body_out = pre.h_in + state.cached_residual_neg
+    out = _qwen_tail(inner, body_out, pre)
+    state.step_counter += 1
+    pairer.advance()
+    return out
 
 
 def apply(

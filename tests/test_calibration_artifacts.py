@@ -110,3 +110,41 @@ def test_z_image_config_coefficients_match_calibration_signal_b() -> None:
         f"z-image config COEFFICIENTS {COEFFICIENTS} drifted from "
         f"scripts/_calibration_z_image.json signal B {json_b}"
     )
+
+
+_QWEN_CALIB = _REPO_ROOT / "scripts" / "_calibration_qwen.json"
+
+
+def _load_qwen_calibration() -> dict:
+    return json.loads(_QWEN_CALIB.read_text())
+
+
+@pytest.mark.parametrize("signal", ["A", "B"])
+def test_qwen_calibration_signal_coefficients_length5_finite(signal: str) -> None:
+    coeffs = _load_qwen_calibration()["signals"][signal]["coefficients_c4_to_c0"]
+    assert len(coeffs) == 5, f"signal {signal}: expected 5 coefficients, got {len(coeffs)}"
+    assert all(math.isfinite(float(c)) for c in coeffs), f"signal {signal}: non-finite coefficient"
+
+
+@pytest.mark.parametrize("signal", ["A", "B"])
+def test_qwen_calibration_r_squared_in_unit_range(signal: str) -> None:
+    sig = _load_qwen_calibration()["signals"][signal]
+    for key in ("fit_r_squared", "heldout_r_squared"):
+        r2 = float(sig[key])
+        assert math.isfinite(r2), f"signal {signal}: {key} is not finite"
+        assert 0.0 <= r2 <= 1.0, f"signal {signal}: {key}={r2} outside [0, 1] (broken fit?)"
+
+
+def test_qwen_config_coefficients_match_calibration_signal_a() -> None:
+    """The shipped qwen-image config is read verbatim from signal A of the committed
+    calibration. Signal A is the SELECTED gate signal (caption-independent + cheaper
+    skips) even though signal B's R^2 is marginally higher — see the config docstring.
+    A recalibration that updates the JSON but not the config (or vice versa) drifts
+    and must red."""
+    from mlx_teacache.variants.qwen_image.config import COEFFICIENTS
+
+    json_a = _load_qwen_calibration()["signals"]["A"]["coefficients_c4_to_c0"]
+    assert _isclose_seq(COEFFICIENTS, json_a, rel_tol=1e-9, abs_tol=1e-12), (
+        f"qwen-image config COEFFICIENTS {COEFFICIENTS} drifted from "
+        f"scripts/_calibration_qwen.json signal A {json_a}"
+    )

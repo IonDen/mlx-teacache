@@ -37,7 +37,8 @@ guard. The CFG combine itself is mflux's own `compute_guided_noise` (not
 re-walked), so it is faithful by construction; the per-branch cosine gate is the
 port guarantee.
 
-Pinned recipe: q4 / 768x768 / 20 steps / guidance 4.0 / seed 42.
+Pinned recipe: q4 / 512x512 / 20 steps / guidance 4.0 / seed 42 (fell back from
+768x768 — 768² peaked 28.3 GB > the 24.96 GB working-set ceiling on a 32 GB M1 Max).
 
 Run (AFTER the model is downloaded; HEAVY — one full vanilla forward per prompt,
 20B model, two transformer passes per step). Run only on the MAIN THREAD:
@@ -81,7 +82,10 @@ except ImportError:  # pragma: no cover - import-path fallback for the run phase
 
 # --- Pinned recipe. Calibrate + sweep + bench all share it. ---
 SEED = 42
-HEIGHT = WIDTH = 768
+# 512², not the spec's nominal 768²: the 768² memory probe peaked at 28.3 GB, over
+# the 24.96 GB device working-set ceiling on the 32 GB M1 Max (the kernel-panic
+# regime). Fell back to 512² (resolution only; prompt + seed unchanged).
+HEIGHT = WIDTH = 512
 NUM_INFERENCE_STEPS = 20
 GUIDANCE = 4.0  # CFG path (two transformer passes per step)
 QUANTIZE = 4
@@ -420,16 +424,29 @@ def main() -> None:
     flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
     flux.freeze()
 
-    all_caps: list[list[dict[str, Any]]] = []
+    # Incremental accumulation: reduce each prompt's captures to scalar (x, y)
+    # pairs immediately and discard the raw per-prompt tensors before the next
+    # generation. The 20B model peaks ~27.6 GB (near the 32 GB ceiling), so
+    # retaining all 10 prompts' captures would grow the peak past the wired cap
+    # and risk a swap-thrash panic — this keeps the peak ~one generation.
+    n_fit = len(CALIBRATION_PROMPTS) - N_HELDOUT
+    acc: dict[str, dict[str, list[float]]] = {
+        sig: {"fit_x": [], "fit_y": [], "held_x": [], "held_y": []} for sig in ("A", "B")
+    }
     t0 = time.time()
     for i, prompt in enumerate(CALIBRATION_PROMPTS, 1):
         print(f"[{i}/{len(CALIBRATION_PROMPTS)}] {prompt!r}", flush=True)
         caps = _capture_one_prompt(flux, prompt)
         assert len(caps) == NUM_INFERENCE_STEPS, f"expected {NUM_INFERENCE_STEPS} captures, got {len(caps)}"
-        all_caps.append(caps)
+        is_fit = (i - 1) < n_fit
+        for sig in ("A", "B"):
+            xs, ys = _pairs_for(caps, sig, branch="pos")
+            tgt = acc[sig]
+            tgt["fit_x" if is_fit else "held_x"] += xs
+            tgt["fit_y" if is_fit else "held_y"] += ys
+        del caps  # drop the prompt's raw tensors before the next generation
+        mx.clear_cache()  # release the MLX buffer cache so the peak doesn't grow across prompts
     elapsed = time.time() - t0
-
-    n_fit = len(CALIBRATION_PROMPTS) - N_HELDOUT
     report: dict[str, Any] = {
         "variant": "qwen-image",
         "num_inference_steps": NUM_INFERENCE_STEPS,
@@ -447,26 +464,19 @@ def main() -> None:
         "calibration_prompts": list(CALIBRATION_PROMPTS),
     }
     for sig in ("A", "B"):
-        branch = "pos"  # fit on positive: moot for caption-independent Signal A; matches the runtime gate for B
-        fit_x, fit_y, held_x, held_y = [], [], [], []
-        for pi, caps in enumerate(all_caps):
-            xs, ys = _pairs_for(caps, sig, branch=branch)
-            if pi < n_fit:
-                fit_x += xs
-                fit_y += ys
-            else:
-                held_x += xs
-                held_y += ys
-        fit = _fit(fit_x, fit_y, fit_mode=args.fit_mode)
+        # Scalar (x, y) pairs accumulated incrementally above. Fit on the positive
+        # branch: moot for caption-independent Signal A; matches the runtime gate for B.
+        tgt = acc[sig]
+        fit = _fit(tgt["fit_x"], tgt["fit_y"], fit_mode=args.fit_mode)
         # Held-out R^2 against the fitted polynomial.
         p = np.poly1d(fit["coefficients_c4_to_c0"])
-        hy = np.asarray(held_y)
-        hp = p(np.asarray(held_x))
+        hy = np.asarray(tgt["held_y"])
+        hp = p(np.asarray(tgt["held_x"]))
         ss_res = float(np.sum((hy - hp) ** 2))
         ss_tot = float(np.sum((hy - np.mean(hy)) ** 2))
         fit["heldout_r_squared"] = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-        fit["x_values"] = [float(x) for x in fit_x]
-        fit["y_values"] = [float(y) for y in fit_y]
+        fit["x_values"] = [float(x) for x in tgt["fit_x"]]
+        fit["y_values"] = [float(y) for y in tgt["fit_y"]]
         report["signals"][sig] = fit
         print(
             f"  signal {sig}: R^2={fit['fit_r_squared']:.4f} held-out R^2={fit['heldout_r_squared']:.4f} "

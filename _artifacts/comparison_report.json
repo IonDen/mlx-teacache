@@ -142,6 +142,51 @@
         "vanilla": "_artifacts/comparison/z-image/vanilla.webp",
         "wrapper": "_artifacts/comparison/z-image/wrapper.webp"
       }
+    },
+    "qwen-image": {
+      "variant_id": "qwen-image",
+      "num_inference_steps": 20,
+      "guidance": 4.0,
+      "height": 512,
+      "width": 512,
+      "quantize": 4,
+      "vanilla": {
+        "rep_seconds": [
+          123.52734741597669,
+          118.04438500001561,
+          116.50082012504572
+        ],
+        "cold_seconds": 123.52734741597669,
+        "warm_median_seconds": 117.27260256253066,
+        "peak_memory_gb": 27.60813026037067
+      },
+      "wrapper": {
+        "rep_seconds": [
+          89.0888727499987,
+          83.17119283298962,
+          83.55662516696611
+        ],
+        "cold_seconds": 89.0888727499987,
+        "warm_median_seconds": 83.36390899997787,
+        "skipped_per_rep": [
+          6,
+          6,
+          6
+        ],
+        "computed_per_rep": [
+          12,
+          12,
+          12
+        ],
+        "rel_l1_thresh_used": 0.25,
+        "peak_memory_gb": 27.783944888971746
+      },
+      "speedup_warm": 1.406755081057461,
+      "speedup_cold": 1.386563143105641,
+      "image_paths": {
+        "vanilla": "_artifacts/comparison/qwen-image/vanilla.webp",
+        "wrapper": "_artifacts/comparison/qwen-image/wrapper.webp"
+      }
     }
   }
 }

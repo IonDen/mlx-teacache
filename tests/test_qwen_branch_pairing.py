@@ -213,3 +213,44 @@ def test_fast_path_thresh_zero_advances_once_no_cache(monkeypatch) -> None:  # n
     assert handle._state.cache.cached_residual is None
     assert len(handle._state.stats._staging.decisions) == 1
     assert calls["run_body"] == 2
+
+
+def test_interrupt_midpair_then_fresh_generation_clears_stale_residual(monkeypatch) -> None:  # noqa: ANN001
+    """Interrupt between the positive and negative calls leaves a positive residual
+    cached but no negative residual (asymmetric). The next generation's lifecycle
+    reset (reset_for_new_generation) + the pairer's token-reset must clear that
+    stale state so it cannot leak into gen 2 — the documented interrupt heal."""
+    _patch_physics(monkeypatch, signal_value=0.5)
+    inner = SimpleNamespace()
+    handle = _InternalHandle(
+        rel_l1_thresh=0.20,
+        coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0; the first eligible step seeds + caches
+        skip_first_n_steps=0,
+        skip_last_n_steps=0,
+    )
+    handle._gen_ctx.token = 1
+    handle._gen_ctx.active_num_steps = 4
+
+    def call(t: int):  # noqa: ANN202
+        return qwen_forward_with_gate(
+            inner, handle, t=t, config=SimpleNamespace(num_inference_steps=4),
+            hidden_states=mx.zeros((1, 4, 8)),
+            encoder_hidden_states=mx.zeros((1, 2, 8)),
+            encoder_hidden_states_mask=mx.ones((1, 2)),
+            qwen_image_ids=None, cond_image_grid=None,
+        )
+
+    call(0)  # gen 1, step 0 positive: seed compute caches the POSITIVE residual
+    # INTERRUPT here — the negative call never runs.
+    assert handle._state.cache.cached_residual is not None
+    assert handle._state.cache.cached_residual_neg is None  # asymmetric interrupt state
+
+    # Fresh generation: what the lifecycle's call_before_loop does.
+    handle._gen_ctx.token = 2
+    handle._state.cache.reset_for_new_generation(num_steps=4)
+    assert handle._state.cache.cached_residual is None  # stale positive residual cleared
+    assert handle._state.cache.cached_residual_neg is None
+
+    call(0)  # gen 2, step 0 positive: re-seeds cleanly on the new token
+    assert handle._pairer.last_seen_token == 2
+    assert handle._state.cache.cached_residual is not None  # gen-2 fresh seed, not the stale one

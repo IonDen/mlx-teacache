@@ -2,16 +2,16 @@
 
 Visual showcase of what the wrapper does on real generations. Two harnesses contribute to this page:
 
-- The `flux1-dev`, `flux2-klein-base-4b`, and `z-image-base` rows are from `scripts/bench_comparison.py` (subprocess-per-condition, three reps per subprocess; cold = rep 1, warm = median of reps 2 and 3). Full report: `_artifacts/comparison_report.json`. Committed images alongside this file under `_artifacts/comparison/<variant>/`. All three share the portrait prompt and seed below; `z-image-base` renders at 640×896 q8 (rather than 768×1024 q4) because its 8-bit weights at full resolution would cross the 32 GB ceiling.
+- The `flux1-dev`, `flux2-klein-base-4b`, `z-image-base`, and `qwen-image` rows are from `scripts/bench_comparison.py` (subprocess-per-condition, three reps per subprocess; cold = rep 1, warm = median of reps 2 and 3). Full report: `_artifacts/comparison_report.json`. Committed images alongside this file under `_artifacts/comparison/<variant>/`. They share the portrait prompt and seed below; `z-image-base` renders at 640×896 q8 and `qwen-image` at 512×512 q4 (rather than 768×1024 q4), because at full resolution those weights would cross the 32 GB ceiling.
 - The `flux2-klein-base-9b` row is from `scripts/bench_speedup.py --three-way --reps 3` (subprocess-per-rep — every rep gets a fresh interpreter, fully cold). Full report: `_artifacts/v0.6.0_bench_klein_base_9b.json`. Images under `tests/_artifacts/bench_images/klein-base-9b/`.
 
-The two harnesses use different prompts and resolutions (the bench_comparison rows use the 768×1024 portrait listed below, except z-image-base at 640×896; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
+The two harnesses use different prompts and resolutions (the bench_comparison rows use the 768×1024 portrait listed below, except z-image-base at 640×896 and qwen-image at 512×512; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
 
 Only non-distilled variants are listed here. Distilled schedules (`flux1-schnell`, `flux2-klein-4b`, `flux2-klein-9b`) skip zero steps and gain nothing from the wrapper. See the "When to use mlx-teacache" section in the README for the recommendation.
 
 ## Test machine
 
-Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5 (q8 for the `z-image-base` row — its pinned recipe). mlx-teacache 0.7.0.
+Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5 (q8 for the `z-image-base` row — its pinned recipe). mlx-teacache 0.9.0.
 
 Shared inputs across every cell:
 
@@ -87,6 +87,24 @@ Z-Image (Tongyi-MAI, Apache-2.0) is a single-stream DiT, not a FLUX model, so it
 
 Two notes on the numbers. The warm 1.33× here is larger than the 1.17× the README cites for this variant, because the README figure comes from the 512×512 red-apple bench recipe; at 640×896 each skipped step saves more compute, so the per-step gating overhead amortizes better. Both are honest measured wins on their own recipe. The wall-clock speedup is all gating — `mx.compile`-path avoidance is at best neutral on Z-Image. The peak-memory drop from 18.7 GB to 13.1 GB is a separate benefit of the eager wrapper, not of gating: the 512² three-way bench shows the no-gate wrapper landing at the same ~11.9 GB as the gated one (vanilla 17.2 GB), so the drop comes from bypassing mflux's compiled `_predict`, the same effect seen on klein-base-9b.
 
+## Qwen-Image
+
+### `qwen-image` — 20 steps, guidance=4.0, q4, 512×512
+
+|  | Vanilla mflux | mlx-teacache |
+|---|---|---|
+| Time (cold) | 123.5 s | 89.1 s |
+| Time (warm median) | 117.3 s | 83.4 s |
+| Warm speedup | — | **1.41×** |
+| Steps skipped | 0 of 18 active | 6 of 18 active |
+| Threshold | — | rel_l1 = 0.25 |
+| Peak memory | 27.6 GB | 27.8 GB |
+| Image | ![vanilla](_artifacts/comparison/qwen-image/vanilla.webp) | ![wrapper](_artifacts/comparison/qwen-image/wrapper.webp) |
+
+This row uses the shared portrait prompt and seed at **512×512 q4** rather than the page's 768×1024. Qwen-Image is a ~20B model; at q4 it peaks ~27.6 GB even at 512×512, and the peak is weights-dominated — 768×768 only adds ~0.7 GB and crosses the 32 GB ceiling. So 512×512 is the resolution that stays survivable on this machine, same portrait subject as the other rows, only the resolution differs.
+
+Qwen-Image (Alibaba, Apache-2.0) is a dual-stream MMDiT, FLUX-shaped, so it gets the FLUX-canonical gate signal — the modulated block-0 image input — and calibrates well at R² 0.946. At the quality-first threshold of 0.25 the wrapper skips 6 of the 18 active steps, each skip avoiding both CFG branches' 60-block bodies, and the two portraits are perceptually equivalent. The 1.41× is the largest warm speedup on this page, and it is entirely step-skipping: Qwen-Image's `_predict` is not `mx.compile`-wrapped in mflux, so unlike the FLUX.2 variants there is no compile-path effect to attribute separately.
+
 ## What is excluded and why
 
 - `flux1-schnell` and `flux2-klein-4b` / `flux2-klein-9b` distilled schedules: the residual change between adjacent steps is too large for the gate to engage at any reasonable threshold. They skip zero steps and the wrapper would only add a ~1-2% gating tax. Run them through vanilla mflux instead.
@@ -116,7 +134,7 @@ Override the hardware label in the bench_comparison.py JSON if you are running o
 uv run python scripts/bench_comparison.py --machine-label "Apple M3 Max" --ram-gb 64
 ```
 
-To re-run a single variant after a partial bench_comparison.py run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`, `z-image`).
+To re-run a single variant after a partial bench_comparison.py run, pass `--only <slug>` (one of `flux1-dev`, `klein-base-4b-cfg`, `z-image`, `qwen-image`).
 
 ---
 

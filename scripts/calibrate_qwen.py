@@ -82,8 +82,8 @@ except ImportError:  # pragma: no cover - import-path fallback for the run phase
 
 # --- Pinned recipe. Calibrate + sweep + bench all share it. ---
 SEED = 42
-# 512², not the spec's nominal 768²: the 768² memory probe peaked at 28.3 GB, over
-# the 24.96 GB device working-set ceiling on the 32 GB M1 Max (the kernel-panic
+# 512², not the nominal 768²: the 768² memory probe peaked at 28.3 GB, over the
+# 24.96 GB device working-set ceiling on the 32 GB M1 Max (the kernel-panic
 # regime). Fell back to 512² (resolution only; prompt + seed unchanged).
 HEIGHT = WIDTH = 512
 NUM_INFERENCE_STEPS = 20

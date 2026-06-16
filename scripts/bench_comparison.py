@@ -83,6 +83,12 @@ class VariantConfig:
     # where a single gen peaks ~18.7 GB but the cache accumulates across reps in
     # one process and OOMs the Metal command buffer on rep 2 without this.
     clear_cache_between_reps: bool = False
+    # Soft memory limit (mx.set_memory_limit) in GB. 0 = use wired_cap_gb + 1 (the
+    # default for variants whose peak fits under wired+1). The 20B Qwen row sets
+    # this above its ~27.6 GB peak so the advisory soft limit doesn't force
+    # mid-generation cache eviction that would inflate the timing; the wired cap
+    # still bounds the panic-causing wired memory.
+    soft_cap_gb: int = 0
 
 
 VARIANTS: tuple[VariantConfig, ...] = (
@@ -112,6 +118,23 @@ VARIANTS: tuple[VariantConfig, ...] = (
         wired_cap_gb=24,  # 640x896 q8 peaks higher than the q4 rows; 24 < 25 recommended
         clear_cache_between_reps=True,  # single gen ~18.7 GB; cache accumulation OOMs rep 2 without this
     ),
+    VariantConfig(
+        slug="qwen-image",
+        variant_id="qwen-image",
+        num_inference_steps=20,
+        guidance=4.0,
+        loader="qwen-image",
+        # 20B Qwen-Image (q4) peaks ~27.6 GB even at 512x512 (weights-dominated, not
+        # activation-dominated — 768x768 peaked 28.3 GB). 512x512 is the memory
+        # fallback: same PROMPT + SEED as every other row, only the resolution (and
+        # incidentally the aspect) changes, per the COMPARISON shared-prompt rule.
+        height=512,
+        width=512,
+        quantize=4,
+        wired_cap_gb=21,  # device-derived ~0.85*24.96; bounds wired memory (peak ~27.6 GB total is pageable)
+        soft_cap_gb=30,  # advisory, above the ~27.6 GB peak so timing isn't inflated by forced eviction
+        clear_cache_between_reps=True,  # 20B near the 32 GB edge; cache accumulation OOMs reps without this
+    ),
 )
 
 
@@ -135,6 +158,10 @@ def _load_flux(loader: str, quantize: int) -> Any:
         from mflux.models.z_image.variants.z_image import ZImage
 
         flux = ZImage(quantize=quantize, model_config=ModelConfig.z_image())
+    elif loader == "qwen-image":
+        from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
+
+        flux = QwenImage(quantize=quantize, model_config=ModelConfig.qwen_image())
     else:
         raise ValueError(f"unknown loader: {loader!r}")
     flux.freeze()
@@ -260,10 +287,11 @@ def _worker_main(args: argparse.Namespace) -> None:
     # max_recommended_working_set_size (25 GB on M1 Max 32GB) so the worst case
     # is a clean MLX OOM, never a kernel watchdog panic.
     wired = cfg.wired_cap_gb
+    soft = cfg.soft_cap_gb or (wired + 1)
     mx.set_wired_limit(int(wired * 1024**3))
-    mx.set_memory_limit(int((wired + 1) * 1024**3))
+    mx.set_memory_limit(int(soft * 1024**3))
     print(
-        f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired} GB soft={wired + 1} GB, "
+        f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired} GB soft={soft} GB, "
         f"res={cfg.width}x{cfg.height} q{cfg.quantize}",
         flush=True,
     )

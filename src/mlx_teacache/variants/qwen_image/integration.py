@@ -24,9 +24,18 @@ from .pairing import CfgBranchPairer
 
 _PROVENANCE = Provenance(
     source="builtin",
-    revision="PLACEHOLDER-pre-calibration",  # replaced when calibration lands
-    calibration_dataset="PENDING in-repo calibration (scripts/calibrate_qwen.py)",
+    revision="in-repo-2026-06-16-origin-signalA",
+    calibration_dataset=(
+        "10 prompts (7 fit / 3 held-out) x 20 steps x seed=42, M1 Max 32GB, q4, "
+        "512x512, guidance=4.0 (CFG), origin-constrained polyfit"
+    ),
+    fit_metric=(
+        "constrained-LSQ R^2 on consecutive-step Signal-A (modulated block-0 input, "
+        "worst-branch body_out) rel-L1 pairs (poly(0)=0)"
+    ),
+    fit_metric_value=0.9464,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_qwen.py",
+    default_thresh=DEFAULT_THRESH,
 )
 
 

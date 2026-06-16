@@ -12,10 +12,13 @@ residual, R^2 0.9516) despite B's marginally higher fit: A is caption-independen
 block-0 run). Qwen-Image is FLUX-shaped, so the FLUX-canonical modulated-input
 signal calibrates well (R^2 ~0.95, vs Z-Image's 0.40 and FLUX.2's 0.11-0.47).
 
-DEFAULT_THRESH is still 0.0 (caching disabled, gate fast-path = vanilla) pending
-the SSIM-knee threshold sweep. The 512x512 recipe is a memory fallback from the
-nominal 768x768 (768^2 peaked 28.3 GB > the 24.96 GB device working-set ceiling
-on a 32 GB M1 Max).
+DEFAULT_THRESH = 0.25 is the SSIM knee from scripts/sweep_threshold_qwen.py
+(red-apple, q4, 512x512, 20 steps, g=4.0, seed 42): SSIM holds >= 0.99 through
+0.30 then cliffs to 0.908 at 0.40, and the skip count plateaus at 6/18 by 0.25
+(SSIM 0.9918, ~1.27x single-rep) — so 0.25 captures the full SSIM-lossless skip
+benefit with margin from the 0.40 cliff. The 512x512 recipe is a memory fallback
+from 768x768 (768^2 peaked 28.3 GB > the 24.96 GB device working-set ceiling on a
+32 GB M1 Max).
 """
 
 from typing import Any
@@ -31,9 +34,9 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
-# Still 0.0 (caching disabled) pending the SSIM-knee sweep — set to the knee
-# threshold once the sweep characterizes skip-count vs SSIM for Signal A.
-DEFAULT_THRESH: float = 0.0
+# SSIM knee (scripts/sweep_threshold_qwen.py): SSIM >= 0.99 through 0.30, cliffs
+# to 0.908 at 0.40; skips plateau at 6/18 by 0.25. Quality-first default.
+DEFAULT_THRESH: float = 0.25
 
 RECIPES: dict[str, dict[str, Any]] = {
     "default": {"num_inference_steps": 20, "guidance": 4.0},

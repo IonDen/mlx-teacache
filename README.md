@@ -48,7 +48,7 @@ uv add "mlx-teacache[mflux]"
 Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17,<0.18`.
 
 ```bash
-pip install "mlx-teacache==0.8.1[mflux]"  # pin for reproducibility
+pip install "mlx-teacache==0.9.0[mflux]"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -116,6 +116,7 @@ The table below is generated from the variant registry — see `docs/_generate_s
 | `flux2-klein-9b` | FLUX.2 Klein 9B | yes | 8 steps, g=1.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
 | `flux2-klein-base-4b` | FLUX.2 Klein base 4B | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) |
 | `flux2-klein-base-9b` | FLUX.2 Klein base 9B | no | 50 steps, g=4.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) |
+| `qwen-image` | Qwen-Image | no | 20 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Qwen/Qwen-Image) |
 | `z-image-base` | Z-Image base | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Tongyi-MAI/Z-Image) |
 <!-- SUPPORTED_MODELS_END -->
 
@@ -137,13 +138,15 @@ See `_artifacts/v0.6.0_bench_klein_base_9b.json` for the full report and `tests/
 
 See `scripts/_bench_z_image_v0_7_0.json` for the full report.
 
+**[`qwen-image`](docs/variants/qwen-image.md)** — Qwen-Image base (Alibaba, Apache-2.0), a ~20B dual-stream MMDiT and the first variant that proxies `flux.transformer` (the FLUX.1 pattern) *and* runs true two-pass CFG. It's FLUX-shaped, so the gate taps the FLUX-canonical modulated block-0 input — calibrated in-repo at R² 0.946, well above Z-Image's 0.400 and the FLUX.2 family's 0.11–0.47. Per-variant default `rel_l1_thresh=0.25`, set at the SSIM knee. At the shared 512×512 portrait recipe (subprocess-per-condition, 3 reps, q4, 20 steps, g=4.0): **1.41× warm-median** (117.3 s → 83.4 s; 6 of 18 active steps skipped), SSIM 0.99 — the largest speedup of the [COMPARISON.md](COMPARISON.md) set. The win is entirely step-skipping: Qwen-Image's `_predict` is not `mx.compile`-wrapped in mflux, so there is no compile-path effect to separate out (unlike the FLUX.2 variants). The recipe is 512×512 because the 20B model peaks ~27.6 GB at q4 even there — the peak is weights-dominated, so 768×768 only adds ~0.7 GB and crosses the 32 GB ceiling. Reproduce with `uv run python scripts/bench_comparison.py --only qwen-image`.
+
 ## When to use mlx-teacache
 
 The wrapper helps when the underlying schedule actually has cacheable redundancy. That is the case for non-distilled FLUX schedules with enough denoising steps for adjacent transformer outputs to look similar, which is what TeaCache's gate exploits.
 
 In practice, that means:
 
-- Use mlx-teacache for **`flux1-dev`** at 20-50 steps, the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps with or without CFG, and **`z-image-base`** at 50 steps with CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
+- Use mlx-teacache for **`flux1-dev`** at 20-50 steps, the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps with or without CFG, **`z-image-base`** at 50 steps with CFG, and **`qwen-image`** at 20 steps with CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
 - Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux.
 
 There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.

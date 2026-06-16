@@ -7,6 +7,16 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-06-16
+
+### Added
+- **Qwen-Image support** (`qwen-image`) — Alibaba's ~20B dual-stream MMDiT (Apache-2.0). At the package default it skips 6 of 18 active steps for a 1.41× warm-median speedup, the largest of any supported variant, with output visually equivalent to vanilla (SSIM 0.99 at the quality-first threshold). Qwen-Image is FLUX-shaped, so the gate taps the FLUX-canonical modulated block-0 input (Signal A), calibrated in-repo at R² 0.946 — well above Z-Image's 0.40 and the FLUX.2 family's 0.11–0.47, because Qwen's modulation matches the structure the polynomial form was designed for. Per-variant default `rel_l1_thresh=0.25`, set at the SSIM knee from `scripts/sweep_threshold_qwen.py`.
+- This is the first variant that proxies `flux.transformer` (the FLUX.1 pattern) **and** runs true two-pass CFG. Qwen has no `_predict` factory and no `mx.compile`, so the integration re-walks `QwenTransformer.__call__` through a proxy instead of replacing `_predict`. `generate_image` calls the transformer twice per step — positive then negative caption, combined outside it — so a branch-pairing state machine threads one shared gate decision and two cached residuals across the pair. Sharing one decision is exact, not an approximation: the gate signal depends on the latents and timestep, never the caption. The whole speedup is step-skipping; there is no compiled `_predict` to bypass the way the FLUX.2 variants do.
+- `docs/variants/qwen-image.md`; a Qwen-Image row in `COMPARISON.md`; committed artifacts `scripts/calibrate_qwen.py`, `scripts/sweep_threshold_qwen.py`, and `scripts/_calibration_qwen.json`.
+
+### Notes
+- The Qwen-Image recipe is 512×512, a memory fallback from the nominal 768×768. The 20B model at q4 peaks ~27.6 GB on a 32 GB M1 Max regardless of resolution (the peak is weights-dominated, so 768² only adds ~0.7 GB), and 512² is the resolution that stays survivable under the wired-memory cap. The COMPARISON row keeps the shared portrait prompt and seed and changes only the resolution.
+
 ## [0.8.1] — 2026-06-13
 
 Maintenance release — no new models and no change to generated images or benchmark numbers (gate math and coefficients untouched). Defensive cleanups and internal hygiene; a normal txt2img or img2img run behaves exactly as it did on 0.8.0.

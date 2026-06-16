@@ -39,6 +39,6 @@ class CfgBranchPairer:
         positive call, once on the negative). The integration forward upholds
         this; a double-advance before the negative branch is consumed would
         silently desync parity. Behaviorally pinned by the two-calls-per-step
-        orchestration tests (plan Task 5).
+        orchestration tests in tests/test_qwen_branch_pairing.py.
         """
         self.branch_idx ^= 1

@@ -24,16 +24,16 @@ from .pairing import CfgBranchPairer
 
 _PROVENANCE = Provenance(
     source="builtin",
-    revision="in-repo-2026-06-16-origin-signalA",
+    revision="in-repo-2026-06-17-origin-signalA-768-50",
     calibration_dataset=(
-        "10 prompts (7 fit / 3 held-out) x 20 steps x seed=42, M1 Max 32GB, q4, "
-        "512x512, guidance=4.0 (CFG), origin-constrained polyfit"
+        "10 prompts (7 fit / 3 held-out) x 50 steps x seed=42, M1 Max 32GB, q4, "
+        "768x768, guidance=4.0 (CFG), origin-constrained polyfit, chunked per-prompt"
     ),
     fit_metric=(
         "constrained-LSQ R^2 on consecutive-step Signal-A (modulated block-0 input, "
         "worst-branch body_out) rel-L1 pairs (poly(0)=0)"
     ),
-    fit_metric_value=0.9464,
+    fit_metric_value=0.8490,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_qwen.py",
     default_thresh=DEFAULT_THRESH,
 )
@@ -255,7 +255,9 @@ def qwen_forward_with_gate(
     # ONCE per step (on the positive branch) to keep len(decisions)==num_steps.
     if handle.rel_l1_thresh <= 0.0:
         body_out = _qwen_run_body(
-            inner, pre, config=config,
+            inner,
+            pre,
+            config=config,
             encoder_hidden_states=encoder_hidden_states,
             encoder_hidden_states_mask=encoder_hidden_states_mask,
             cond_image_grid=cond_image_grid,
@@ -263,9 +265,15 @@ def qwen_forward_with_gate(
         if positive:
             # Fast path mirrors the gate's threshold-0 contract: always compute, never cache (see _kernel/gate.py).
             stats._staging.cfg_was_active = True
-            stats.record(StepDecision(
-                step_idx=state.step_counter, timestep=float(t), rel_l1=None,
-                accumulated_distance=state.accumulated_distance, decision="computed"))
+            stats.record(
+                StepDecision(
+                    step_idx=state.step_counter,
+                    timestep=float(t),
+                    rel_l1=None,
+                    accumulated_distance=state.accumulated_distance,
+                    decision="computed",
+                )
+            )
         out = _qwen_tail(inner, body_out, pre)
         if not positive:
             state.step_counter += 1
@@ -282,14 +290,22 @@ def qwen_forward_with_gate(
                 actual=mod_in.shape,
             )
         decision = gate_step(
-            state, rel_l1_thresh=handle.rel_l1_thresh, coefficients=handle.coefficients,
-            skip_first=handle.skip_first_n_steps, skip_last=handle.skip_last_n_steps,
-            num_steps=active_num_steps, step_idx=state.step_counter, mod_in=mod_in)
+            state,
+            rel_l1_thresh=handle.rel_l1_thresh,
+            coefficients=handle.coefficients,
+            skip_first=handle.skip_first_n_steps,
+            skip_last=handle.skip_last_n_steps,
+            num_steps=active_num_steps,
+            step_idx=state.step_counter,
+            mod_in=mod_in,
+        )
         pairer.shared_decision = decision
         stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=float(t)))
         if decision.should_compute:
             body_out = _qwen_run_body(
-                inner, pre, config=config,
+                inner,
+                pre,
+                config=config,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_hidden_states_mask=encoder_hidden_states_mask,
                 cond_image_grid=cond_image_grid,
@@ -300,7 +316,8 @@ def qwen_forward_with_gate(
         else:
             if state.cached_residual is None:
                 raise InternalStateError(
-                    "cached_residual is None on a skipped positive step (qwen); gate logic bug.")
+                    "cached_residual is None on a skipped positive step (qwen); gate logic bug."
+                )
             body_out = pre.h_in + state.cached_residual
         out = _qwen_tail(inner, body_out, pre)
         pairer.advance()
@@ -309,11 +326,12 @@ def qwen_forward_with_gate(
     # Negative branch: reuse the shared decision; cache the NEGATIVE residual.
     decision = pairer.shared_decision
     if decision is None:
-        raise InternalStateError(
-            "negative branch with no shared decision (qwen pairing bug).")
+        raise InternalStateError("negative branch with no shared decision (qwen pairing bug).")
     if decision.should_compute:
         body_out = _qwen_run_body(
-            inner, pre, config=config,
+            inner,
+            pre,
+            config=config,
             encoder_hidden_states=encoder_hidden_states,
             encoder_hidden_states_mask=encoder_hidden_states_mask,
             cond_image_grid=cond_image_grid,
@@ -323,7 +341,8 @@ def qwen_forward_with_gate(
     else:
         if state.cached_residual_neg is None:
             raise InternalStateError(
-                "cached_residual_neg is None on a skipped negative step (qwen); gate logic bug.")
+                "cached_residual_neg is None on a skipped negative step (qwen); gate logic bug."
+            )
         body_out = pre.h_in + state.cached_residual_neg
     out = _qwen_tail(inner, body_out, pre)
     state.step_counter += 1

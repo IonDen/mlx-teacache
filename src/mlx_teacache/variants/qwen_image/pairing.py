@@ -18,9 +18,9 @@ from typing import Any
 
 @dataclass
 class CfgBranchPairer:
-    branch_idx: int = 0           # 0 = positive (decide); 1 = negative (reuse)
+    branch_idx: int = 0  # 0 = positive (decide); 1 = negative (reuse)
     last_seen_token: int | None = None
-    shared_decision: Any = None   # GateDecision stored on the positive call
+    shared_decision: Any = None  # GateDecision stored on the positive call
 
     def on_generation_token(self, token: int) -> None:
         """Reset branch parity + shared decision when a new generation starts."""

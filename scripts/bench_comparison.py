@@ -121,18 +121,20 @@ VARIANTS: tuple[VariantConfig, ...] = (
     VariantConfig(
         slug="qwen-image",
         variant_id="qwen-image",
-        num_inference_steps=20,
+        num_inference_steps=50,
         guidance=4.0,
         loader="qwen-image",
-        # 20B Qwen-Image (q4) peaks ~27.6 GB even at 512x512 (weights-dominated, not
-        # activation-dominated — 768x768 peaked 28.3 GB). 512x512 is the memory
-        # fallback: same PROMPT + SEED as every other row, only the resolution (and
-        # incidentally the aspect) changes, per the COMPARISON shared-prompt rule.
-        height=512,
-        width=512,
+        # 20B Qwen-Image at the mixed-precision build (q8 edge blocks + bf16 embeddings,
+        # for showcase quality) peaks ~30.4 GB at 768x768 on a 32 GB M1 Max — it fits
+        # (the wired cap bounds non-pageable memory; the excess is pageable). 768x768
+        # / 50 steps is the official Qwen recipe; same PROMPT + SEED as every other
+        # row, only the resolution (and incidentally the aspect) changes, per the
+        # COMPARISON shared-prompt rule.
+        height=768,
+        width=768,
         quantize=4,
-        wired_cap_gb=21,  # device-derived ~0.85*24.96; bounds wired memory (peak ~27.6 GB total is pageable)
-        soft_cap_gb=30,  # advisory, above the ~27.6 GB peak so timing isn't inflated by forced eviction
+        wired_cap_gb=21,  # device-derived ~0.85*24.96; bounds wired memory (peak ~30.4 GB total is pageable)
+        soft_cap_gb=31,  # advisory, above the ~30.4 GB mixed-precision peak so timing isn't inflated by forced eviction
         clear_cache_between_reps=True,  # 20B near the 32 GB edge; cache accumulation OOMs reps without this
     ),
 )
@@ -160,7 +162,12 @@ def _load_flux(loader: str, quantize: int) -> Any:
         flux = ZImage(quantize=quantize, model_config=ModelConfig.z_image())
     elif loader == "qwen-image":
         from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
+        from qwen_mixed_precision import enable_qwen_mixed_precision
 
+        # Showcase quality: mixed-precision (q8 edge blocks + bf16 embeddings) clears
+        # the uniform-q4 grain so the COMPARISON portraits look good. mlx-teacache
+        # stays quant-agnostic — this is a construction-time choice in the bench only.
+        enable_qwen_mixed_precision()
         flux = QwenImage(quantize=quantize, model_config=ModelConfig.qwen_image())
     else:
         raise ValueError(f"unknown loader: {loader!r}")
@@ -379,6 +386,8 @@ def _run_one_worker(slug: str, condition: str, save_to: Path) -> dict[str, Any]:
         condition,
         "--save-to",
         str(save_to),
+        "--reps",
+        str(REPS),  # orchestrator's REPS (possibly overridden by --reps) -> worker
     ]
     print(f"\n>> spawning worker: {slug} / {condition}", flush=True)
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -456,11 +465,18 @@ def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
 
 
 def main() -> None:
+    global REPS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--worker",
         action="store_true",
         help="(internal) run as a worker subprocess for one (variant, condition) pair.",
+    )
+    parser.add_argument(
+        "--reps",
+        type=int,
+        default=None,
+        help="Override reps per condition (e.g. 1 for an images-only preview; default 3 for timing).",
     )
     parser.add_argument("--variant", help="Variant slug (worker mode only).")
     parser.add_argument("--condition", help="vanilla or wrapper (worker mode only).")
@@ -490,6 +506,8 @@ def main() -> None:
         "Useful for resuming after a partial run.",
     )
     args = parser.parse_args()
+    if args.reps is not None:  # applies to both orchestrator (report) and worker subprocess
+        REPS = args.reps
 
     if args.worker:
         _worker_main(args)

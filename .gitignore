@@ -22,5 +22,9 @@ tests/_artifacts/
 src/mlx_teacache/_version.py
   docs/superpowers/
 
+# Per-prompt calibration chunk files (intermediate, resumable scratch). The
+# aggregated scripts/_calibration_qwen.json IS committed — only the chunks are scratch.
+scripts/_calib_qwen_chunks/
+
 # Local Claude working layer — a thin pointer to ../CLAUDE.md. Not committed.
 /CLAUDE.md

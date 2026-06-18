@@ -1,16 +1,17 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-18T07:02Z",
+  "generated_at": "2026-06-18T08:09Z",
   "hardware": {
     "chip": "Apple M1 Max",
     "ram_gb": 32,
     "machine": "arm64",
     "os": "Darwin 25.4.0",
-    "mlx_teacache_version": "0.1.0",
+    "mlx_teacache_version": "0.9.0",
     "mflux_version": "0.17.5",
     "quantize": 4,
     "dtype": "bf16"
   },
+  "note": "Assembled incrementally (one bench_comparison.py --only run per variant, across mlx-teacache versions). The top-level generated_at/version reflect the most recent write; each variant's own 'provenance' (where present) is authoritative for that row.",
   "prompt": "Portrait of a young woman with auburn hair and green eyes, soft golden-hour window light, photorealistic, shallow depth of field, 50mm prime lens, subtle freckles, neutral background, cinematic color grading.",
   "seed": 42,
   "height": 1024,
@@ -150,6 +151,7 @@
       "height": 768,
       "width": 768,
       "quantize": 4,
+      "build": "mixed-precision: q8 first/last-6 transformer blocks + bf16 embeddings/projection (quantize=4 base)",
       "vanilla": {
         "rep_seconds": [
           1153.2238424169482,
@@ -186,6 +188,11 @@
       "image_paths": {
         "vanilla": "_artifacts/comparison/qwen-image/vanilla.webp",
         "wrapper": "_artifacts/comparison/qwen-image/wrapper.webp"
+      },
+      "provenance": {
+        "generated_at": "2026-06-18T08:09Z",
+        "mlx_teacache_version": "0.9.0",
+        "mflux_version": "0.17.5"
       }
     }
   }

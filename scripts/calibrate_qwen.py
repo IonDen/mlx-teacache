@@ -37,25 +37,39 @@ guard. The CFG combine itself is mflux's own `compute_guided_noise` (not
 re-walked), so it is faithful by construction; the per-branch cosine gate is the
 port guarantee.
 
-Pinned recipe: q4 / 512x512 / 20 steps / guidance 4.0 / seed 42 (fell back from
-768x768 — 768² peaked 28.3 GB > the 24.96 GB working-set ceiling on a 32 GB M1 Max).
+Pinned recipe: q4 / 768x768 / 50 steps / guidance 4.0 / seed 42. 50 steps is the
+official Qwen-Image recipe (mflux's 20-step default is a fast-preview value); 768x768
+peaks ~28.5 GB on a 32 GB M1 Max, which fits (the wired cap, not the 24.96 GB Metal
+working-set guideline, is the panic guard).
 
-Run (AFTER the model is downloaded; HEAVY — one full vanilla forward per prompt,
-20B model, two transformer passes per step). Run only on the MAIN THREAD:
+CHUNKED + RESUMABLE (HEAVY — one full vanilla forward per prompt, 20B model, two
+transformer passes per step). Run only on the MAIN THREAD. The orchestrator spawns
+one worker SUBPROCESS per prompt (fresh memory each, no cross-prompt accumulation),
+each writing scripts/_calib_qwen_chunks/prompt_NN.json the instant it finishes. An
+interrupted run (throttle, sleep, crash, an approved kill) RESUMES by re-running
+only the prompts whose chunk is missing — completed prompts are never recomputed:
 
-    uv run python scripts/calibrate_qwen.py --fit-mode origin
+    uv run python scripts/calibrate_qwen.py --fit-mode origin     # run / resume
 
-Pre-flight the heavy phase first (loads the model, runs ONE generation, prints
-the peak vs the device working-set ceiling, writes NO JSON):
+Validate the chunk/resume/aggregate plumbing with NO model load (seconds, no GPU):
+
+    uv run python scripts/calibrate_qwen.py --dry-run --max-prompts 3 --steps 4 \
+        --chunk-dir /tmp/calib_dry
+
+Pre-flight memory (loads the model, runs ONE generation, prints peak vs ceiling,
+writes NO JSON):
 
     uv run python scripts/calibrate_qwen.py --memory-probe
 
 Output: scripts/_calibration_qwen.json (both signals' fits + R^2 + curve range +
-held-out split + raw arrays for offline refit + recipe metadata).
+held-out split + raw arrays for offline refit + recipe metadata), aggregated from
+the per-prompt chunks once all are present.
 """
 
 import argparse
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -82,11 +96,12 @@ except ImportError:  # pragma: no cover - import-path fallback for the run phase
 
 # --- Pinned recipe. Calibrate + sweep + bench all share it. ---
 SEED = 42
-# 512², not the nominal 768²: the 768² memory probe peaked at 28.3 GB, over the
-# 24.96 GB device working-set ceiling on the 32 GB M1 Max (the kernel-panic
-# regime). Fell back to 512² (resolution only; prompt + seed unchanged).
-HEIGHT = WIDTH = 512
-NUM_INFERENCE_STEPS = 20
+# 768²/50-step is the official Qwen-Image recipe. 768² peaks ~28.5 GB on the 32 GB
+# M1 Max — it fits (the wired cap bounds non-pageable memory; the excess above it is
+# pageable). The earlier 512²/20-step recipe under-resolved detail (512² < native
+# 1328²) and under-cooked (20 steps); 768²/50 is the in-scope quality recipe.
+HEIGHT = WIDTH = 768
+NUM_INFERENCE_STEPS = 50
 GUIDANCE = 4.0  # CFG path (two transformer passes per step)
 QUANTIZE = 4
 
@@ -108,11 +123,51 @@ CALIBRATION_PROMPTS = (
 N_HELDOUT = 3
 
 OUTPUT_JSON = "_calibration_qwen.json"
+CHUNK_DIR_DEFAULT = Path(__file__).parent / "_calib_qwen_chunks"
 
 
 # ---------------------------------------------------------------------------
 # Pure helpers.
 # ---------------------------------------------------------------------------
+
+
+def _chunk_filename(idx: int) -> str:
+    """Per-prompt chunk filename. Zero-padded so lexical order == numeric order."""
+    return f"prompt_{idx:02d}.json"
+
+
+def _pending_prompt_indices(chunk_dir: Path, n_prompts: int) -> list[int]:
+    """Prompt indices in [0, n_prompts) whose chunk file does NOT yet exist.
+
+    The resume contract: a finished prompt has written its chunk and is skipped
+    on a rerun; an interrupted prompt left no chunk, so it (and only it) reruns.
+    """
+    return [i for i in range(n_prompts) if not (chunk_dir / _chunk_filename(i)).exists()]
+
+
+def _n_fit(n_prompts: int, n_heldout: int) -> int:
+    """Count of FIT prompts (the remainder are held out). Always >= 1; the
+    held-out split shrinks first when n_prompts is small (e.g. smoke runs)."""
+    return max(1, n_prompts - n_heldout)
+
+
+def _accumulate_chunks(chunks: list[dict[str, Any]], n_fit: int) -> dict[str, dict[str, list[float]]]:
+    """Merge per-prompt chunk dicts into fit/held (x, y) lists per signal.
+
+    Each chunk is {"idx": int, "signal_A": {"xs", "ys"}, "signal_B": {"xs", "ys"}}.
+    A chunk is a FIT prompt iff its idx < n_fit. Pure — no MLX, no I/O — so the
+    resume/aggregation logic is unit-testable without weights.
+    """
+    acc: dict[str, dict[str, list[float]]] = {
+        sig: {"fit_x": [], "fit_y": [], "held_x": [], "held_y": []} for sig in ("A", "B")
+    }
+    for chunk in sorted(chunks, key=lambda c: int(c["idx"])):
+        is_fit = int(chunk["idx"]) < n_fit
+        for sig in ("A", "B"):
+            pairs = chunk[f"signal_{sig}"]
+            acc[sig]["fit_x" if is_fit else "held_x"] += [float(x) for x in pairs["xs"]]
+            acc[sig]["fit_y" if is_fit else "held_y"] += [float(y) for y in pairs["ys"]]
+    return acc
 
 
 def _fit_signal_origin(xs: list[float], ys: list[float], *, fit_mode: str) -> dict[str, Any]:
@@ -298,9 +353,7 @@ class _CapturingTransformer:
             )
             noise = cap["noise"]
             cos = float(mx.sum(ref * noise) / (mx.linalg.norm(ref) * mx.linalg.norm(noise)))
-            assert cos >= 0.999, (
-                f"re-walk diverges from QwenTransformer.__call__: cos={cos:.6f} (port bug)"
-            )
+            assert cos >= 0.999, f"re-walk diverges from QwenTransformer.__call__: cos={cos:.6f} (port bug)"
             self._self_check["done"] = True
 
         branch = "pos" if positive else "neg"
@@ -323,7 +376,7 @@ class _CapturingTransformer:
         return getattr(self.__dict__["_inner"], name)
 
 
-def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
+def _capture_one_prompt(flux: Any, prompt: str, *, steps: int = NUM_INFERENCE_STEPS) -> list[dict[str, Any]]:
     captures: list[dict[str, Any]] = []
     self_check = {"done": False}
     original_transformer = flux.transformer
@@ -332,7 +385,7 @@ def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
         flux.generate_image(
             prompt=prompt,
             seed=SEED,
-            num_inference_steps=NUM_INFERENCE_STEPS,
+            num_inference_steps=steps,
             height=HEIGHT,
             width=WIDTH,
             guidance=GUIDANCE,
@@ -355,7 +408,9 @@ def _pairs_for(
     xs: list[float] = []
     ys: list[float] = []
     for t in range(1, len(captures)):
-        x = _rel_l1(captures[t][f"signal_{signal_key}_{branch}"], captures[t - 1][f"signal_{signal_key}_{branch}"])
+        x = _rel_l1(
+            captures[t][f"signal_{signal_key}_{branch}"], captures[t - 1][f"signal_{signal_key}_{branch}"]
+        )
         y_pos = _rel_l1(captures[t]["body_out_pos"], captures[t - 1]["body_out_pos"])
         y_neg = _rel_l1(
             captures[t].get("body_out_neg", captures[t]["body_out_pos"]),
@@ -397,78 +452,127 @@ def _run_memory_probe() -> None:
     print("[memory-probe] done (no JSON written).", flush=True)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fit-mode", default="origin", choices=["free", "origin"])
-    parser.add_argument(
-        "--memory-probe",
-        action="store_true",
-        help="Load the model, run ONE generation, print peak vs ceiling, exit without writing JSON.",
-    )
-    args = parser.parse_args()
+def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) -> None:
+    """Capture ONE prompt and write its chunk file, then exit.
 
-    # Memory guardrail — device-derived wired cap, strictly below the recommended
-    # working set (NOT a hardcoded literal). Set here, not at import, so the module
-    # is importable for unit tests without mutating MLX state.
-    _max_set = mx.device_info()["max_recommended_working_set_size"]
-    mx.set_wired_limit(int(_max_set * 0.85))  # strictly below the recommended working set; device-derived
+    A fresh subprocess per prompt = fresh MLX memory (no cross-prompt
+    accumulation) AND a durable checkpoint: an interrupted run resumes from the
+    last written chunk instead of from zero.
+    """
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    out = chunk_dir / _chunk_filename(prompt_idx)
+    prompt = CALIBRATION_PROMPTS[prompt_idx]
 
-    if args.memory_probe:
-        _run_memory_probe()
+    if dry_run:
+        # Plumbing smoke: synthetic monotonic pairs, NO model load — exercises the
+        # worker -> chunk -> resume -> aggregate -> fit path end-to-end without weights.
+        m = max(1, steps - 1)
+        xs = [round(0.01 * (k + 1), 5) for k in range(m)]
+        ys = [round(0.02 * (k + 1), 5) for k in range(m)]
+        chunk: dict[str, Any] = {
+            "idx": prompt_idx,
+            "prompt": prompt,
+            "num_captures": steps,
+            "steps": steps,
+            "dry_run": True,
+            "signal_A": {"xs": xs, "ys": ys},
+            "signal_B": {"xs": xs, "ys": ys},
+        }
+        out.write_text(json.dumps(chunk, indent=2))
+        print(f"[worker {prompt_idx}] dry-run chunk -> {out}", flush=True)
         return
 
+    # Memory guardrail — device-derived wired cap, strictly below the recommended
+    # working set, BEFORE any model load (the kernel-panic guard).
+    _max_set = mx.device_info()["max_recommended_working_set_size"]
+    mx.set_wired_limit(int(_max_set * 0.85))
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
-    print(f"Loading Qwen-Image (quantize={QUANTIZE})...", flush=True)
+    print(f"[worker {prompt_idx}] loading Qwen-Image (q{QUANTIZE}) for {prompt!r} ...", flush=True)
     flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
     flux.freeze()
+    caps = _capture_one_prompt(flux, prompt, steps=steps)
+    assert len(caps) == steps, f"expected {steps} captures, got {len(caps)}"
+    chunk = {"idx": prompt_idx, "prompt": prompt, "num_captures": len(caps), "steps": steps}
+    for sig in ("A", "B"):
+        xs, ys = _pairs_for(caps, sig, branch="pos")
+        chunk[f"signal_{sig}"] = {"xs": [float(x) for x in xs], "ys": [float(y) for y in ys]}
+    out.write_text(json.dumps(chunk, indent=2))
+    print(f"[worker {prompt_idx}] wrote {out} (peak {mx.get_peak_memory() / 1024**3:.2f} GB)", flush=True)
 
-    # Incremental accumulation: reduce each prompt's captures to scalar (x, y)
-    # pairs immediately and discard the raw per-prompt tensors before the next
-    # generation. The 20B model peaks ~27.6 GB (near the 32 GB ceiling), so
-    # retaining all 10 prompts' captures would grow the peak past the wired cap
-    # and risk a swap-thrash panic — this keeps the peak ~one generation.
-    n_fit = len(CALIBRATION_PROMPTS) - N_HELDOUT
-    acc: dict[str, dict[str, list[float]]] = {
-        sig: {"fit_x": [], "fit_y": [], "held_x": [], "held_y": []} for sig in ("A", "B")
-    }
+
+def _aggregate_path(chunk_dir: Path, *, dry_run: bool) -> Path:
+    """Where the final aggregated calibration JSON lands. The committed
+    scripts/_calibration_qwen.json is written ONLY by a real run into the default
+    chunk dir; a dry-run or a custom chunk dir writes beside its chunks so a smoke
+    never clobbers the committed artifact."""
+    if not dry_run and chunk_dir.resolve() == CHUNK_DIR_DEFAULT.resolve():
+        return Path(__file__).parent / OUTPUT_JSON
+    return chunk_dir / OUTPUT_JSON
+
+
+def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: str, dry_run: bool) -> None:
+    """Spawn one worker SUBPROCESS per pending prompt (sequential — never two 20B
+    loads at once), each writing its chunk on completion; resume by skipping
+    prompts whose chunk already exists; aggregate + fit once all are present."""
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    pending = _pending_prompt_indices(chunk_dir, n_prompts)
+    done = n_prompts - len(pending)
+    print(
+        f"[orchestrator] {n_prompts} prompts, {done} already done, {len(pending)} pending: {pending}",
+        flush=True,
+    )
     t0 = time.time()
-    for i, prompt in enumerate(CALIBRATION_PROMPTS, 1):
-        print(f"[{i}/{len(CALIBRATION_PROMPTS)}] {prompt!r}", flush=True)
-        caps = _capture_one_prompt(flux, prompt)
-        assert len(caps) == NUM_INFERENCE_STEPS, f"expected {NUM_INFERENCE_STEPS} captures, got {len(caps)}"
-        is_fit = (i - 1) < n_fit
-        for sig in ("A", "B"):
-            xs, ys = _pairs_for(caps, sig, branch="pos")
-            tgt = acc[sig]
-            tgt["fit_x" if is_fit else "held_x"] += xs
-            tgt["fit_y" if is_fit else "held_y"] += ys
-        del caps  # drop the prompt's raw tensors before the next generation
-        mx.clear_cache()  # release the MLX buffer cache so the peak doesn't grow across prompts
-    elapsed = time.time() - t0
+    for idx in pending:
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--worker",
+            "--prompt-idx",
+            str(idx),
+            "--steps",
+            str(steps),
+            "--chunk-dir",
+            str(chunk_dir),
+        ]
+        if dry_run:
+            cmd.append("--dry-run")
+        print(f"[orchestrator] -> prompt {idx} ({CALIBRATION_PROMPTS[idx]!r})", flush=True)
+        result = subprocess.run(cmd)
+        if result.returncode != 0 or not (chunk_dir / _chunk_filename(idx)).exists():
+            raise SystemExit(
+                f"[orchestrator] worker for prompt {idx} failed (rc={result.returncode}); chunk not "
+                f"written. Fix the cause and rerun — completed chunks in {chunk_dir} are reused."
+            )
+        mx.clear_cache()
+    gen_seconds = time.time() - t0
+
+    # All chunks present -> aggregate + fit. Same report schema as the monolith.
+    chunks = [json.loads((chunk_dir / _chunk_filename(i)).read_text()) for i in range(n_prompts)]
+    n_fit = _n_fit(n_prompts, N_HELDOUT)
+    acc = _accumulate_chunks(chunks, n_fit)
     report: dict[str, Any] = {
         "variant": "qwen-image",
-        "num_inference_steps": NUM_INFERENCE_STEPS,
+        "num_inference_steps": steps,
         "guidance": GUIDANCE,
         "height": HEIGHT,
         "width": WIDTH,
         "seed": SEED,
         "quantize": QUANTIZE,
-        "num_prompts": len(CALIBRATION_PROMPTS),
+        "num_prompts": n_prompts,
         "n_fit_prompts": n_fit,
-        "n_heldout_prompts": N_HELDOUT,
-        "elapsed_seconds": elapsed,
-        "fit_mode": args.fit_mode,
+        "n_heldout_prompts": n_prompts - n_fit,
+        "elapsed_seconds": gen_seconds,
+        "fit_mode": fit_mode,
         "signals": {},
-        "calibration_prompts": list(CALIBRATION_PROMPTS),
+        "calibration_prompts": list(CALIBRATION_PROMPTS[:n_prompts]),
+        "chunked": True,
+        "dry_run": dry_run,
     }
     for sig in ("A", "B"):
-        # Scalar (x, y) pairs accumulated incrementally above. Fit on the positive
-        # branch: moot for caption-independent Signal A; matches the runtime gate for B.
         tgt = acc[sig]
-        fit = _fit(tgt["fit_x"], tgt["fit_y"], fit_mode=args.fit_mode)
-        # Held-out R^2 against the fitted polynomial.
+        fit = _fit(tgt["fit_x"], tgt["fit_y"], fit_mode=fit_mode)
         p = np.poly1d(fit["coefficients_c4_to_c0"])
         hy = np.asarray(tgt["held_y"])
         hp = p(np.asarray(tgt["held_x"]))
@@ -484,12 +588,58 @@ def main() -> None:
             flush=True,
         )
 
-    out = Path(__file__).parent / OUTPUT_JSON
+    out = _aggregate_path(chunk_dir, dry_run=dry_run)
     out.write_text(json.dumps(report, indent=2))
-    print(f"\nCaptured both signals in {elapsed:.1f}s. Wrote {out}")
+    print(f"\n[orchestrator] aggregated {n_prompts} chunks ({gen_seconds:.1f}s generation). Wrote {out}")
     print(
         "Signal SELECTION (A vs B) happens after the variant integration via the "
         "Qwen threshold sweep (usable-curve screen + held-out skip-vs-SSIM knee)."
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fit-mode", default="origin", choices=["free", "origin"])
+    parser.add_argument(
+        "--memory-probe",
+        action="store_true",
+        help="Load the model, run ONE generation, print peak vs ceiling, exit without writing JSON.",
+    )
+    parser.add_argument("--worker", action="store_true", help="internal: capture ONE prompt -> chunk file")
+    parser.add_argument("--prompt-idx", type=int, default=None, help="worker: which prompt index to capture")
+    parser.add_argument("--steps", type=int, default=NUM_INFERENCE_STEPS, help="override step count (smoke)")
+    parser.add_argument(
+        "--max-prompts", type=int, default=len(CALIBRATION_PROMPTS), help="limit number of prompts (smoke)"
+    )
+    parser.add_argument(
+        "--chunk-dir",
+        type=Path,
+        default=CHUNK_DIR_DEFAULT,
+        help="per-prompt chunk files live here; resume reads them",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="synthetic chunks, no model load — validates the chunk/resume/aggregate plumbing",
+    )
+    args = parser.parse_args()
+
+    if args.memory_probe:
+        _max_set = mx.device_info()["max_recommended_working_set_size"]
+        mx.set_wired_limit(int(_max_set * 0.85))  # device-derived; strictly below the recommended working set
+        _run_memory_probe()
+        return
+    if args.worker:
+        if args.prompt_idx is None:
+            parser.error("--worker requires --prompt-idx")
+        _run_worker(args.prompt_idx, steps=args.steps, chunk_dir=args.chunk_dir, dry_run=args.dry_run)
+        return
+    _run_orchestrator(
+        steps=args.steps,
+        n_prompts=args.max_prompts,
+        chunk_dir=args.chunk_dir,
+        fit_mode=args.fit_mode,
+        dry_run=args.dry_run,
     )
 
 

@@ -9,7 +9,7 @@ prompt-to-prompt Metal-dispatch noise with margin.
 
 Three gates:
   - threshold=0 latent cosine + restore-no-trace  (compute-path correctness)
-  - SSIM at the shipped DEFAULT_THRESH on the calibrated 20-step recipe, with a
+  - SSIM at the shipped DEFAULT_THRESH on the calibrated 50-step recipe, with a
     skip-engagement assert                          (the user-facing quality gate)
   - high-threshold skip path produces a finite latent (skip-reconstruction)
 
@@ -40,7 +40,7 @@ _COSINE_GATE = 0.99  # threshold=0 re-walk parity (calibration self-check measur
 _SSIM_GATE = 0.85  # PR-gate quality floor (FLUX.2-family bar; sweep measured 0.9918 at 0.25)
 PROMPT = "a red apple on a wooden table"
 SEED = 42
-HEIGHT = WIDTH = 512
+HEIGHT = WIDTH = 768
 GUIDANCE = 4.0
 _ARTIFACTS = Path(__file__).parent / "_artifacts" / "parity_qwen"
 
@@ -136,14 +136,14 @@ def test_cfg_parity_at_threshold_zero(qwen_image: Any) -> None:
 
 
 def test_image_quality_ssim_at_default_threshold(qwen_image: Any) -> None:
-    """User-facing quality gate at the calibrated 20-step recipe + the shipped
-    DEFAULT_THRESH (0.25): caching MUST engage (skipped > 0 — the dormant-cache
+    """User-facing quality gate at the calibrated 50-step recipe + the shipped
+    DEFAULT_THRESH: caching MUST engage (skipped > 0 — the dormant-cache
     guard) and SSIM vs vanilla MUST hold the PR-gate floor. Images saved for
     manual inspection."""
     flux = qwen_image
-    van = _gen_image_array(flux, save_path=_ARTIFACTS / "vanilla.png", steps=20)
-    with apply_teacache(flux) as h:  # builtin DEFAULT_THRESH = 0.25
-        wrap = _gen_image_array(flux, save_path=_ARTIFACTS / "wrapper_default_thresh.png", steps=20)
+    van = _gen_image_array(flux, save_path=_ARTIFACTS / "vanilla.png", steps=50)
+    with apply_teacache(flux) as h:  # builtin DEFAULT_THRESH
+        wrap = _gen_image_array(flux, save_path=_ARTIFACTS / "wrapper_default_thresh.png", steps=50)
         skipped, computed = h.stats.skipped_count, h.stats.computed_count
     score = float(ssim(van, wrap, channel_axis=-1, data_range=255))
     assert skipped > 0, (
@@ -156,7 +156,7 @@ def test_skip_path_engages_and_produces_finite_latent(qwen_image: Any) -> None:
     """Mechanical skip-path correctness: a high threshold forces skips and the
     reconstructed latent (img_in + cached_residual per CFG branch) stays finite —
     no NaN/inf from a shape/broadcast bug. No quality bound on the short schedule
-    (8-step over-skips the 20-step-calibrated coefficients); skip QUALITY is gated
+    (8-step over-skips the 50-step-calibrated coefficients); skip QUALITY is gated
     by the SSIM test above at the pinned recipe."""
     flux = qwen_image
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)

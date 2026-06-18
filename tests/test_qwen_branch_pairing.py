@@ -26,21 +26,21 @@ def test_fresh_token_starts_positive() -> None:
 def test_alternates_within_one_generation() -> None:
     p = CfgBranchPairer()
     p.on_generation_token(1)
-    assert p.is_positive()        # step 0 positive
+    assert p.is_positive()  # step 0 positive
     p.advance()
-    p.on_generation_token(1)      # same token → no reset
-    assert not p.is_positive()    # step 0 negative
+    p.on_generation_token(1)  # same token → no reset
+    assert not p.is_positive()  # step 0 negative
     p.advance()
     p.on_generation_token(1)
-    assert p.is_positive()        # step 1 positive
+    assert p.is_positive()  # step 1 positive
 
 
 def test_new_token_resets_after_midpair_interrupt() -> None:
     p = CfgBranchPairer()
     p.on_generation_token(1)
-    p.advance()                   # interrupt lands here: positive done, negative pending
-    p.on_generation_token(2)      # fresh generation
-    assert p.is_positive()        # reset, not stuck on negative
+    p.advance()  # interrupt lands here: positive done, negative pending
+    p.on_generation_token(2)  # fresh generation
+    assert p.is_positive()  # reset, not stuck on negative
     assert p.shared_decision is None
 
 
@@ -113,11 +113,15 @@ def _orch_handle(thresh: float) -> _InternalHandle:
 
 def _orch_call(inner, handle, *, t):  # noqa: ANN001
     return qwen_forward_with_gate(
-        inner, handle, t=t, config=SimpleNamespace(num_inference_steps=4),
+        inner,
+        handle,
+        t=t,
+        config=SimpleNamespace(num_inference_steps=4),
         hidden_states=mx.zeros((1, 4, 8)),
         encoder_hidden_states=mx.zeros((1, 2, 8)),
         encoder_hidden_states_mask=mx.ones((1, 2)),
-        qwen_image_ids=None, cond_image_grid=None,
+        qwen_image_ids=None,
+        cond_image_grid=None,
     )
 
 
@@ -125,8 +129,8 @@ def test_two_calls_record_once_and_advance_step_counter_once(monkeypatch) -> Non
     calls = _patch_physics(monkeypatch, signal_value=0.5)
     inner = SimpleNamespace()
     handle = _orch_handle(thresh=0.20)
-    _orch_call(inner, handle, t=0)   # positive
-    _orch_call(inner, handle, t=0)   # negative
+    _orch_call(inner, handle, t=0)  # positive
+    _orch_call(inner, handle, t=0)  # negative
     assert handle._state.cache.step_counter == 1
     assert len(handle._state.stats._staging.decisions) == 1
     assert calls["run_body"] == 2
@@ -136,8 +140,8 @@ def test_gate_runs_on_positive_only(monkeypatch) -> None:  # noqa: ANN001
     calls = _patch_physics(monkeypatch, signal_value=0.5)
     inner = SimpleNamespace()
     handle = _orch_handle(thresh=0.20)
-    _orch_call(inner, handle, t=0)   # positive: signal_a computed
-    _orch_call(inner, handle, t=0)   # negative: NO new signal_a
+    _orch_call(inner, handle, t=0)  # positive: signal_a computed
+    _orch_call(inner, handle, t=0)  # negative: NO new signal_a
     assert calls["signal_a"] == 1
 
 
@@ -155,11 +159,15 @@ def test_skip_step_reconstructs_from_cache_without_running_body(monkeypatch) -> 
 
     def call(t):  # noqa: ANN001, ANN202
         return qwen_forward_with_gate(
-            inner, h, t=t, config=SimpleNamespace(num_inference_steps=6),
+            inner,
+            h,
+            t=t,
+            config=SimpleNamespace(num_inference_steps=6),
             hidden_states=mx.zeros((1, 4, 8)),
             encoder_hidden_states=mx.zeros((1, 2, 8)),
             encoder_hidden_states_mask=mx.ones((1, 2)),
-            qwen_image_ids=None, cond_image_grid=None,
+            qwen_image_ids=None,
+            cond_image_grid=None,
         )
 
     # step 0 (forced) + step 1 (seed compute): 4 body runs, cache seeded.
@@ -233,11 +241,15 @@ def test_interrupt_midpair_then_fresh_generation_clears_stale_residual(monkeypat
 
     def call(t: int):  # noqa: ANN202
         return qwen_forward_with_gate(
-            inner, handle, t=t, config=SimpleNamespace(num_inference_steps=4),
+            inner,
+            handle,
+            t=t,
+            config=SimpleNamespace(num_inference_steps=4),
             hidden_states=mx.zeros((1, 4, 8)),
             encoder_hidden_states=mx.zeros((1, 2, 8)),
             encoder_hidden_states_mask=mx.ones((1, 2)),
-            qwen_image_ids=None, cond_image_grid=None,
+            qwen_image_ids=None,
+            cond_image_grid=None,
         )
 
     call(0)  # gen 1, step 0 positive: seed compute caches the POSITIVE residual

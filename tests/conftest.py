@@ -67,6 +67,7 @@ _MFLUX_FILES = {
     "test_parity_flux1.py",
     "test_parity_flux2.py",
     "test_parity_z_image.py",
+    "test_parity_qwen.py",
     "test_image_quality_flux1.py",
     "test_image_quality_flux2.py",
     "test_integration_slow.py",

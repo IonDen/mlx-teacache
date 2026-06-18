@@ -1,6 +1,6 @@
 # qwen-image
 
-Qwen-Image base (Alibaba) — a ~20B dual-stream MMDiT, non-distilled, run at a 20-step CFG recipe. It's the first variant on the FLUX.1 proxy-transformer pattern that also runs true two-pass CFG, and at the package default it gets the largest measured speedup of any supported model (1.41× warm-median).
+Qwen-Image base (Alibaba) — a ~20B dual-stream MMDiT, non-distilled, run at the official 50-step CFG recipe. It's the first variant on the FLUX.1 proxy-transformer pattern that also runs true two-pass CFG, and TeaCache skips about half its denoising steps at visually-lossless quality.
 
 ## Construct via mflux
 
@@ -15,28 +15,53 @@ The detector matches `model_config.aliases` containing `"qwen-image"` or `"qwen"
 
 ## Recipe + defaults
 
-- Default recipe: 20 steps, `guidance=4.0` (CFG), quantize=4
-- Default `rel_l1_thresh`: **0.25** (per-variant default, set at the SSIM knee from the sweep)
+- Default recipe: 50 steps, `guidance=4.0` (CFG), quantize=4, 768×768
+- Default `rel_l1_thresh`: **0.30** (per-variant default, set from the threshold sweep)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At the 512×512 shared portrait recipe on M1 Max 32 GB (`bench_comparison.py`, subprocess-per-condition, 3 reps, q4):
+At the 768×768 shared portrait recipe on M1 Max 32 GB (`bench_comparison.py`, subprocess-per-condition, 3 reps):
 
 | Condition | Warm-median wall-clock | Peak memory |
 |---|---|---|
-| vanilla | 117.27 s | 27.61 GB |
-| wrapper (full TeaCache) | 83.36 s | 27.78 GB |
+| vanilla | 1207.2 s | 30.4 GB |
+| wrapper (full TeaCache) | 695.1 s | 30.8 GB |
 
-- **Warm speedup: 1.41×** (cold 1.39×), 6 of 18 active steps skipped at `rel_l1_thresh=0.25`, stable across reps.
-- The win is entirely step-skipping. Qwen-Image's `_predict` is **not** `mx.compile`-wrapped in mflux (the FLUX.2/Z-Image compile-avoidance effect does not exist here), so there is no separate compile-path tailwind to attribute — the speedup comes from reusing the cached transformer-body residual on skipped steps.
-- Peak memory is ~27.6 GB, near the 32 GB ceiling. The wired cap (device-derived, strictly below `max_recommended_working_set_size`) bounds the non-pageable allocation; the remainder is pageable. See [Quirks](#quirks) for the 768→512 resolution fallback.
+- **Warm speedup: 1.74×** (1.63× cold), with 25 of 48 active steps skipped at `rel_l1_thresh=0.30`.
+- The win is step-skipping. Qwen-Image's `_predict` is **not** `mx.compile`-wrapped in mflux (the FLUX.2/Z-Image compile-avoidance effect does not exist here), so there is no separate compile-path tailwind to attribute — the speedup comes from reusing the cached transformer-body residual on skipped steps, each skip avoiding both CFG branches' 60-block bodies.
 
 Reproduce with `uv run python scripts/bench_comparison.py --only qwen-image`. Full report at `_artifacts/comparison_report.json`; images under `_artifacts/comparison/qwen-image/`.
 
-There is no `bench_speedup.py` three-way row for Qwen-Image: with no `mx.compile` path to bypass, the vanilla / no-gate / gated decomposition collapses to "all step-skipping", so the subprocess-per-condition comparison bench above is the committed source for the number.
+## Image quality on consumer memory
+
+Stock uniform 4-bit quantization over-quantizes Qwen-Image's quantization-sensitive layers and produces a grainy, low-detail skin texture on a 32 GB Mac — a Qwen + q4 limitation, independent of TeaCache (the wrapper faithfully reproduces whatever the base model generates). The comparison portraits here were rendered with a mixed-precision build that keeps the first/last transformer blocks at 8-bit and the embeddings + final projection at bf16, which clears the artifact and still fits 32 GB (~30.4 GB peak). mlx-teacache stays quantization-agnostic; this is a model-construction choice. To reproduce the showcase quality, install the predicate before building the model:
+
+```python
+import mlx.nn as nn
+from mflux.models.qwen.weights.qwen_weight_definition import QwenWeightDefinition
+
+_PROTECT = set(range(6)) | set(range(54, 60))           # first 6 + last 6 of 60 blocks -> q8
+_BF16 = ("img_in", "txt_in", "time_text_embed", "proj_out", "norm_out")  # -> bf16
+
+def _mixed(path, module):
+    if not hasattr(module, "to_quantized"):
+        return False
+    if any(path == p or path.startswith(p + ".") for p in _BF16):
+        return False                                    # keep bf16
+    if path.startswith("transformer_blocks."):
+        idx = int(path.split(".")[1])
+        if idx in _PROTECT:
+            return {"group_size": 64, "bits": 8}        # q8
+    return True                                         # default q4
+
+QwenWeightDefinition.quantization_predicate = staticmethod(_mixed)
+flux = QwenImage(quantize=4, model_config=ModelConfig.qwen_image())
+```
+
+The gate signal (Signal A) is unaffected enough by this that the shipped coefficients — calibrated on stock q4 — transfer cleanly to the mixed-precision build (the threshold sweep confirmed a sensible skip ramp at high SSIM on it).
 
 ## Threshold sweep
 
-`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 512² recipe and records skip count + SSIM vs vanilla per threshold. SSIM holds ≥ 0.99 through 0.30, then drops off a cliff to 0.908 at 0.40. The skip count plateaus at 6 of 18 active steps by 0.25 (SSIM 0.9918), so 0.25 is the quality-first default: it captures the full visually-lossless skip benefit with margin from the cliff, and a higher threshold buys no extra skips on this recipe. Full sweep: `tests/_artifacts/sweep_qwen/results_qwen.json`.
+`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe and records skip count + SSIM vs vanilla per threshold. SSIM degrades **gracefully — no cliff**: 0.9951 at 0.20, 0.9883 at 0.25, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50. The default 0.30 takes ~50% of the active steps (24 of 48) at SSIM 0.987 — visually identical to vanilla — while leaving margin. The sweep's single-rep wall-clock is thermal noise (subprocess-per-threshold, cold each); the headline speedup comes from the multi-rep bench. Full sweep: `tests/_artifacts/sweep_qwen/results_qwen.json`.
 
 ## CFG (guidance > 1.0)
 
@@ -46,13 +71,13 @@ Qwen-Image always runs CFG: `QwenImage.generate_image` calls the transformer twi
 
 Qwen-Image is FLUX-shaped: each block applies a 6×dim adaLN modulation, so the FLUX-canonical TeaCache signal is available — the modulated block-0 image input. The calibration captured two candidate signals and fit a degree-4 origin-constrained polynomial for each:
 
-- **Signal A** — modulated block-0 image input rel-L1 (the FLUX-canonical signal; caption-independent). **Selected**: R² = 0.9464, held-out 0.9439.
-- **Signal B** — first-block image-stream residual rel-L1 (caption-dependent). R² = 0.9516, held-out 0.9553.
+- **Signal A** — modulated block-0 image input rel-L1 (the FLUX-canonical signal; caption-independent). **Selected**: R² = 0.849, held-out 0.845.
+- **Signal B** — first-block image-stream residual rel-L1 (caption-dependent). R² = 0.881, held-out 0.890.
 
-Signal B's R² is marginally higher, but Signal A is the better choice on two counts: it's caption-independent (the shared CFG decision is exact rather than approximate), and it's cheaper on a skip step (Signal A comes from the prelude; Signal B would require running block 0). The fit quality here (~0.95) is far above Z-Image's 0.40 and the FLUX.2 family's 0.11–0.47, because Qwen's modulation structure matches the FLUX models the polynomial form was designed for.
+Signal B's R² is marginally higher, but Signal A is the better choice on two counts: it's caption-independent (the shared CFG decision is exact rather than approximate), and it's cheaper on a skip step (Signal A comes from the prelude; Signal B would require running block 0). The R² (~0.85) is lower than a 512×512/20-step fit would give because the heavier 768×768/50-step recipe samples a finer, noisier per-step rel-L1 distribution — still well above Z-Image's 0.40 and the FLUX.2 family's 0.11–0.47, and the sweep confirms it skips strongly at high SSIM.
 
-- `scripts/calibrate_qwen.py --fit-mode origin`
-- 10 prompts (7 fit / 3 held-out) × 20 steps × seed=42 on M1 Max 32 GB, q4, 512×512, guidance=4.0 (CFG)
+- `scripts/calibrate_qwen.py --fit-mode origin` (chunked: one worker subprocess per prompt, resumable)
+- 10 prompts (7 fit / 3 held-out) × 50 steps × seed=42 on M1 Max 32 GB, q4, 768×768, guidance=4.0 (CFG)
 - A first-step self-check asserts the capturing re-walk's per-branch noise matches the unwrapped `QwenTransformer.__call__` at cosine ≥ 0.999 (faithful-port guard)
 - Stored verbatim in `src/mlx_teacache/variants/qwen_image/config.py::COEFFICIENTS`
 
@@ -68,8 +93,8 @@ The integration replaces `flux.transformer` with a proxy whose forward re-walks 
 
 ## Quirks
 
-- **Default threshold is 0.25, not the package fallback 0.20.** Set via `Provenance.default_thresh` in the variant's `_PROVENANCE`, resolved at `apply_teacache` time.
-- **512×512, a memory fallback from the nominal 768×768.** At 768² the model peaks 28.3 GB; at 512² it still peaks 27.6 GB — the peak is weights-dominated (20B at q4 plus the Qwen2.5-VL text encoder), so dropping resolution barely moves it. 512² is the recipe that stays survivable on a 32 GB M1 Max. The calibration, sweep, parity, and comparison all use 512²; the COMPARISON portrait row keeps the shared prompt and seed and changes only the resolution.
+- **Default threshold is 0.30, not the package fallback 0.20.** Set via `Provenance.default_thresh` in the variant's `_PROVENANCE`, resolved at `apply_teacache` time.
+- **768×768, the official Qwen recipe.** The 20B model peaks ~28.5 GB at stock q4 and ~30.4 GB at the mixed-precision showcase build — both fit a 32 GB M1 Max (the wired cap bounds the non-pageable allocation; the excess is pageable). 1024×1024 needs tiled VAE decode to fit; 768×768 is the comfortable default.
 - **Proxy-transformer pattern, not the `_predict` closure.** Qwen-Image has no `_predict` factory and no `mx.compile`, so the variant proxies `flux.transformer` (like FLUX.1) rather than replacing `_predict` (like FLUX.2 / Z-Image). As with FLUX.1, calling `flux.parameters()` at the parent level can miss transformer parameters while the wrapper is active — use `flux.transformer.parameters()` or `handle.restore()` first.
 - **Self-contained.** The variant defines its own internal handle, branch-pairing state machine, and forward, importing no sibling variant — only the model-agnostic `_kernel/`, the public handle, and the shared mflux lifecycle helpers.
-- The comparison harness clears the MLX buffer cache between reps for this variant (`clear_cache_between_reps=True`) and sets a soft memory limit above the peak (`soft_cap_gb`); without the cache clear, accumulation across reps in one process would OOM the second rep.
+- The comparison harness clears the MLX buffer cache between reps for this variant and sets a soft memory limit above the peak; without the cache clear, accumulation across reps in one process would OOM the second rep.

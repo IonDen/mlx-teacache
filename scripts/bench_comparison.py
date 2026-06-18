@@ -39,7 +39,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -75,6 +75,10 @@ class VariantConfig:
     height: int = 1024
     width: int = 768
     quantize: int = 4
+    # Construction note recorded in the report so a reader can tell HOW the model
+    # was built (e.g. mixed-precision), since `quantize` alone is misleading for a
+    # variant that overrides it. "" means uniform q{quantize}.
+    build: str = ""
     wired_cap_gb: int = (
         22  # mx.set_wired_limit; must stay < max_recommended_working_set_size (25 on M1 Max 32GB)
     )
@@ -133,6 +137,7 @@ VARIANTS: tuple[VariantConfig, ...] = (
         height=768,
         width=768,
         quantize=4,
+        build="mixed-precision: q8 first/last-6 transformer blocks + bf16 embeddings/projection (quantize=4 base)",
         wired_cap_gb=21,  # device-derived ~0.85*24.96; bounds wired memory (peak ~30.4 GB total is pageable)
         soft_cap_gb=31,  # advisory, above the ~30.4 GB mixed-precision peak so timing isn't inflated by forced eviction
         clear_cache_between_reps=True,  # 20B near the 32 GB edge; cache accumulation OOMs reps without this
@@ -332,6 +337,43 @@ def _mlx_teacache_version() -> str:
     return __version__
 
 
+def _provenance() -> dict[str, str]:
+    """Per-run provenance stamped into each variant entry and the top-level on
+    every write. ``datetime.now`` is the only impure part; the merge that consumes
+    this (``_merge_variant_into_report``) is pure and unit-tested."""
+    return {
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
+        "mlx_teacache_version": _mlx_teacache_version(),
+        "mflux_version": _mflux_version(),
+    }
+
+
+def _merge_variant_into_report(
+    report: dict[str, Any], slug: str, entry: dict[str, Any], provenance: dict[str, str]
+) -> dict[str, Any]:
+    """Insert/replace one variant entry (stamped with its own provenance) and
+    refresh the report's top-level ``generated_at`` + hardware software-versions to
+    THIS run.
+
+    The report is assembled incrementally — one ``--only <slug>`` run per variant,
+    often across different mlx-teacache versions — so no single top-level value can
+    honestly describe every row. Per-variant ``provenance`` is authoritative for
+    its row; the top-level reflects the most recent write. Without this, a
+    ``--only`` resume reloaded a prior report and overwrote only the variant row,
+    keeping the earlier run's stale ``generated_at`` / version at the top level.
+    Pure: returns a new dict, never mutates the input."""
+    out = dict(report)
+    out["generated_at"] = provenance["generated_at"]
+    if out.get("hardware"):
+        out["hardware"] = {
+            **out["hardware"],
+            "mlx_teacache_version": provenance["mlx_teacache_version"],
+            "mflux_version": provenance["mflux_version"],
+        }
+    out["variants"] = {**out.get("variants", {}), slug: {**entry, "provenance": dict(provenance)}}
+    return out
+
+
 def _macos_sysctl(key: str) -> str | None:
     """Read a macOS sysctl value as a string. Returns None on failure."""
     if sys.platform != "darwin":
@@ -405,6 +447,29 @@ def _run_one_worker(slug: str, condition: str, save_to: Path) -> dict[str, Any]:
     raise RuntimeError(f"worker for {slug}/{condition} did not emit a {WORKER_RESULT_SENTINEL} result line")
 
 
+def _condition_metrics(rep_seconds: list[float]) -> dict[str, float | None]:
+    """Cold = rep 1 (the subprocess just started); warm = median of reps 2+.
+
+    A one-rep images-only preview (``--reps 1``) has no warm measurement, so warm
+    is ``None`` rather than crashing on ``statistics.median([])``. Pure."""
+    return {
+        "cold": rep_seconds[0],
+        "warm": statistics.median(rep_seconds[1:]) if len(rep_seconds) > 1 else None,
+    }
+
+
+def _speedup(vanilla: float | None, wrapper: float | None) -> float | None:
+    """vanilla/wrapper wall-clock ratio, or ``None`` when either side is missing
+    (a one-rep preview has no warm timing) or the denominator is zero. Pure."""
+    if vanilla is None or wrapper is None or wrapper == 0:
+        return None
+    return vanilla / wrapper
+
+
+def _fmt_speedup(x: float | None) -> str:
+    return f"{x:.2f}x" if x is not None else "n/a"
+
+
 def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
     """Run vanilla + wrapper subprocesses for one variant; merge into a JSON entry."""
     variant_dir = base_dir / cfg.slug
@@ -415,23 +480,22 @@ def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
     wrapper_path = variant_dir / "wrapper.webp"
     wrapper = _run_one_worker(cfg.slug, "wrapper", wrapper_path)
 
-    vanilla_times = vanilla["rep_seconds"]
-    wrapper_times = wrapper["rep_seconds"]
-    vanilla_cold = vanilla_times[0]
-    vanilla_warm = statistics.median(vanilla_times[1:])
-    wrapper_cold = wrapper_times[0]
-    wrapper_warm = statistics.median(wrapper_times[1:])
-    speedup_warm = vanilla_warm / wrapper_warm if wrapper_warm else 0.0
-    speedup_cold = vanilla_cold / wrapper_cold if wrapper_cold else 0.0
+    v = _condition_metrics(vanilla["rep_seconds"])
+    w = _condition_metrics(wrapper["rep_seconds"])
+    speedup_warm = _speedup(v["warm"], w["warm"])
+    speedup_cold = _speedup(v["cold"], w["cold"])
 
     print(
-        f"  cold: vanilla {vanilla_cold:.2f}s | wrapper {wrapper_cold:.2f}s "
-        f"| speedup_cold {speedup_cold:.2f}x"
+        f"  cold: vanilla {v['cold']:.2f}s | wrapper {w['cold']:.2f}s "
+        f"| speedup_cold {_fmt_speedup(speedup_cold)}"
     )
-    print(
-        f"  warm: vanilla {vanilla_warm:.2f}s | wrapper {wrapper_warm:.2f}s "
-        f"| speedup_warm {speedup_warm:.2f}x"
-    )
+    if v["warm"] is not None and w["warm"] is not None:
+        print(
+            f"  warm: vanilla {v['warm']:.2f}s | wrapper {w['warm']:.2f}s "
+            f"| speedup_warm {_fmt_speedup(speedup_warm)}"
+        )
+    else:
+        print("  warm: (images-only preview — --reps 1, no warm timing)")
 
     return {
         "variant_id": cfg.variant_id,
@@ -440,16 +504,17 @@ def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
         "height": cfg.height,
         "width": cfg.width,
         "quantize": cfg.quantize,
+        "build": cfg.build or f"uniform q{cfg.quantize}",
         "vanilla": {
-            "rep_seconds": vanilla_times,
-            "cold_seconds": vanilla_cold,
-            "warm_median_seconds": vanilla_warm,
+            "rep_seconds": vanilla["rep_seconds"],
+            "cold_seconds": v["cold"],
+            "warm_median_seconds": v["warm"],
             "peak_memory_gb": vanilla.get("peak_memory_gb"),
         },
         "wrapper": {
-            "rep_seconds": wrapper_times,
-            "cold_seconds": wrapper_cold,
-            "warm_median_seconds": wrapper_warm,
+            "rep_seconds": wrapper["rep_seconds"],
+            "cold_seconds": w["cold"],
+            "warm_median_seconds": w["warm"],
             "skipped_per_rep": wrapper["skipped_per_rep"],
             "computed_per_rep": wrapper["computed_per_rep"],
             "rel_l1_thresh_used": wrapper["rel_l1_thresh_used"],
@@ -517,11 +582,10 @@ def main() -> None:
     base_dir.mkdir(parents=True, exist_ok=True)
     report_path: Path = args.output_root / "comparison_report.json"
 
-    from datetime import datetime
-
+    provenance = _provenance()
     report: dict[str, Any] = {
         "schema_version": 1,
-        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
+        "generated_at": provenance["generated_at"],
         "hardware": _detect_hardware(args.machine_label, args.ram_gb),
         "prompt": PROMPT,
         "seed": SEED,
@@ -529,6 +593,9 @@ def main() -> None:
         "width": WIDTH,
         "reps_per_condition": REPS,
         "isolation": "subprocess-per-condition",
+        # Assembled incrementally (one --only run per variant, across versions);
+        # each variant's "provenance" is authoritative, the top-level reflects the
+        # latest write.
         "variants": {},
     }
 
@@ -545,18 +612,19 @@ def main() -> None:
             f"\n=== {cfg.variant_id} (slug={cfg.slug}) — "
             f"{cfg.num_inference_steps} steps, guidance={cfg.guidance} ==="
         )
-        report["variants"][cfg.slug] = _orchestrate(cfg, base_dir)
+        entry = _orchestrate(cfg, base_dir)
+        report = _merge_variant_into_report(report, cfg.slug, entry, provenance)
 
     report_path.write_text(json.dumps(report, indent=2))
     print(f"\nReport written: {report_path}")
     for slug, entry in report["variants"].items():
-        print(
-            f"  {slug:24s} "
-            f"vanilla_warm={entry['vanilla']['warm_median_seconds']:.2f}s "
-            f"wrapper_warm={entry['wrapper']['warm_median_seconds']:.2f}s "
-            f"speedup_warm={entry['speedup_warm']:.2f}x "
-            f"skipped[0]={entry['wrapper']['skipped_per_rep'][0]}"
+        warm = entry["wrapper"]["warm_median_seconds"]
+        warm_str = (
+            f"wrapper_warm={warm:.2f}s speedup_warm={_fmt_speedup(entry['speedup_warm'])}"
+            if warm is not None
+            else "(images-only preview)"
         )
+        print(f"  {slug:24s} {warm_str} skipped[0]={entry['wrapper']['skipped_per_rep'][0]}")
 
 
 if __name__ == "__main__":

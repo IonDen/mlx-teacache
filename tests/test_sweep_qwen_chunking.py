@@ -12,6 +12,12 @@ from pathlib import Path
 
 import pytest
 
+# sweep_threshold_qwen imports PIL + scikit-image at module top; both live in the
+# [mflux]/test extra and are absent in the pure-core CI env. Skip this module
+# cleanly there (importorskip) instead of erroring collection on the import below.
+pytest.importorskip("PIL")
+pytest.importorskip("skimage")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import sweep_threshold_qwen as sw  # noqa: E402
 

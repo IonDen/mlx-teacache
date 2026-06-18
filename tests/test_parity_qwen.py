@@ -28,11 +28,15 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 import pytest
-from PIL import Image
-from skimage.metrics import structural_similarity as ssim
 
 from mlx_teacache import apply_teacache
 from mlx_teacache.errors import TeaCacheDisabledWarning
+
+# PIL + skimage live in the [mflux]/test extra and are absent in the pure-core CI
+# env. importorskip skips this module cleanly at collection there (it is parity-only
+# anyway) instead of erroring the whole pure-core lane on a module-top import.
+Image = pytest.importorskip("PIL.Image")
+ssim = pytest.importorskip("skimage.metrics").structural_similarity
 
 pytestmark = pytest.mark.parity
 

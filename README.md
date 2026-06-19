@@ -9,7 +9,7 @@
 [![License: Apache 2.0](https://img.shields.io/pypi/l/mlx-teacache.svg)](https://github.com/IonDen/mlx-teacache/blob/main/LICENSE)
 [![CI](https://github.com/IonDen/mlx-teacache/actions/workflows/ci.yml/badge.svg)](https://github.com/IonDen/mlx-teacache/actions/workflows/ci.yml)
 
-**TeaCache step-skipping for FLUX diffusion on Apple Silicon, in pure MLX.**
+**TeaCache step-skipping for FLUX, Qwen-Image & Z-Image diffusion on Apple Silicon, in pure MLX.**
 
 `mlx-teacache` is the first MLX port of TeaCache, a training-free inference optimization that predicts which denoising steps add little to the final image and reuses the previous step's output instead of running the full transformer. On FLUX.1-dev at 25 steps the polynomial gate skips 6 of 25 steps and produces a measured 1.46× wall-clock speedup with visually-equivalent output (SSIM ≥ 0.80 across a 5-prompt suite, ≥ 0.90 on the PR-gate prompt).
 
@@ -45,10 +45,10 @@ pip install "mlx-teacache[mflux]"
 uv add "mlx-teacache[mflux]"
 ```
 
-Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17,<0.18`.
+Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.19`.
 
 ```bash
-pip install "mlx-teacache==0.9.0[mflux]"  # pin for reproducibility
+pip install "mlx-teacache==0.9.1[mflux]"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -285,7 +285,7 @@ The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exc
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
-The mflux pin is strict at `>=0.17,<0.18`. Bumping it is a deliberate release.
+The mflux pin is strict at `>=0.17.5,<0.19`. Bumping it is a deliberate release.
 
 Calling `flux.parameters()` at the parent level can miss transformer parameters while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first.
 

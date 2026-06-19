@@ -7,6 +7,18 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-06-19
+
+Maintenance release: supports the current mflux, with no change to any generated image.
+
+### Changed
+- **Allow mflux 0.18.x** (pin `>=0.17.5,<0.19`). The lower bound rises to 0.17.5, the version v0.9.0 shipped and was validated on (0.17.0–0.17.4 were never validated). No library code changed: the integration ports the same private mflux internals, which 0.18.0 leaves intact, so output matches v0.9.0. Compatibility was checked per variant against the installed 0.18.0 source and confirmed by generating with FLUX.1, FLUX.2 Klein, Z-Image, and Qwen-Image.
+- PyPI keywords and the package description now name Qwen-Image and Z-Image, not only FLUX.
+
+### Added
+- A weight-free contract test pinning the real-mflux structures the integration relies on (the callback-registry layout, each variant's model-config aliases, and the precision default), so a future mflux change to any of them surfaces in CI instead of at generation time.
+- A CI job that runs the fast lane against the lowest supported mflux (0.17.5), guarding the lower bound.
+
 ## [0.9.0] — 2026-06-18
 
 ### Added

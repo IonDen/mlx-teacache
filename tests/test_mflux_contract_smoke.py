@@ -15,13 +15,14 @@ import mlx.core as mx
 import pytest
 
 from mlx_teacache.variants.flux1_dev import detect as flux1_detect
+from mlx_teacache.variants.flux1_schnell import detect as flux1_schnell_detect
 from mlx_teacache.variants.flux2_klein_base_4b import detect as flux2_detect
 from mlx_teacache.variants.qwen_image import detect as qwen_detect
 from mlx_teacache.variants.z_image_base import detect as zimage_detect
 
 
 def test_callback_registry_exposes_list_attributes() -> None:
-    """_remove_callback_by_identity walks these four lists; a rename/retype breaks restore()."""
+    """These four are the PRIMARY callback lists _remove_callback_by_identity walks during restore(). It also has a suffixed-name fallback (before_loop_callbacks, etc.), so a bare-name rename in mflux would red THIS test as a heads-up even if production's fallback still carries it — treat a failure as 'go re-read _remove_callback_by_identity', not necessarily a hard break."""
     from mflux.callbacks.callback_registry import CallbackRegistry
 
     reg = CallbackRegistry()
@@ -33,6 +34,7 @@ def test_modelconfig_precision_is_bfloat16() -> None:
     """The FLUX.2 forwards hard-cast temb to ModelConfig.precision; a default flip
     silently shifts compute precision (transparently passed through, but the audit
     must know if it changed)."""
+    # Consumed by variants/flux2_klein_base_4b/integration.py: temb.astype(ModelConfig.precision) (3 sites).
     from mflux.models.common.config.model_config import ModelConfig
 
     assert ModelConfig.precision == mx.bfloat16
@@ -42,6 +44,7 @@ def test_modelconfig_precision_is_bfloat16() -> None:
     "matches, factory_name",
     [
         (flux1_detect.matches, "dev"),
+        (flux1_schnell_detect.matches, "schnell"),
         (flux2_detect.matches, "flux2_klein_base_4b"),
         (qwen_detect.matches, "qwen_image"),
         (zimage_detect.matches, "z_image"),

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mlx-teacache"
 dynamic = ["version"]
-description = "TeaCache step-skipping for FLUX diffusion on Apple Silicon, in pure MLX"
+description = "TeaCache step-skipping for FLUX, Qwen-Image & Z-Image diffusion on Apple Silicon, in pure MLX"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -14,7 +14,7 @@ authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
 keywords = [
     "mlx", "apple-silicon", "diffusion", "flux", "flux1", "flux2",
     "mflux", "teacache", "inference-acceleration", "step-skipping",
-    "image-generation", "cfg",
+    "image-generation", "cfg", "qwen-image", "qwen", "z-image",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

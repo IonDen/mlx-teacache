@@ -76,6 +76,24 @@ jobs:
           name: coverage-mflux-${{ matrix.python-version }}
           path: coverage-mflux-${{ matrix.python-version }}.xml
 
+  test-mflux-floor:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install test-mflux, then pin mflux to the floor (0.17.5)
+        run: |
+          uv sync --group test-mflux
+          uv pip install "mflux==0.17.5"
+      - name: Verify floor version + run fast mflux lane (no re-sync, no coverage)
+        run: |
+          uv run --no-sync python -c "import importlib.metadata as m; v=m.version('mflux'); print('mflux', v); assert v.startswith('0.17.5'), v"
+          uv run --no-sync pytest -m "not parity and not slow and not benchmark and not network"
+
   coverage:
     needs: [test-pure-core, test-mflux]
     runs-on: ubuntu-latest

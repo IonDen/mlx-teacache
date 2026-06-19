@@ -73,6 +73,7 @@ _MFLUX_FILES = {
     "test_integration_slow.py",
     "test_perf.py",
     "test_detect.py",  # imports mflux types for variant detection
+    "test_mflux_contract_smoke.py",
 }
 
 

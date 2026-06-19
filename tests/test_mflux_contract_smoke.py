@@ -16,9 +16,9 @@ import pytest
 
 from mlx_teacache.variants.flux1_dev import detect as flux1_detect
 from mlx_teacache.variants.flux1_schnell import detect as flux1_schnell_detect
-from mlx_teacache.variants.flux2_klein_base_4b import detect as flux2_klein_base_4b_detect
 from mlx_teacache.variants.flux2_klein_4b import detect as flux2_klein_4b_detect
 from mlx_teacache.variants.flux2_klein_9b import detect as flux2_klein_9b_detect
+from mlx_teacache.variants.flux2_klein_base_4b import detect as flux2_klein_base_4b_detect
 from mlx_teacache.variants.flux2_klein_base_9b import detect as flux2_klein_base_9b_detect
 from mlx_teacache.variants.qwen_image import detect as qwen_detect
 from mlx_teacache.variants.z_image_base import detect as zimage_detect

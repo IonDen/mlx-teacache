@@ -307,6 +307,14 @@ Apache-2.0. See `LICENSE` and `NOTICE`.
 - [filipstrand/mflux](https://github.com/filipstrand/mflux) — MLX FLUX runner this library integrates with.
 - [Apple ML Explore](https://github.com/ml-explore/mlx) — MLX.
 
+## Sister projects
+
+Other MLX libraries for Apple Silicon:
+
+- [mlx-taef](https://github.com/IonDen/mlx-taef) — tiny autoencoders for fast diffusion-latent previews and low-memory decode (FLUX / SD).
+- [mlx-model-doctor](https://github.com/IonDen/mlx-model-doctor) — validate an MLX / Hugging Face model repo before you load it (config, tokenizer, safetensors, memory).
+- [mlx-quant-fidelity](https://github.com/IonDen/mlx-quant-fidelity) — measure how much quality a quantization costs (KL divergence, top-token flips, perplexity delta).
+
 ---
 
 By Denis Ineshin · [ineshin.space](https://ineshin.space)

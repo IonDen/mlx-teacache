@@ -24,7 +24,7 @@ def apply_teacache(
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,
 ) -> TeaCacheHandle:
-    """Enable TeaCache step-skipping on an mflux Flux1 / Flux2Klein instance.
+    """Enable TeaCache step-skipping on a supported mflux FLUX, Qwen-Image, or Z-Image model.
 
     Walks the variant registry; the first variant whose matches(flux) returns
     True wins, then its integration module is loaded lazily and dispatched with

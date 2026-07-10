@@ -81,8 +81,8 @@ def apply(
     internal._callback_instance = callback
 
     try:
-        flux.callbacks.register(callback)
         _rollbacks_so_far.append(lambda: _remove_callback_by_identity(flux.callbacks, callback))
+        flux.callbacks.register(callback)
         wrap_generate_image(flux, internal)
     except BaseException:
         for _undo in reversed(_rollbacks_so_far):

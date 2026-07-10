@@ -91,6 +91,33 @@ def test_re_apply_after_restore_succeeds():
     h2.restore()
 
 
+def test_failed_restore_blocks_reapply_until_retry_succeeds():
+    flux = _make_fake_flux1()
+    handle = apply_teacache(flux, rel_l1_thresh=0.25)
+    callback = handle._callback_instance
+    attempts = 0
+
+    def _fail_once():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient rollback failure")
+
+    handle._patch.rollbacks.append(_fail_once)
+
+    with pytest.raises(RuntimeError, match="transient rollback failure"):
+        handle.restore()
+    assert flux._teacache_handle is handle
+    assert callback not in flux.callbacks.before_loop
+    with pytest.raises(AlreadyPatchedError):
+        apply_teacache(flux)
+
+    handle.restore()
+    assert getattr(flux, "_teacache_handle", None) is None
+    reapplied = apply_teacache(flux, rel_l1_thresh=0.25)
+    reapplied.restore()
+
+
 def test_context_manager_restores():
     flux = _make_fake_flux1()
     original_transformer = flux.transformer
@@ -202,15 +229,22 @@ def test_apply_rollback_on_failure_flux1(alias, patch_module, monkeypatch):
 def test_apply_rollback_on_register_failure_flux1(alias, monkeypatch):
     flux = _make_fake_flux1(alias)
     original_transformer = flux.transformer
+    before = {
+        name: list(getattr(flux.callbacks, name))
+        for name in ("before_loop", "in_loop", "after_loop", "interrupt")
+    }
 
-    def _boom(_callback):
+    def _partially_register_then_boom(callback):
+        flux.callbacks.before_loop.append(callback)
         raise RuntimeError("register boom")
 
-    monkeypatch.setattr(flux.callbacks, "register", _boom)
+    monkeypatch.setattr(flux.callbacks, "register", _partially_register_then_boom)
     with pytest.raises(RuntimeError, match="register boom"):
         apply_teacache(flux)
     assert flux.transformer is original_transformer, "proxy transformer left installed"
     assert "_teacache_handle" not in vars(flux), "sentinel left behind"
+    for name, expected in before.items():
+        assert getattr(flux.callbacks, name) == expected, f"callback left in {name}"
 
 
 @pytest.mark.parity

@@ -9,10 +9,10 @@ from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 
 
-def _make_handle(rollbacks, on_restored=None):
+def _make_handle(rollbacks, finalizers=None, on_restored=None):
     patch = VariantPatch(
         rollbacks=list(rollbacks),
-        finalizers=[],
+        finalizers=list(finalizers or []),
         on_restored=list(on_restored or []),
     )
     return TeaCacheHandle(
@@ -34,6 +34,32 @@ def test_restore_runs_all_rollbacks_even_when_one_raises():
     with pytest.raises(RuntimeError, match="rollback boom"):
         handle.restore()
     assert ran == ["third", "first"]
+    assert handle._torn_down is False
+
+
+def test_restore_runs_all_finalizers_after_action_failures():
+    ran: list[str] = []
+
+    def _raise(label, message):
+        ran.append(label)
+        raise RuntimeError(message)
+
+    handle = _make_handle(
+        rollbacks=[
+            lambda: ran.append("rollback-ok"),
+            lambda: _raise("rollback-fail", "rollback boom"),
+        ],
+        finalizers=[
+            lambda: _raise("finalizer-fail", "finalizer boom"),
+            lambda: ran.append("finalizer-ok"),
+        ],
+        on_restored=[lambda: ran.append("on-restored")],
+    )
+
+    with pytest.raises(RuntimeError, match="rollback boom"):
+        handle.restore()
+
+    assert ran == ["rollback-fail", "rollback-ok", "finalizer-fail", "finalizer-ok"]
     assert handle._torn_down is False
 
 

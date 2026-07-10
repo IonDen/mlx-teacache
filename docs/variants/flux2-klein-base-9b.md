@@ -35,7 +35,7 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps,
 
 > **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. That measurement was inflated by same-process MLX state leakage in the v0.5.x bench harness: vanilla ran cold while the wrapper inherited warm MLX allocator state from it, so the wall-clock difference conflated the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness makes every condition cold and exposes the honest 1.36×.
 
-Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.6.0_bench_klein_base_9b.json`; side-by-side images at `tests/_artifacts/bench_images/klein-base-9b/`.
+Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.6.0_bench_klein_base_9b.json`; regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 ## Coefficient provenance — intentional reuse
 

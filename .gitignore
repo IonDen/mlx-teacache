@@ -20,7 +20,7 @@ tests/_artifacts/
 # committed comparison images for COMPARISON.md and the recoverable
 # comparison_report.json. Keep them tracked.
 src/mlx_teacache/_version.py
-  docs/superpowers/
+docs/superpowers/
 
 # Per-prompt calibration chunk files (intermediate, resumable scratch). The
 # aggregated scripts/_calibration_qwen.json IS committed — only the chunks are scratch.

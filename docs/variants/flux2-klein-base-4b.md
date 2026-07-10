@@ -35,7 +35,7 @@ At the 25-step `low_step` recipe (`guidance=1.0`) the gate skips 3/25 with **1.4
 
 > **Note on the v0.4.1 claim.** v0.4.1 reported 1.26× combined on this variant, decomposed as 1.16× gating × 1.09× compile-avoidance. The 1.26× combined number was honest within day-to-day noise; v0.6.0's subprocess-per-rep harness lands 1.23×, a 2.4% difference well inside any reasonable measurement band. The *decomposition* is what needed correcting. With subprocess isolation, gating is doing essentially all the work (1.22×) and compile-avoidance is at noise level (1.01×). The v0.4.1 same-process harness had the wrapper inheriting warm allocator state, which got attributed to compile-avoidance.
 
-Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.6.0_bench_klein_base_4b.json`; side-by-side images at `tests/_artifacts/bench_images/klein-base-4b/`.
+Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.6.0_bench_klein_base_4b.json`; regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 The 0.17 default was chosen because the polynomial R² is low (0.106) and the engagement window is narrow:
 - At 0.20 (package default): 19/25 skips, SSIM ~0.76 — visibly degraded.

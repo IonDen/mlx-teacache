@@ -3,7 +3,7 @@
 Visual showcase of what the wrapper does on real generations. Two harnesses contribute to this page:
 
 - The `flux1-dev`, `flux2-klein-base-4b`, `z-image-base`, and `qwen-image` rows are from `scripts/bench_comparison.py` (subprocess-per-condition, three reps per subprocess; cold = rep 1, warm = median of reps 2 and 3). Full report: `_artifacts/comparison_report.json`. Committed images alongside this file under `_artifacts/comparison/<variant>/`. They share the portrait prompt and seed below; `z-image-base` renders at 640×896 q8 and `qwen-image` at 768×768 (a mixed-precision build, for quality on 32 GB — see its row), rather than the page's 768×1024.
-- The `flux2-klein-base-9b` row is from `scripts/bench_speedup.py --three-way --reps 3` (subprocess-per-rep — every rep gets a fresh interpreter, fully cold). Full report: `_artifacts/v0.6.0_bench_klein_base_9b.json`. Images under `tests/_artifacts/bench_images/klein-base-9b/`.
+- The `flux2-klein-base-9b` row is from `scripts/bench_speedup.py --three-way --reps 3` (subprocess-per-rep — every rep gets a fresh interpreter, fully cold). Full report: `_artifacts/v0.6.0_bench_klein_base_9b.json`. Regenerate the side-by-side images with `scripts/bench_comparison.py`.
 
 The two harnesses use different prompts and resolutions (the bench_comparison rows use the 768×1024 portrait listed below, except z-image-base at 640×896 and qwen-image at 768×768; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
 

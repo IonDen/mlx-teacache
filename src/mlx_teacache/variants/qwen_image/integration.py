@@ -401,10 +401,10 @@ def apply(
 
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
-    flux.callbacks.register(callback)
-    _rollbacks_so_far.append(lambda: _remove_callback_by_identity(flux.callbacks, callback))
 
     try:
+        flux.callbacks.register(callback)
+        _rollbacks_so_far.append(lambda: _remove_callback_by_identity(flux.callbacks, callback))
         _lifecycle.wrap_generate_image(flux, internal)
     except BaseException:
         for _undo in reversed(_rollbacks_so_far):

@@ -198,6 +198,21 @@ def test_apply_rollback_on_failure_flux1(alias, patch_module, monkeypatch):
     assert "_teacache_handle" not in vars(flux), "sentinel left behind"
 
 
+@pytest.mark.parametrize("alias", ["dev", "schnell"])
+def test_apply_rollback_on_register_failure_flux1(alias, monkeypatch):
+    flux = _make_fake_flux1(alias)
+    original_transformer = flux.transformer
+
+    def _boom(_callback):
+        raise RuntimeError("register boom")
+
+    monkeypatch.setattr(flux.callbacks, "register", _boom)
+    with pytest.raises(RuntimeError, match="register boom"):
+        apply_teacache(flux)
+    assert flux.transformer is original_transformer, "proxy transformer left installed"
+    assert "_teacache_handle" not in vars(flux), "sentinel left behind"
+
+
 @pytest.mark.parity
 def test_apply_teacache_accepts_flux2_klein_9b():
     """Smoke: apply_teacache returns a handle with the right variant_id on Klein 9B.

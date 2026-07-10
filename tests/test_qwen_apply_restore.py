@@ -3,6 +3,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from mlx_teacache.variants.qwen_image.integration import ProxyQwenTransformer, apply
 from tests._fakes import FaithfulCallbackRegistry
 
@@ -41,6 +43,19 @@ def test_restore_unsubscribes_lifecycle_callback() -> None:
     assert cb not in flux.callbacks.before_loop
     assert cb not in flux.callbacks.after_loop
     assert cb not in flux.callbacks.interrupt
+
+
+def test_apply_rollback_on_register_failure_qwen(monkeypatch) -> None:
+    flux = _fake_flux()
+    original = flux.transformer
+
+    def _boom(_callback):
+        raise RuntimeError("register boom")
+
+    monkeypatch.setattr(flux.callbacks, "register", _boom)
+    with pytest.raises(RuntimeError, match="register boom"):
+        apply(flux, rel_l1_thresh=0.25)
+    assert flux.transformer is original, "proxy transformer left installed"
 
 
 def test_proxy_delegates_parameters_to_inner() -> None:

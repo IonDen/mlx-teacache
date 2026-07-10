@@ -11,7 +11,7 @@ Only non-distilled variants are listed here. Distilled schedules (`flux1-schnell
 
 ## Test machine
 
-Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5 (q8 for the `z-image-base` row — its pinned recipe). mlx-teacache 0.9.0.
+Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5 (q8 for the `z-image-base` row — its pinned recipe). mlx-teacache 0.9.2.
 
 Shared inputs across every cell:
 

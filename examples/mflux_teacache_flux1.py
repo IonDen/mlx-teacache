@@ -1,8 +1,5 @@
 """mflux + mlx-teacache on FLUX.1-dev at 25 steps — the headline speedup.
 
-Target search query: "mflux TeaCache FLUX.1", "speed up FLUX dev Mac",
-"FLUX.1-dev faster Apple Silicon".
-
 Expected output: writes `flux1_teacache.webp` next to this script.
 Prints the TeaCache skip counts at the end so users can see the
 gate actually firing (FLUX.1-dev at 25 steps + default threshold

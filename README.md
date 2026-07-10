@@ -28,11 +28,10 @@ On FLUX.2 Klein at the distilled 4-8 step defaults the polynomial gate does not 
 Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.46× speedup.
 
 ```python
-from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
-from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.flux.variants.txt2img.flux import Flux1
 from mlx_teacache import apply_teacache
 
-flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_4b())
+flux = Flux1.from_name("dev")
 with apply_teacache(flux):  # default rel_l1_thresh=0.20
     flux.generate_image(prompt="a red apple", seed=42, num_inference_steps=25)
 ```

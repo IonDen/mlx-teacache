@@ -1,7 +1,6 @@
 """FLUX.2 Klein base 4B integration. Byte-for-byte port from v0.5.x:
 - src/mlx_teacache/integrations/mflux/flux2.py (proxy / factory)
 - src/mlx_teacache/integrations/mflux/forward.py FLUX.2 block:
-  * _flux2_compute_mod_in
   * _flux2_extract_mod_input
   * _flux2_run_body
   * flux2_forward_with_gate (no-CFG path)
@@ -65,28 +64,6 @@ def _step_decision_from_gate(decision: Any, *, step_idx: int, timestep: float) -
         accumulated_distance=decision.accumulated_distance,
         decision=decision.kind,
     )
-
-
-def _flux2_compute_mod_in(inner: Any, hidden_states: mx.array, timestep: mx.array) -> Any:
-    """Shared helper: compute the TeaCache gating signal from raw inputs.
-
-    Performs the exact same preprocessing as flux2_forward_with_gate up to
-    the modulation-extraction point, so calibration recorders and the runtime
-    gate see byte-identical mod_in tensors. (Per audit medium #6.)"""
-    from mflux.models.common.config.model_config import ModelConfig
-
-    if not isinstance(timestep, mx.array):
-        timestep = mx.array(timestep, dtype=hidden_states.dtype)
-    if timestep.ndim == 0:
-        timestep = mx.full((hidden_states.shape[0],), timestep, dtype=hidden_states.dtype)
-    timestep = timestep.astype(hidden_states.dtype)
-    timestep_scale = mx.where(mx.max(timestep) <= 1.0, 1000.0, 1.0).astype(hidden_states.dtype)
-    timestep = timestep * timestep_scale
-    temb = inner.time_guidance_embed(timestep, None)
-    temb = temb.astype(ModelConfig.precision)
-    body_in = inner.x_embedder(hidden_states)
-    temb_mod_params_img = inner.double_stream_modulation_img(temb)
-    return _flux2_extract_mod_input(inner, body_in, temb_mod_params_img)
 
 
 def _flux2_extract_mod_input(
@@ -177,8 +154,6 @@ def flux2_forward_with_gate(
     stats = handle._state.stats
 
     # 1. Prelude (mirrors Flux2Transformer.__call__ lines 76-109).
-    #    Uses the shared _flux2_compute_mod_in helper for mod_in extraction so
-    #    calibration and production see byte-identical signals (audit medium #6).
     from mflux.models.common.config.model_config import ModelConfig
 
     if not isinstance(timestep, mx.array):
@@ -246,7 +221,7 @@ def flux2_forward_with_gate(
     # 1b. Slow path: TeaCache gating live. Build the gating tensors.
     body_in_concat = mx.concatenate([encoder_hidden_states, body_in], axis=1)
 
-    # 2. Extract mod_in (same value _flux2_compute_mod_in would return).
+    # 2. Extract mod_in from the first block's modulated input.
     mod_in = _flux2_extract_mod_input(inner, body_in, temb_mod_params_img)
 
     # 3. Defensive shape check.

@@ -90,17 +90,16 @@ def apply_teacache(
             # class, so dynamic attributes can be set without modifying handle.py.
             handle.variant_id = variant_id  # type: ignore[attr-defined]
 
-            # Set the sentinel on flux so AlreadyPatchedError fires on
-            # double-apply, and register a rollback that clears it when
-            # restore() runs. Rollbacks execute in reverse; appending here
-            # means this rollback runs FIRST (after all variant rollbacks).
+            # Set the sentinel so AlreadyPatchedError fires on double-apply.
+            # Clear it only after every teardown action succeeds, preventing a
+            # re-apply from nesting on a half-restored model.
             flux._teacache_handle = handle
 
             def _clear_sentinel(_flux: Any = flux, _handle: Any = handle) -> None:
                 if getattr(_flux, "_teacache_handle", None) is _handle:
                     delattr(_flux, "_teacache_handle")
 
-            handle._patch.rollbacks.append(_clear_sentinel)
+            handle._patch.on_restored.append(_clear_sentinel)
             return handle
 
     model_config = getattr(flux, "model_config", None)

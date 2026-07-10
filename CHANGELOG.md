@@ -7,6 +7,20 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-07-10
+
+Maintenance release. Gate math, coefficients, and generated output are unchanged.
+
+### Fixed
+- A callback-registration failure during `apply_teacache()` now restores the original FLUX.1 or Qwen transformer instead of leaving a proxy installed without a handle. `restore()` also attempts every teardown action before reporting a failure. The double-apply sentinel remains set until teardown succeeds, so a second patch cannot be nested on a partially restored model.
+- The test-suite memory guard now derives a positive wired-memory cap from each machine's recommended working-set limit. Wired and advisory memory caps are installed independently, so an unavailable wired-limit API no longer prevents the soft cap from being applied.
+- The pinned README install command now uses valid PEP 508 ordering: `mlx-teacache[mflux]==0.9.2`.
+
+### Changed
+- Source distributions no longer include the test tree without its excluded reference fixtures. A package smoke job verifies that the sdist stays lean and does not cite ignored test artifacts.
+- CI now runs the fast suite against both mflux 0.17.5 and the newest release allowed by `mflux>=0.17.5,<0.19`.
+- Public docs no longer point at ignored benchmark and threshold-sweep outputs. The API docs include Qwen-Image's `0.30` default, the first README example uses the recommended FLUX.1-dev recipe, and stale test routing and integration commentary were removed.
+
 ## [0.9.1] — 2026-06-19
 
 Maintenance release: supports the current mflux, with no change to any generated image.

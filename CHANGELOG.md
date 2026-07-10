@@ -180,7 +180,7 @@ Three-way bench on `flux2-klein-base-4b` at the same recipe (3 reps, subprocess-
 
 The 1.23× combined lands inside the day-to-day noise band on the v0.4.1 claim of 1.26×, so the verbatim ports preserved v0.4.1 behavior. What did shift is the decomposition: v0.4.1 attributed 1.16× to gating and 1.09× to compile-avoidance, but subprocess isolation reveals that gating is doing essentially all the work (1.22×) and compile-avoidance is at noise level (1.01×). The 4B decomposition matches the 9B finding (gating 1.34×, compile-avoidance 1.02×): the same mechanism dominance across both base variants.
 
-Full evidence: `_artifacts/v0.6.0_bench_klein_base_9b.json`, `_artifacts/v0.6.0_bench_klein_base_4b.json`, and `tests/_artifacts/bench_images/{klein-base-9b,klein-base-4b}/`.
+Full evidence: `_artifacts/v0.6.0_bench_klein_base_9b.json` and `_artifacts/v0.6.0_bench_klein_base_4b.json`. Regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 ### Why this refactor
 

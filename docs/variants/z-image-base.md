@@ -38,7 +38,7 @@ The portrait row in [COMPARISON.md](../../COMPARISON.md) is a separate generatio
 
 ## Threshold sweep
 
-`scripts/sweep_threshold_z_image.py` sweeps `rel_l1_thresh` at the 512² recipe and records skip count + SSIM vs vanilla per threshold. SSIM holds ≥ 0.99 through 0.12 (15/48 skips, SSIM 0.991), then drops to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first knee — the last threshold before the cliff. Full sweep: `tests/_artifacts/sweep_z_image/results_z_image.json`.
+`scripts/sweep_threshold_z_image.py` sweeps `rel_l1_thresh` at the 512² recipe and records skip count + SSIM vs vanilla per threshold. SSIM holds ≥ 0.99 through 0.12 (15/48 skips, SSIM 0.991), then drops to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first knee — the last threshold before the cliff.
 
 ## CFG (guidance > 1.0)
 

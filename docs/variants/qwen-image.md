@@ -61,7 +61,7 @@ The gate signal (Signal A) is unaffected enough by this that the shipped coeffic
 
 ## Threshold sweep
 
-`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe and records skip count + SSIM vs vanilla per threshold. SSIM degrades **gracefully — no cliff**: 0.9951 at 0.20, 0.9883 at 0.25, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50. The default 0.30 takes ~50% of the active steps (24 of 48) at SSIM 0.987 — visually identical to vanilla — while leaving margin. The sweep's single-rep wall-clock is thermal noise (subprocess-per-threshold, cold each); the headline speedup comes from the multi-rep bench. Full sweep: `tests/_artifacts/sweep_qwen/results_qwen.json`.
+`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe and records skip count + SSIM vs vanilla per threshold. SSIM degrades **gracefully — no cliff**: 0.9951 at 0.20, 0.9883 at 0.25, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50. The default 0.30 takes ~50% of the active steps (24 of 48) at SSIM 0.987 — visually identical to vanilla — while leaving margin. The sweep's single-rep wall-clock is thermal noise (subprocess-per-threshold, cold each); the headline speedup comes from the multi-rep bench.
 
 ## CFG (guidance > 1.0)
 

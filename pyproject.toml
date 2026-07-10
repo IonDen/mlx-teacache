@@ -62,7 +62,7 @@ source = "vcs"
 version-file = "src/mlx_teacache/_version.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/", "tests/", "scripts/", "docs/", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md", "pyproject.toml"]
+include = ["src/", "scripts/", "docs/", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md", "pyproject.toml"]
 exclude = [
     ".hypothesis/",
     "tests/reference/",          # nested per-variant subdirs and all .safetensors

@@ -94,6 +94,18 @@ jobs:
           uv run --no-sync python -c "import importlib.metadata as m; v=m.version('mflux'); print('mflux', v); assert v.startswith('0.17.5'), v"
           uv run --no-sync pytest -m "not parity and not slow and not benchmark and not network"
 
+  sdist-smoke:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Build and verify the lean sdist
+        run: bash scripts/sdist_smoke.sh
+
   coverage:
     needs: [test-pure-core, test-mflux]
     runs-on: ubuntu-latest

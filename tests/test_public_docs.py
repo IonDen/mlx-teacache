@@ -47,3 +47,18 @@ def test_no_public_doc_cites_gitignored_artifacts():
             if "tests/_artifacts/" in line:
                 offenders.append(f"{relative_path}:{line_number}")
     assert not offenders, f"public docs cite gitignored tests/_artifacts/: {offenders}"
+
+
+def test_mflux_files_allowlist_all_exist():
+    from tests.conftest import _MFLUX_FILES
+
+    tests_dir = _REPO / "tests"
+    missing = sorted(filename for filename in _MFLUX_FILES if not (tests_dir / filename).exists())
+    assert not missing, f"_MFLUX_FILES lists non-existent files: {missing}"
+
+
+def test_apply_teacache_docstring_lists_qwen_default():
+    from mlx_teacache import apply_teacache
+
+    doc = apply_teacache.__doc__ or ""
+    assert "0.30" in doc and "qwen" in doc.lower()

@@ -26,5 +26,6 @@ src/mlx_teacache/_version.py
 # aggregated scripts/_calibration_qwen.json IS committed — only the chunks are scratch.
 scripts/_calib_qwen_chunks/
 
-# Local Claude working layer — a thin pointer to ../CLAUDE.md. Not committed.
+# Local agent working layers. Not committed.
 /CLAUDE.md
+/AGENTS.md

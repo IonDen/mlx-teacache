@@ -62,3 +62,16 @@ def test_apply_teacache_docstring_lists_qwen_default():
 
     doc = apply_teacache.__doc__ or ""
     assert "0.30" in doc and "qwen" in doc.lower()
+
+
+def test_public_docstring_summaries_name_all_supported_model_families():
+    import mlx_teacache
+    from mlx_teacache import apply_teacache
+
+    summaries = [
+        (mlx_teacache.__doc__ or "").splitlines()[0].lower(),
+        (apply_teacache.__doc__ or "").splitlines()[0].lower(),
+    ]
+    for summary in summaries:
+        for family in ("flux", "qwen-image", "z-image"):
+            assert family in summary, f"{family} missing from public summary: {summary!r}"

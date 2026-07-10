@@ -1,25 +1,30 @@
 """Unit tests for the test-session MLX memory guard."""
 
+import runpy
+import sys
+from pathlib import Path
+from types import ModuleType
+
 import pytest
 
+from tests import _memory_guard
 from tests._memory_guard import apply_mlx_memory_caps, wired_limit_target
 
 GIB = 1024**3
+_REPO = Path(__file__).resolve().parent.parent
 
 
 @pytest.mark.parametrize("total_gb", [7, 16, 32, 64, 128])
-def test_target_is_positive_and_strictly_below_ceiling(total_gb):
+def test_target_matches_policy_across_machine_sizes(total_gb):
     total = total_gb * GIB
     max_working_set = int(total_gb * 0.78 * GIB)
     target = wired_limit_target(total, max_working_set)
-    assert target is not None
-    assert 0 < target < max_working_set
+    assert target == min(int(total * 0.60), int(max_working_set * 0.90))
 
 
 def test_clamps_below_small_working_set_ceiling():
     target = wired_limit_target(32 * GIB, 18 * GIB)
-    assert target is not None
-    assert 0 < target < 18 * GIB
+    assert target == int(18 * GIB * 0.90)
 
 
 @pytest.mark.parametrize(
@@ -57,9 +62,25 @@ def test_apply_caps_sets_both_on_a_healthy_device():
     mx = _FakeMx({"memory_size": 32 * GIB, "max_recommended_working_set_size": max_working_set})
     messages: list[str] = []
     apply_mlx_memory_caps(mx, messages.append)
-    assert mx.wired_calls and 0 < mx.wired_calls[0] < max_working_set
-    assert mx.memory_calls
+    assert mx.wired_calls == [min(int(32 * GIB * 0.60), int(max_working_set * 0.90))]
+    assert mx.memory_calls == [int(32 * GIB * 0.70)]
     assert messages == []
+
+
+def test_conftest_installs_memory_caps_at_import(monkeypatch):
+    fake_mlx = ModuleType("mlx")
+    fake_mlx.__path__ = []
+    fake_core = ModuleType("mlx.core")
+    fake_mlx.core = fake_core
+    calls = []
+
+    monkeypatch.setitem(sys.modules, "mlx", fake_mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", fake_core)
+    monkeypatch.setattr(_memory_guard, "apply_mlx_memory_caps", lambda mx, emit: calls.append(mx))
+
+    runpy.run_path(str(_REPO / "tests/conftest.py"), run_name="_memory_guard_conftest_probe")
+
+    assert calls == [fake_core]
 
 
 def test_wired_failure_still_attempts_memory_cap_and_emits():

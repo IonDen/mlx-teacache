@@ -48,14 +48,21 @@ def test_restore_unsubscribes_lifecycle_callback() -> None:
 def test_apply_rollback_on_register_failure_qwen(monkeypatch) -> None:
     flux = _fake_flux()
     original = flux.transformer
+    before = {
+        name: list(getattr(flux.callbacks, name))
+        for name in ("before_loop", "in_loop", "after_loop", "interrupt")
+    }
 
-    def _boom(_callback):
+    def _partially_register_then_boom(callback):
+        flux.callbacks.before_loop.append(callback)
         raise RuntimeError("register boom")
 
-    monkeypatch.setattr(flux.callbacks, "register", _boom)
+    monkeypatch.setattr(flux.callbacks, "register", _partially_register_then_boom)
     with pytest.raises(RuntimeError, match="register boom"):
         apply(flux, rel_l1_thresh=0.25)
     assert flux.transformer is original, "proxy transformer left installed"
+    for name, expected in before.items():
+        assert getattr(flux.callbacks, name) == expected, f"callback left in {name}"
 
 
 def test_proxy_delegates_parameters_to_inner() -> None:

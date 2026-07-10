@@ -20,39 +20,20 @@ memory — not the soft `set_memory_limit` — is the root cause."""
 
 from __future__ import annotations
 
+import sys
+
 import pytest
+
+from tests._memory_guard import apply_mlx_memory_caps
 
 
 def _install_mlx_memory_caps() -> None:
-    """Hard-cap Metal wired memory before any test imports MLX models.
-
-    Skipped silently if MLX isn't importable (pure-core CI without MLX
-    installed) or if the platform pre-dates macOS 15 (where
-    `set_wired_limit` is a no-op). The numbers below are tuned for
-    32 GB Apple Silicon; on bigger machines they still apply (just
-    leave more headroom)."""
+    """Hard-cap Metal wired memory before any test imports MLX models."""
     try:
         import mlx.core as mx
     except ImportError:
         return
-
-    info = mx.device_info()
-    total_gb = info.get("memory_size", 0) / 1024**3
-    # 32 GB machines: cap wired at 20 GB (well under the ~25 GB system limit),
-    # cap memory at 22 GB. On larger machines, scale proportionally but keep
-    # at least 8 GB headroom for the OS + other apps.
-    if total_gb <= 36:
-        wired_gb, memory_gb = 20, 22
-    else:
-        # Leave ~12 GB for OS on bigger machines; cap wired 2 GB below memory.
-        memory_gb = int(total_gb - 12)
-        wired_gb = memory_gb - 2
-
-    try:
-        mx.set_wired_limit(int(wired_gb * 1024**3))
-        mx.set_memory_limit(int(memory_gb * 1024**3))
-    except Exception:  # noqa: BLE001  # set_wired_limit is macOS 15+ only
-        pass
+    apply_mlx_memory_caps(mx, lambda message: print(f"mlx-teacache tests: {message}", file=sys.stderr))
 
 
 _install_mlx_memory_caps()

@@ -30,6 +30,11 @@ documents a uniform-q4 portrait artifact and the mixed q8/q4/bf16 recipe that re
 controlled pair for about 1.9 GiB of additional peak MLX allocation. The recipe changes model
 construction, not TeaCache.
 
+**[Why the TeaCache gate did not engage on short distilled FLUX schedules](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md)**
+documents the zero-skip negative result on the 8-step distilled Klein schedules and the
+measurement practice it forced: skip counts published next to every wall-clock number, so a
+speedup cannot be mis-attributed to caching.
+
 ## What it does
 
 Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.46× speedup.
@@ -153,7 +158,7 @@ The wrapper helps when the underlying schedule actually has cacheable redundancy
 In practice, that means:
 
 - Use mlx-teacache for **`flux1-dev`** at 20-50 steps, the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps with or without CFG, **`z-image-base`** at 50 steps with CFG, and **`qwen-image`** at 50 steps with CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
-- Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux.
+- Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux. The full story of that zero-skip result is in [the distilled-schedules research note](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md).
 
 There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.
 

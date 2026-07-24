@@ -1,0 +1,38 @@
+@startuml
+title One gate, two schedules: where the skip branch is actually reached
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam defaultFontName Helvetica
+skinparam defaultFontColor #111827
+skinparam ArrowColor #4B5563
+skinparam ArrowFontColor #374151
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+  BackgroundColor #F8FAFC
+}
+
+rectangle "Denoising step\nCheap input signal: relative-L1 of the modulated\nblock-0 input against the previous step" as signal #EDE9FE
+
+rectangle "Calibrated degree-4 polynomial\npredicts the body-output change from the signal" as poly #FEF3C7
+rectangle "Accumulator adds the prediction\n(running total since the last full compute)" as acc #FEF3C7
+rectangle "Accumulated prediction under\nrel_l1_thresh (default 0.20)?" as gate #FEF3C7
+
+rectangle "Skip the transformer body\nReuse the cached residual; prelude + tail only" as skip #DCFCE7
+rectangle "Compute the step in full\nRefresh the cache; reset the accumulator to 0" as compute #F8FAFC
+
+rectangle "FLUX.1-dev, 25-step schedule\nPredicted changes stay small for stretches,\nso the accumulator crawls toward 0.20\nMeasured: 6 of 25 steps skipped" as dev #DCFCE7
+rectangle "FLUX.2 Klein 4B / 9B, 8-step distilled schedules\nThe shipped fit predicts above 0.20 across the\nobserved signal range (0.1316-0.4498 for 9B)\nMeasured: 0 of 8 steps skipped, every repetition" as klein #FECACA
+
+signal -down-> poly
+poly -down-> acc
+acc -down-> gate
+gate -down-> skip : yes
+gate -down-> compute : no
+skip -down-> dev : reached repeatedly
+compute -down-> klein : the only branch ever reached
+
+caption The decision flow is conceptual structure; the two skip counts are measured, repetition-stable results. The Klein branch summarizes the calibration finding, not a separate measurement.
+@enduml

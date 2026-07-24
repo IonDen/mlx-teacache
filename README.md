@@ -23,6 +23,13 @@ On FLUX.2 Klein at the distilled 4-8 step defaults the polynomial gate does not 
 
 **You want both?** They compose cleanly. mflux 4-step Klein + TeaCache + TAEF2 previews = 1.30× wall-clock and 26% less peak memory vs vanilla.
 
+## Research notes
+
+**[Qwen-Image mixed precision on a 32 GB Mac](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/qwen-image-mixed-precision-on-a-32-gb-mac.md)**
+documents a uniform-q4 portrait artifact and the mixed q8/q4/bf16 recipe that removed it in one
+controlled pair for about 1.9 GiB of additional peak MLX allocation. The recipe changes model
+construction, not TeaCache.
+
 ## What it does
 
 Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.46× speedup.

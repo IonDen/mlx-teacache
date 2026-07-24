@@ -1,0 +1,49 @@
+@startuml
+title Qwen-Image mixed-precision allocation
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 15
+skinparam defaultFontColor #111827
+skinparam ArrowColor #475569
+skinparam ArrowThickness 1.4
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+  BackgroundColor #F8FAFC
+}
+skinparam package {
+  BorderColor #64748B
+  FontColor #111827
+  BackgroundColor #F8FAFC
+}
+
+top to bottom direction
+
+rectangle "Inputs and conditioning\nimg_in, txt_in, time_text_embed\nbf16" as inputs #DCFCE7
+
+package "Transformer: 60 blocks" as transformer {
+  rectangle "Blocks 0 through 5\nfirst 6 blocks\n8-bit, group size 64" as first #DBEAFE
+  rectangle "Blocks 6 through 53\nmiddle 48 blocks\n4-bit requested default" as middle #FEF3C7
+  rectangle "Blocks 54 through 59\nlast 6 blocks\n8-bit, group size 64" as last #DBEAFE
+
+  first -down-> middle
+  middle -down-> last
+}
+
+rectangle "Output path\nnorm_out, proj_out\nbf16" as output #DCFCE7
+
+inputs -down-> first
+last -down-> output
+
+note right of transformer
+  Load report for the complete build:
+  bf16: 6 quantizable modules
+  8-bit: 168 modules
+  4-bit: 672 modules
+end note
+
+caption Conceptual precision map. This is not a sensitivity measurement or ablation result, and it is not to scale.
+@enduml

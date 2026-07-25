@@ -2,6 +2,8 @@
 
 *A negative result from `mlx-teacache`, and the measurement practice it forced*
 
+> 📄 [Read on the website](https://ineshin.space/papers/why-teacache-does-not-engage-on-short-distilled-schedules/) — same paper, formatted for reading.
+
 A wall-clock improvement can be real while its explanation is wrong. In May 2026 the
 `mlx-teacache` project shipped, and then corrected, exactly that combination: its TeaCache wrapper
 ran measurably faster than vanilla [mflux](https://github.com/filipstrand/mflux) on FLUX.2 Klein's

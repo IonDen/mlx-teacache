@@ -3,6 +3,8 @@
 *A case study from `mlx-teacache`'s Qwen-Image showcase: diagnosing a visual artifact
 in a uniform 4-bit build and removing it for about 1.9 GiB of additional MLX allocation*
 
+> 📄 [Read on the website](https://ineshin.space/papers/qwen-image-mixed-precision-on-a-32-gb-mac/) — same paper, formatted for reading.
+
 [Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) has about 20 billion parameters. Its bf16
 weights alone need roughly 40 GiB, so a 32 GB Mac calls for lower precision. Our first baseline,
 mflux with `quantize=4`, produced a portrait with a cracked skin texture. Changes to resolution,

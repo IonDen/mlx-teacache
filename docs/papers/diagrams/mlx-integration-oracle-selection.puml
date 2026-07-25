@@ -1,0 +1,49 @@
+@startuml
+title One integration, four questions, four test oracles
+
+top to bottom direction
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam defaultFontName Helvetica
+skinparam defaultFontColor #111827
+skinparam ArrowColor #4B5563
+skinparam ArrowFontColor #374151
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+  BackgroundColor #F8FAFC
+}
+
+rectangle "What claim should\nthe test support?" as claim #DBEAFE
+
+rectangle "1. Did the committed\nartifact change?" as q1 #EDE9FE
+rectangle "2. Does the no-op wrapper\npreserve the underlying math?" as q2 #EDE9FE
+rectangle "3. Is a changed execution\npath numerically equivalent?" as q3 #EDE9FE
+rectangle "4. Is the intentionally\napproximate output acceptable?" as q4 #EDE9FE
+
+rectangle "Artifact-drift oracle\nExact SHA-256 + pinned upstream revision\nFailure means: something moved" as o1 #F8FAFC
+rectangle "Paired same-process oracle\nvanilla -> wrapper at threshold 0 -> restore -> vanilla\nExact only where measurement supports it; assert 0 skips" as o2 #DCFCE7
+rectangle "Per-variant numerical oracle\nUse byte equality where stable; otherwise use a documented gate\nMark it provisional when the full distribution is missing" as o3 #FEF3C7
+rectangle "Quality + engagement oracle\nSSIM against same-process vanilla\nplus a calibrated skip-count band" as o4 #FCE7F3
+
+claim -down-> q1
+claim -down-> q2
+claim -down-> q3
+claim -down-> q4
+
+q1 -right-> o1
+q2 -right-> o2
+q3 -right-> o3
+q4 -right-> o4
+
+q1 -[hidden]down-> q2
+q2 -[hidden]down-> q3
+q3 -[hidden]down-> q4
+o1 -[hidden]down-> o2
+o2 -[hidden]down-> o3
+o3 -[hidden]down-> o4
+
+caption Conceptual test-selection map. It summarizes the shipped oracle split; it does not identify the unisolated cause of the cross-process byte difference.
+@enduml

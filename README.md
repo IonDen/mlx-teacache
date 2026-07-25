@@ -35,6 +35,11 @@ documents the zero-skip negative result on the 8-step distilled Klein schedules 
 measurement practice it forced: skip counts published next to every wall-clock number, so a
 speedup cannot be mis-attributed to caching.
 
+**[Why byte-exact parity is a poor MLX integration oracle](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-byte-exact-parity-is-a-poor-mlx-integration-oracle.md)**
+uses a pre-release FLUX.1 fixture failure to separate artifact drift, no-op parity, numerical
+equivalence, and intentionally approximate output. It explains why paired same-process tests and
+measured per-variant gates are more informative than committed real-model bytes.
+
 ## What it does
 
 Diffusion models run the same big transformer 20-50 times in a loop. Between consecutive steps the output changes very little, and TeaCache uses a tiny polynomial fit to predict which steps can reuse the previous step's output. On M1 Max with FLUX.1-dev at 25 steps the default threshold (`rel_l1_thresh=0.20`) skips 6 of 25 steps and produces a 1.46× speedup.

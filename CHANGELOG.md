@@ -7,6 +7,15 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-07-25
+
+Maintenance release. Gate math, coefficients, and generated output are unchanged.
+
+### Changed
+- **Python 3.10 is now supported** (`requires-python >= 3.10`, previously 3.11). No library code needed changes: `mlx` itself allows 3.10, and the only 3.11-only constructs in the repo were `tomllib` imports in two test files (guarded with `tomli` on 3.10) and `datetime.UTC` in two bench scripts (replaced with `timezone.utc`). Lint and type checking now target the 3.10 floor.
+- CI runs the mflux test lane on Python 3.10 through 3.13, and a configuration-guard test suite pins the declared floor, the PyPI classifiers, the CI matrix, the mypy/ruff targets, and the README badge to a single supported-versions list — a version cannot be advertised without a CI job running it.
+- The README Python badge states the floor (`3.10+`) instead of enumerating individual versions.
+
 ## [0.9.2] — 2026-07-10
 
 Maintenance release. Gate math, coefficients, and generated output are unchanged.

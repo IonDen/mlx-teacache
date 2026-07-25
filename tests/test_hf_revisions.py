@@ -3,10 +3,15 @@ committed reference fixtures. Runs before parity tests so an upstream model
 update produces a clear remediation message instead of silent bit-exact
 failures."""
 
-import tomllib
+import sys
 from pathlib import Path
 
 import pytest
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 pytestmark = pytest.mark.parity
 

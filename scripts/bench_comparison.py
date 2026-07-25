@@ -39,7 +39,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -342,7 +342,7 @@ def _provenance() -> dict[str, str]:
     every write. ``datetime.now`` is the only impure part; the merge that consumes
     this (``_merge_variant_into_report``) is pure and unit-tested."""
     return {
-        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
         "mlx_teacache_version": _mlx_teacache_version(),
         "mflux_version": _mflux_version(),
     }

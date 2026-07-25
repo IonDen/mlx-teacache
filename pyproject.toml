@@ -9,7 +9,7 @@ description = "TeaCache step-skipping for FLUX, Qwen-Image & Z-Image diffusion o
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
 keywords = [
     "mlx", "apple-silicon", "diffusion", "flux", "flux1", "flux2",
@@ -22,6 +22,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -45,6 +46,7 @@ test-core = [
     "pytest>=8",
     "pytest-cov",
     "hypothesis>=6",
+    'tomli>=2.0; python_version < "3.11"',
 ]
 test-mflux = [
     { include-group = "test-core" },
@@ -76,7 +78,7 @@ packages = ["src/mlx_teacache"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "TID"]
@@ -85,7 +87,7 @@ ignore = ["E501"]  # line-length handled by formatter
 [tool.mypy]
 strict = true
 files = ["src/mlx_teacache"]
-python_version = "3.11"
+python_version = "3.10"
 
 [[tool.mypy.overrides]]
 module = ["mflux.*", "mlx.*", "mlx_taef.*", "skimage.*", "lpips.*"]

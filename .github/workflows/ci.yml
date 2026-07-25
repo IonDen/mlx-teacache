@@ -38,12 +38,14 @@ jobs:
     # MLX has no Linux wheel (libmlx.so is macOS-only), so even the "pure
     # core" job runs on macOS. The "pure" qualifier here means the [mflux]
     # extra is NOT installed — we still need MLX itself as a hard dependency.
+    # Runs on the floor interpreter so the mflux-free import contract is
+    # proven at 3.10 (the test-mflux matrix covers 3.11-3.13 on its side).
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.10"
       - name: Install uv
         run: pip install uv
       - name: Install test-core (NO mflux extra)
@@ -59,7 +61,7 @@ jobs:
     runs-on: macos-14
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

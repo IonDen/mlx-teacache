@@ -48,7 +48,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -265,7 +265,7 @@ def _orchestrator_main(args: argparse.Namespace) -> int:
 
     report = {
         "schema_version": 1,
-        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
         "hardware": _detect_hardware(),
         "mlx_memory_cap_gb": args.mlx_memory_cap_gb,
         "isolation": "subprocess-per-condition",

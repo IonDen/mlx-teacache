@@ -20,6 +20,7 @@ class _RegistryEntry(TypedDict):
     META: dict[str, Any]
     matches: Callable[[object], bool]
     load_integration: Callable[[], Callable[..., Any]]
+    default_thresh: float | None
 
 
 _REGISTRY: dict[str, _RegistryEntry] = {}
@@ -81,10 +82,13 @@ def _build_one(full: str, subname: str) -> tuple[str, _RegistryEntry]:
     except TeaCacheValueError as e:
         raise CalibrationError(variant_id=variant_id, reason=str(e)) from e
 
+    default_thresh = cast("float | None", getattr(config, "DEFAULT_THRESH", None))
+
     return variant_id, _RegistryEntry(
         META=meta,
         matches=detect.matches,
         load_integration=_make_lazy_loader(full),
+        default_thresh=default_thresh,
     )
 
 

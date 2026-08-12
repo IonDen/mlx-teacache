@@ -11,7 +11,12 @@ from collections.abc import Sequence
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import validate_custom
-from mlx_teacache.errors import IncompatibleModelError, TeaCacheDisabledWarning, TeaCacheValueError
+from mlx_teacache.errors import (
+    IncompatibleModelError,
+    TeaCacheDisabledWarning,
+    TeaCacheNoBenefitWarning,
+    TeaCacheValueError,
+)
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.variants import _REGISTRY
 
@@ -79,6 +84,16 @@ def apply_teacache(
 
     for variant_id, entry in _REGISTRY.items():
         if entry["matches"](flux):
+            if entry["default_thresh"] is None:
+                warnings.warn(
+                    TeaCacheNoBenefitWarning(
+                        f"variant {variant_id!r} runs a distilled few-step schedule where the "
+                        "polynomial gate does not engage; apply_teacache adds per-step gate "
+                        "overhead and any wall-clock benefit comes from bypassing mx.compile, "
+                        "not from step-skipping"
+                    ),
+                    stacklevel=2,
+                )
             apply = entry["load_integration"]()
             handle: TeaCacheHandle = apply(
                 flux,

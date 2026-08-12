@@ -171,6 +171,10 @@ def test_first_eligible_step_no_previous_is_computed_with_cache_update():
 def test_skip_decision_below_threshold():
     state = _fresh_state()
     state.previous_mod_input = mx.ones((1, 16, 64))
+    # v0.10.0: consecutive-delta anchoring (Option A) — a skip requires a
+    # cached residual to reuse; seed it so the threshold path (not the
+    # seed/re-seed guard) is exercised.
+    state.cached_residual = mx.ones((1, 16, 64))
     # Small change ⇒ small predicted distance ⇒ acc stays below thresh
     mod_in = state.previous_mod_input + 0.001
     dec = gate_step(
@@ -191,6 +195,10 @@ def test_skip_decision_below_threshold():
 def test_compute_decision_resets_accumulator():
     state = _fresh_state()
     state.previous_mod_input = mx.ones((1, 16, 64))
+    # v0.10.0: consecutive-delta anchoring (Option A) — seed a cached residual
+    # so this reaches the threshold path (not the seed/re-seed guard, which
+    # doesn't touch accumulated_distance).
+    state.cached_residual = mx.ones((1, 16, 64))
     state.accumulated_distance = 0.1
     # Large change ⇒ predicted distance pushes acc over thresh
     mod_in = state.previous_mod_input * 10.0
@@ -211,6 +219,9 @@ def test_compute_decision_resets_accumulator():
 def test_predicted_distance_clamped_at_zero():
     state = _fresh_state()
     state.previous_mod_input = mx.ones((1, 16, 64))
+    # v0.10.0: consecutive-delta anchoring (Option A) — seed a cached residual
+    # so a skip decision can actually be issued (seed/re-seed guard requires one).
+    state.cached_residual = mx.ones((1, 16, 64))
     mod_in = state.previous_mod_input + 0.01
     neg_coeffs = (0.0, 0.0, 0.0, -100.0, 0.0)
     dec = gate_step(
@@ -227,3 +238,102 @@ def test_predicted_distance_clamped_at_zero():
     assert dec.kind == "skipped"
     assert dec.predicted_distance is not None
     assert dec.predicted_distance == 0.0
+
+
+def _seeded_state() -> TeaCacheState:
+    """State as it looks after the first computed+cached step."""
+    state = TeaCacheState()
+    state.previous_mod_input = mx.ones((4,))
+    state.cached_residual = mx.ones((4,))
+    return state
+
+
+_FLAT_COEFFS = (0.0, 0.0, 0.0, 0.0, 0.0)  # poly ≡ 0 → accumulator never grows
+_GATE_KWARGS = dict(
+    rel_l1_thresh=0.5,
+    skip_first=0,
+    skip_last=0,
+    num_steps=100,
+    mod_in=mx.ones((4,)) * 1.01,
+)
+
+
+def test_anchor_advances_on_a_skipped_step():
+    """Upstream-faithful (Option A): previous_mod_input advances every gated
+    step, so rel_l1 is always the consecutive delta the polynomial was
+    calibrated on — not cumulative drift since the last compute."""
+    state = _seeded_state()
+    mod_in = mx.ones((4,)) * 1.01
+    decision = gate_step(state, coefficients=_FLAT_COEFFS, step_idx=1, **{**_GATE_KWARGS, "mod_in": mod_in})
+    assert decision.kind == "skipped"
+    assert state.previous_mod_input is mod_in
+
+
+def test_rel_l1_is_consecutive_delta_across_a_skip_run():
+    """Three steps with equal successive deltas must report equal rel_l1 on
+    each gated step (consecutive anchoring). Cumulative anchoring would
+    report a growing sequence."""
+    state = _seeded_state()
+    state.previous_mod_input = mx.full((4,), 1.00)
+    rel_l1s = []
+    for i, scale in enumerate((1.01, 1.02, 1.03), start=1):
+        decision = gate_step(
+            state,
+            coefficients=_FLAT_COEFFS,
+            step_idx=i,
+            **{**_GATE_KWARGS, "mod_in": mx.full((4,), scale)},
+        )
+        rel_l1s.append(decision.rel_l1)
+    assert all(r is not None for r in rel_l1s)
+    # consecutive deltas: |1.01-1.00|/1.00, |1.02-1.01|/1.01, |1.03-1.02|/1.02
+    expected = [0.01 / 1.00, 0.01 / 1.01, 0.01 / 1.02]
+    for got, want in zip(rel_l1s, expected, strict=True):
+        assert abs(got - want) < 1e-6, (got, want)
+
+
+def test_skip_requires_a_cached_residual():
+    """Anchor and residual are decoupled now; a skip without a residual to
+    reuse must never be issued — the gate computes and seeds instead."""
+    state = TeaCacheState()
+    state.previous_mod_input = mx.ones((4,))  # anchor set (e.g. by a forced step)
+    state.cached_residual = None
+    decision = gate_step(state, coefficients=_FLAT_COEFFS, step_idx=1, **_GATE_KWARGS)
+    assert decision.should_compute is True
+    assert decision.should_update_cache is True
+
+
+def test_consecutive_skip_streak_forces_compute_at_cap():
+    """Runaway guard (audit H1): a polynomial that never grows the
+    accumulator must not skip unboundedly on a stale residual."""
+    from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS
+
+    state = _seeded_state()
+    kinds = []
+    for i in range(1, MAX_CONSECUTIVE_SKIPS + 2):
+        decision = gate_step(state, coefficients=_FLAT_COEFFS, step_idx=i, **_GATE_KWARGS)
+        kinds.append(decision.kind)
+    assert kinds[:MAX_CONSECUTIVE_SKIPS] == ["skipped"] * MAX_CONSECUTIVE_SKIPS
+    assert kinds[MAX_CONSECUTIVE_SKIPS] == "computed"
+    assert state.consecutive_skips == 0
+
+
+def test_forced_step_advances_anchor_but_not_streak():
+    """Forced-window steps carry a usable signal: the anchor advances so the
+    next gated rel_l1 is a true consecutive delta, but cache/accumulator/
+    streak are untouched (forced outputs never update the cache)."""
+    state = _seeded_state()
+    state.consecutive_skips = 3
+    mod_in = mx.ones((4,)) * 2.0
+    decision = gate_step(
+        state,
+        coefficients=_FLAT_COEFFS,
+        rel_l1_thresh=0.5,
+        skip_first=5,
+        skip_last=0,
+        num_steps=100,
+        step_idx=2,  # inside the skip_first window
+        mod_in=mod_in,
+    )
+    assert decision.kind == "forced"
+    assert state.previous_mod_input is mod_in
+    assert state.consecutive_skips == 3

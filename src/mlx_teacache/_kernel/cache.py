@@ -13,6 +13,7 @@ accumulated_distance  : float
 last_timestep         : float | None
 skip_window_validated : bool
 num_steps             : int | None
+consecutive_skips     : int
 """
 
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ class TeaCacheState:
     last_timestep: float | None = None
     skip_window_validated: bool = False
     num_steps: int | None = None
+    consecutive_skips: int = 0
 
     def reset_for_new_generation(self, *, num_steps: int) -> None:
         """Clear all per-generation fields. Called by:
@@ -50,6 +52,7 @@ class TeaCacheState:
         self.cached_residual = None
         self.cached_residual_neg = None
         self.accumulated_distance = 0.0
+        self.consecutive_skips = 0
         self.last_timestep = None
         self.skip_window_validated = False
         self.num_steps = num_steps

@@ -47,6 +47,10 @@ def test_forced_windows_honored(step_idx, skip_first, skip_last):
     # Seed the anchor so out-of-window steps reach the threshold-compare path
     # (poly(x)=1.0 >= thresh 0.5 -> "computed"), not just the seed branch.
     state.previous_mod_input = mx.ones((1, 4, 8)) * 2.0
+    # v0.10.0: consecutive-delta anchoring (Option A) — the seed/re-seed guard
+    # now also requires a cached residual; seed one so out-of-window steps
+    # reach the threshold-compare path instead of the seed branch.
+    state.cached_residual = mx.ones((1, 4, 8))
     mod_in = mx.ones((1, 4, 8))
     dec = gate_step(
         state,

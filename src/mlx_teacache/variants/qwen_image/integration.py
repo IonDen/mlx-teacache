@@ -312,7 +312,6 @@ def qwen_forward_with_gate(
             )
             if decision.should_update_cache:
                 state.cached_residual = body_out - pre.h_in
-                state.previous_mod_input = mod_in
         else:
             if state.cached_residual is None:
                 raise InternalStateError(

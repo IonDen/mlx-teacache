@@ -273,7 +273,6 @@ def flux2_forward_with_gate(
         )
         if decision.should_update_cache:
             state.cached_residual = body_out_concat - body_in_concat
-            state.previous_mod_input = mod_in
     else:
         if state.cached_residual is None:
             raise InternalStateError(
@@ -416,7 +415,6 @@ def flux2_cfg_forward_with_gate(
         if decision.should_update_cache:
             state.cached_residual = body_out_pos - body_in_concat_pos
             state.cached_residual_neg = body_out_neg - body_in_concat_neg
-            state.previous_mod_input = mod_in
     else:
         if state.cached_residual is None or state.cached_residual_neg is None:
             raise InternalStateError(

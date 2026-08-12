@@ -38,6 +38,7 @@ import pytest
 ssim = pytest.importorskip("skimage.metrics").structural_similarity
 
 from mlx_teacache import apply_teacache  # noqa: E402
+from tests.conftest import expect_distilled_warning  # noqa: E402
 
 pytestmark = pytest.mark.parity
 
@@ -274,7 +275,8 @@ def test_default_threshold_ssim_klein_pr_gate(
         # img2img (any variant): unmeasured placeholder removed; a dedicated
         #   img2img gate needs its own calibrated measurement.
         vanilla_latent = _capture(flux, **kw)
-        with apply_teacache(flux):  # uses package default rel_l1_thresh
+        # uses package default rel_l1_thresh; distilled variants warn at apply time.
+        with expect_distilled_warning(variant_id), apply_teacache(flux):
             wrapper_latent = _capture(flux, **kw)
         arr = np.asarray(wrapper_latent.astype(mx.float32))
         assert np.isfinite(arr).all(), f"wrapper latent contains non-finite values for {variant_id}"
@@ -379,9 +381,11 @@ def test_default_threshold_ssim_klein_full(flux2_klein: tuple[Any, str], prompt:
         )
     else:
         # distilled: gate premise does not hold on 8-step distilled schedules;
-        # finiteness is the honest correctness gate.
+        # finiteness is the honest correctness gate. Always distilled here
+        # (the `is_base` branch above handles the base variants), so the
+        # apply-time warning always fires.
         vanilla_latent = _capture(flux, **kw)
-        with apply_teacache(flux):  # uses package default rel_l1_thresh
+        with expect_distilled_warning(variant_id), apply_teacache(flux):
             wrapper_latent = _capture(flux, **kw)
         arr = np.asarray(wrapper_latent.astype(mx.float32))
         assert np.isfinite(arr).all(), (

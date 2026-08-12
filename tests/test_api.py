@@ -255,10 +255,12 @@ def test_apply_teacache_accepts_flux2_klein_9b():
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
     from mlx_teacache import apply_teacache
+    from tests.conftest import expect_distilled_warning
 
     flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_9b())
     flux.freeze()
-    handle = apply_teacache(flux)
+    with expect_distilled_warning("flux2-klein-9b"):
+        handle = apply_teacache(flux)
     try:
         assert handle.variant_id == "flux2-klein-9b"
         assert len(handle.coefficients) == 5
@@ -468,8 +470,17 @@ def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, mak
     no leftover callback, no instance-level generate_image.
 
     Each variant patches ITS OWN module's local wrap_generate_image binding.
-    """
+
+    Distilled Kleins (flux2-klein-4b/9b) warn TeaCacheNoBenefitWarning at
+    apply time, before load_integration()/wrap_generate_image ever run — under
+    filterwarnings=error that warning-as-exception would preempt the
+    monkeypatched RuntimeError, so it must be expected via
+    expect_distilled_warning inside the pytest.raises(RuntimeError) block
+    (pytest.warns resets the filter to "always" for its scope, letting
+    execution continue to the real failure)."""
     import importlib
+
+    from tests.conftest import expect_distilled_warning
 
     flux = make_flux()
     flux.freeze()
@@ -480,7 +491,7 @@ def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, mak
         "wrap_generate_image",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError), expect_distilled_warning(variant_id):
         apply_teacache(flux)
     assert len(flux.callbacks.before_loop) == before_callback_count, "callback left registered"
     assert "_predict" not in vars(flux), "_predict instance attr left behind"
@@ -560,11 +571,18 @@ def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, mak
     ],
 )
 def test_user_coefficients_provenance_all_variants(variant_id: str, make_flux) -> None:
-    """All 7 variants: custom coefficients yield handle.provenance.source == 'user'."""
+    """All 7 variants: custom coefficients yield handle.provenance.source == 'user'.
+
+    User-supplied coefficients don't change the apply-time no-benefit warning:
+    it's keyed on the registry's default_thresh (a per-variant fact), not on
+    what the caller passes, so distilled Kleins still warn here too."""
+    from tests.conftest import expect_distilled_warning
+
     flux = make_flux()
     flux.freeze()
     custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
-    handle = apply_teacache(flux, coefficients=custom_coeffs)
+    with expect_distilled_warning(variant_id):
+        handle = apply_teacache(flux, coefficients=custom_coeffs)
     try:
         assert handle.variant_id == variant_id
         assert handle.provenance.source == "user"

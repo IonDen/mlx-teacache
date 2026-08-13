@@ -18,13 +18,21 @@ Phase-4 bench + SSIM gates, not here.
 from __future__ import annotations
 
 import warnings as _w
+from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
+import numpy as np
 import pytest
 
 from mlx_teacache import apply_teacache
 from mlx_teacache.errors import TeaCacheDisabledWarning
+
+# PIL + skimage live in the [mflux]/test extra and are absent in the pure-core CI
+# env. importorskip skips this module cleanly at collection there (it is parity-only
+# anyway) instead of erroring the whole pure-core lane on a module-top import.
+Image = pytest.importorskip("PIL.Image")
+ssim = pytest.importorskip("skimage.metrics").structural_similarity
 
 pytestmark = pytest.mark.parity
 
@@ -32,6 +40,17 @@ pytestmark = pytest.mark.parity
 # re-walk; 0.99 absorbs prompt variance. Tighten toward the measured min if the
 # parity run shows consistently higher.
 _ZIMAGE_COSINE_GATE = 0.99
+
+# User-facing quality gate at the committed sweep recipe (512x512, q8, 50 steps,
+# guidance=4.0) + the shipped DEFAULT_THRESH=0.12: scripts/sweep_threshold_z_image.py /
+# tests/_artifacts/sweep_z_image/results_z_image.json measured SSIM 0.9913, 15/48 steps
+# skipped. This branch (v0.10.0) changed gate anchoring (consecutive-delta anchor + skip
+# streak cap), so the skip count is expected to shift from that sweep value — the band
+# below stays wide until re-measured. PROVISIONAL — locked from the v0.10.0 validation run.
+_SSIM_FLOOR = 0.97  # PROVISIONAL — locked from the v0.10.0 validation run
+_SKIP_BAND = (8, 22)  # PROVISIONAL — locked from the v0.10.0 validation run
+_SSIM_STEPS = 50
+_ARTIFACTS = Path(__file__).parent / "_artifacts" / "parity_z_image"
 
 PROMPT = "a red apple on a wooden table"
 _GEN_KW: dict[str, Any] = {
@@ -79,6 +98,17 @@ def _cosine(a: mx.array, b: mx.array) -> float:
     af = a.astype(mx.float32)
     bf = b.astype(mx.float32)
     return float(mx.sum(af * bf) / (mx.linalg.norm(af) * mx.linalg.norm(bf)))
+
+
+def _gen_image_array(flux: Any, *, save_path: Path, steps: int) -> np.ndarray:
+    image = flux.generate_image(
+        prompt=PROMPT, seed=42, num_inference_steps=steps, height=512, width=512, guidance=4.0
+    )
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    if save_path.exists():
+        save_path.unlink()  # mflux image.save() appends _1 on collision instead of overwriting
+    image.save(path=str(save_path), export_json_metadata=False)
+    return np.array(Image.open(save_path).convert("RGB"), dtype=np.uint8)
 
 
 @pytest.fixture(scope="module")
@@ -141,3 +171,23 @@ def test_skip_path_engages_and_produces_finite_latent(zimage_base: Any) -> None:
 
     assert skipped >= 1, f"rel_l1_thresh=0.5 on 8 steps should skip >=1 step; got {skipped}"
     assert bool(mx.all(mx.isfinite(wrapper))), "skipped-step reconstruction produced non-finite latent"
+
+
+def test_image_quality_ssim_at_default_threshold(zimage_base: Any) -> None:
+    """User-facing quality gate at the committed sweep recipe (512x512, q8, 50
+    steps, guidance=4.0) + the shipped DEFAULT_THRESH (0.12): caching MUST engage
+    (skipped > 0, within the expected band — the dormant/runaway-cache guard) and
+    SSIM vs vanilla MUST hold the PR-gate floor. Images saved for manual inspection.
+    z-image-base is not distilled (DEFAULT_THRESH=0.12, not None), so apply_teacache
+    here must NOT raise TeaCacheNoBenefitWarning."""
+    flux = zimage_base
+    van = _gen_image_array(flux, save_path=_ARTIFACTS / "vanilla.png", steps=_SSIM_STEPS)
+    with apply_teacache(flux) as h:  # builtin DEFAULT_THRESH (0.12)
+        wrap = _gen_image_array(flux, save_path=_ARTIFACTS / "wrapper_default_thresh.png", steps=_SSIM_STEPS)
+        skipped, computed = h.stats.skipped_count, h.stats.computed_count
+    score = float(ssim(van, wrap, channel_axis=-1, data_range=255))
+    assert _SKIP_BAND[0] <= skipped <= _SKIP_BAND[1], (
+        f"skip count {skipped} outside the expected band {_SKIP_BAND} at DEFAULT_THRESH "
+        f"(computed={computed}) — a dormant or runaway cache"
+    )
+    assert score >= _SSIM_FLOOR, f"SSIM {score:.4f} < {_SSIM_FLOOR} at DEFAULT_THRESH (skipped={skipped})"

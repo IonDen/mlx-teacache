@@ -1,10 +1,11 @@
 # Manual verification recipe
 
 Quick smoke test for confirming a local `mlx-teacache` install is working.
-Pin the installed version explicitly:
+This recipe verifies the latest PyPI release, matching the CHANGELOG's top
+entry — pin the installed version explicitly:
 
 ```bash
-uv pip install "mlx-teacache[mflux]==0.2.0"
+uv pip install "mlx-teacache[mflux]==0.9.3"
 ```
 
 ## Shared capture helper

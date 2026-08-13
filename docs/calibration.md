@@ -8,6 +8,40 @@ with the matching `Provenance` in that variant's `integration.py`. The top-level
 `coefficients.py` is a thin re-export shim, extracted in v0.6.0; editing it
 changes nothing.
 
+**Anchoring convention.** `t-1` is the immediately previous gated step,
+whether that step was computed or skipped — the comparison anchor advances
+on every gated step. This matches how the calibration script measures its
+training pairs: `rel_l1(mod_in_t, mod_in_{t-1})` between consecutive steps,
+never against an older, non-adjacent step.
+
+## Runaway guard
+
+The gate accumulates the polynomial's predicted change across consecutive
+skips and resets it to zero on every real compute. The calibrated
+polynomials clamp to 0 for small deltas (all three in-repo fits go negative
+past x≈0.27-0.8), so a run of small consecutive deltas can leave the
+accumulator stalled under `rel_l1_thresh` indefinitely — without a guard,
+that would let the wrapper reuse the same cached residual for an unbounded
+number of steps. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
+forces a recompute after 8 consecutive skips regardless of the accumulated
+total. This is an intentional divergence from upstream ali-vilab TeaCache,
+which has no such cap — the same kind of deliberate departure as the gate's
+`max(0.0, ...)` clamp on the polynomial output, which keeps the accumulator
+monotonic instead of matching upstream's raw polynomial exactly.
+
+### Observed max consecutive-skip streaks
+
+*(placeholder — to be filled from the validation run at each variant's
+default threshold)*
+
+| Variant | Default threshold | Max observed streak |
+|---|---|---|
+| `flux1-dev` | — | — |
+| `flux2-klein-base-4b` | — | — |
+| `flux2-klein-base-9b` | — | — |
+| `z-image-base` | — | — |
+| `qwen-image` | — | — |
+
 ## Built-in coefficient sources
 
 | Variant | Source | Provenance |

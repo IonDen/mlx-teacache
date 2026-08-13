@@ -26,6 +26,12 @@ docs/superpowers/
 # aggregated scripts/_calibration_qwen.json IS committed — only the chunks are scratch.
 scripts/_calib_qwen_chunks/
 
+# Same pattern for calibrate_flux2.py (Task 4, v0.10.0). The aggregated
+# scripts/_calibration_flux2_<variant>.json files ARE committed — only the
+# per-prompt chunks are scratch. (sweep_threshold_klein_base_4b.py's chunk
+# dir already falls under the tests/_artifacts/ ignore above.)
+scripts/_calibration_chunks/
+
 # Local agent working layers. Not committed.
 /CLAUDE.md
 /AGENTS.md

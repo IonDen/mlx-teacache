@@ -112,6 +112,13 @@ filterwarnings = [
     # both module patterns must be suppressed.
     "ignore::DeprecationWarning:tokenizers",
     "ignore::DeprecationWarning:transformers",
+    # huggingface_hub's xet download path emits "hf_xet.download_files() is
+    # deprecated" during snapshot_download; under `filterwarnings = error` that
+    # turns any uncached-weight fixture into a setup ERROR (seen 2026-08-14 on
+    # the FLUX.1-schnell fixture). Suppress in both the emitting binding and
+    # the calling package, mirroring the tokenizers/transformers pair above.
+    "ignore::DeprecationWarning:huggingface_hub",
+    "ignore::DeprecationWarning:hf_xet",
 ]
 
 [tool.coverage.run]

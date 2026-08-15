@@ -1,0 +1,80 @@
+{
+  "schema_version": 2,
+  "isolation": "subprocess-per-rep",
+  "variant": "flux1-dev",
+  "num_inference_steps": 25,
+  "guidance": 3.5,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.6.0",
+    "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+    "mflux_version": "0.18.0",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "vanilla_seconds": [
+    119.79737970797578,
+    113.05129708303139,
+    104.71441437496105
+  ],
+  "wrapper_seconds": [
+    69.7793377090129,
+    73.1061112920288,
+    71.85175283299759
+  ],
+  "vanilla_median": 113.05129708303139,
+  "wrapper_median": 71.85175283299759,
+  "speedup_median": 1.57339650914004,
+  "skipped_counts": [
+    6,
+    6,
+    6
+  ],
+  "computed_counts": [
+    17,
+    17,
+    17
+  ],
+  "skip_patterns": [
+    "CCCSCSCCSCSCSCSCCCCCCCCCC",
+    "CCCSCSCCSCSCSCSCCCCCCCCCC",
+    "CCCSCSCCSCSCSCSCCCCCCCCCC"
+  ],
+  "max_consecutive_skips": [
+    1,
+    1,
+    1
+  ],
+  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/flux1-dev",
+  "vanilla_peak_memory_gb": [
+    10.828802177682519,
+    10.828772112727165,
+    10.828970476984978
+  ],
+  "wrapper_peak_memory_gb": [
+    11.125921364873648,
+    10.971645504236221,
+    10.877848774194717
+  ],
+  "nogate_seconds": [
+    105.62068520800676,
+    100.58477800001856,
+    101.63754720799625
+  ],
+  "nogate_median": 101.63754720799625,
+  "compile_avoidance_ratio": 1.1122985568677435,
+  "gating_ratio": 1.4145451321727487,
+  "combined_ratio": 1.57339650914004,
+  "nogate_peak_memory_gb": [
+    10.828888384625316,
+    10.828940683975816,
+    10.867454428225756
+  ]
+}

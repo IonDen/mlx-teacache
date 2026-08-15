@@ -42,13 +42,15 @@ pytestmark = pytest.mark.parity
 _ZIMAGE_COSINE_GATE = 0.99
 
 # User-facing quality gate at the committed sweep recipe (512x512, q8, 50 steps,
-# guidance=4.0) + the shipped DEFAULT_THRESH=0.12: scripts/sweep_threshold_z_image.py /
-# tests/_artifacts/sweep_z_image/results_z_image.json measured SSIM 0.9913, 15/48 steps
-# skipped. This branch (v0.10.0) changed gate anchoring (consecutive-delta anchor + skip
-# streak cap), so the skip count is expected to shift from that sweep value — the band
-# below stays wide until re-measured. PROVISIONAL — locked from the v0.10.0 validation run.
-_SSIM_FLOOR = 0.97  # PROVISIONAL — locked from the v0.10.0 validation run
-_SKIP_BAND = (8, 22)  # PROVISIONAL — locked from the v0.10.0 validation run
+# guidance=4.0) + the shipped DEFAULT_THRESH=0.12. Locked from the v0.10.0 validation
+# run under consecutive-delta anchoring (2026-08-15): this test measured SSIM 0.9913
+# (unchanged from the pre-anchoring sweep, tests/_artifacts/sweep_z_image/results_z_image.json),
+# and the same recipe in the committed bench _artifacts/v0.10.0_bench_z_image.json skipped
+# 15/48 active steps in every rep (max streak 1). The floor leaves ~0.02 of headroom for
+# cross-machine Metal variance; the band brackets the observed 15 by +-5 — a dormant
+# cache (0) or a runaway one (>20) both trip it.
+_SSIM_FLOOR = 0.97
+_SKIP_BAND = (10, 20)
 _SSIM_STEPS = 50
 _ARTIFACTS = Path(__file__).parent / "_artifacts" / "parity_z_image"
 

@@ -31,16 +31,25 @@ monotonic instead of matching upstream's raw polynomial exactly.
 
 ### Observed max consecutive-skip streaks
 
-*(placeholder — to be filled from the validation run at each variant's
-default threshold)*
+Measured at each variant's default threshold on the committed bench recipes
+(M1 Max 32 GB, mflux 0.18.0, three cold reps per condition, 2026-08-15). The
+bench reports carry a per-rep `skip_patterns` string (`S` = skipped, `C` =
+computed) and `max_consecutive_skips`; the streak below is the maximum across
+reps, and in every case each rep produced the same pattern.
 
-| Variant | Default threshold | Max observed streak |
-|---|---|---|
-| `flux1-dev` | — | — |
-| `flux2-klein-base-4b` | — | — |
-| `flux2-klein-base-9b` | — | — |
-| `z-image-base` | — | — |
-| `qwen-image` | — | — |
+| Variant | Default threshold | Skips (active steps) | Max observed streak | Source |
+|---|---|---|---|---|
+| `flux1-dev` | 0.20 | 6 / 23 | 1 | `_artifacts/v0.10.0_bench_flux1_dev.json` (25 steps, g=3.5) |
+| `flux2-klein-base-4b` | 0.17 | 9 / 48 | 2 | `_artifacts/v0.10.0_bench_klein_base_4b.json` (50 steps, g=4.0) |
+| `flux2-klein-base-9b` | 0.17 | 13 / 48 | 1 | `_artifacts/v0.10.0_bench_klein_base_9b.json` (50 steps, g=4.0) |
+| `z-image-base` | 0.12 | 15 / 48 | 1 | `_artifacts/v0.10.0_bench_z_image.json` (50 steps, g=4.0, q8) |
+| `qwen-image` | 0.30 | — | — | *pending the v0.10.0 showcase run* |
+
+Every measured streak is 1 or 2: at the shipped defaults the gate mostly
+alternates compute / skip and reuses a residual at most twice in a row, so
+the `MAX_CONSECUTIVE_SKIPS = 8` cap is far from the operating point and only
+matters for degenerate settings (an all-zero polynomial, or a threshold well
+above the sweep range).
 
 ## Built-in coefficient sources
 

@@ -31,8 +31,8 @@ To keep TeaCache's gating live on every chip where mflux compiles, `mlx-teacache
 replaces `flux._predict` with an **uncompiled** eager-Python closure. Users on
 those chips lose mflux's compile gain on this code path. The tradeoff: when the
 gate actually engages we skip ~25% of steps, which more than compensates on
-M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.46× on FLUX.1-dev / 25 steps
-on M1 Max, 2026-05-31). The magnitude of the compile-loss tax grows on newer
+M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.57× on FLUX.1-dev / 25 steps
+on M1 Max, 2026-08-15). The magnitude of the compile-loss tax grows on newer
 hardware.
 
 On chips that mflux already runs eager (base + Pro M1/M2), the wrapper does
@@ -115,6 +115,14 @@ whether you use `scripts/bench_speedup.py` or your own timing harness.
 - Use one shared recipe across every condition being compared: identical
   prompt, seed, step count, guidance, and image dimensions. Changing any of
   these between the vanilla and wrapped runs invalidates the comparison.
+- Run on mains power with a charger that can out-supply the GPU load, and
+  start with the battery near full. A low-wattage brick (a 35 W adapter, say)
+  lets the battery drain under a sustained generation load, and macOS starts
+  throttling as it drops; timings taken on a draining battery are not
+  comparable to timings taken on a fully powered machine. Check
+  `pmset -g ac` for the adapter wattage and `pmset -g batt` before a run, and
+  discard any repetition during which the battery fell into low-power
+  territory.
 
 `scripts/bench_speedup.py` in this repo follows the process-isolation and
 environment-capture parts of this protocol: every (variant, condition,

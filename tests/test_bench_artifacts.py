@@ -19,12 +19,12 @@ import statistics
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_FLUX1_DEV_BENCH = _REPO_ROOT / "_artifacts" / "v0.6.3_bench_flux1_dev.json"
+_FLUX1_DEV_BENCH = _REPO_ROOT / "_artifacts" / "v0.10.0_bench_flux1_dev.json"
 _README = _REPO_ROOT / "README.md"
 
 _RUN_HINT = (
     "uv run python scripts/bench_speedup.py --variant flux1-dev "
-    "--three-way --reps 3 --report _artifacts/v0.6.3_bench_flux1_dev.json"
+    "--three-way --reps 3 --report _artifacts/v0.10.0_bench_flux1_dev.json"
 )
 
 

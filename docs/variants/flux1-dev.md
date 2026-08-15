@@ -16,7 +16,7 @@ flux = Flux1.from_name("dev", quantize=4)
 - Default `rel_l1_thresh`: 0.20 (the package fallback)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At the default threshold and 25 steps the gate skips 6/25 steps and produces a measured 1.46× wall-clock speedup on M1 Max with SSIM ≥ 0.80 on the 5-prompt suite (≥ 0.90 on the PR-gate red-apple prompt). See [`README.md` → Benchmarks](../../README.md#benchmarks).
+At the default threshold and 25 steps the gate skips 6/25 steps (never two in a row) and produces a measured 1.57× wall-clock speedup on M1 Max (median of three cold reps, 2026-08-15; 1.50× fastest-to-fastest, see the README footnote for the vanilla spread) with SSIM ≥ 0.80 on the 5-prompt suite (≥ 0.90 on the PR-gate red-apple prompt). See [`README.md` → Benchmarks](../../README.md#benchmarks).
 
 ## Coefficient provenance
 

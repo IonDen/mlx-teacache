@@ -43,6 +43,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import streak_telemetry as _streak_telemetry
+
 # Shared portrait prompt — same across every variant. Single variable = recipe.
 PROMPT = (
     "Portrait of a young woman with auburn hair and green eyes, soft "
@@ -255,6 +257,8 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
     skipped: list[int] = []
     computed: list[int] = []
     thresh_used: float = 0.0
+    skip_patterns: list[str] = []
+    max_streaks: list[int] = []
     for i in range(REPS):
         with apply_teacache(flux) as handle:
             if i == 0:
@@ -269,11 +273,14 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
             times.append(elapsed)
             skipped.append(handle.stats.skipped_count)
             computed.append(handle.stats.computed_count)
+            telemetry = _streak_telemetry(handle.stats)
+            skip_patterns.append(telemetry["skip_pattern"])
+            max_streaks.append(telemetry["max_consecutive_skips"])
             if i == 0:
                 _save_as_webp(image, save_to)
         print(
             f"  wrapper rep {i + 1}: {elapsed:.2f}s (skipped {skipped[-1]}/{cfg.num_inference_steps}, "
-            f"peak {mx.get_peak_memory() / 1024**3:.2f} GB)",
+            f"max streak {max_streaks[-1]}, peak {mx.get_peak_memory() / 1024**3:.2f} GB)",
             flush=True,
         )
         del image
@@ -284,6 +291,8 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
         "rep_seconds": times,
         "skipped_per_rep": skipped,
         "computed_per_rep": computed,
+        "skip_pattern_per_rep": skip_patterns,
+        "max_consecutive_skips_per_rep": max_streaks,
         "rel_l1_thresh_used": thresh_used,
         "peak_memory_gb": mx.get_peak_memory() / 1024**3,
     }

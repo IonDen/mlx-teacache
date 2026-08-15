@@ -104,3 +104,21 @@ def test_merge_is_pure_and_does_not_mutate_input() -> None:
     assert report["generated_at"] == "old"
     assert report["variants"] == {}
     assert report["hardware"]["mlx_teacache_version"] == "0.1.0"
+
+
+# --- skip-streak telemetry (shared with bench_speedup via scripts/_bench_telemetry) ---
+
+
+def test_streak_telemetry_reads_the_last_committed_generation() -> None:
+    from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+
+    stats = TeaCacheStats()
+    kinds = ["forced", "skipped", "skipped", "computed", "skipped", "skipped", "skipped", "computed"]
+    for i, kind in enumerate(kinds):
+        stats.record(
+            StepDecision(
+                step_idx=i, timestep=1.0 - i / 10, rel_l1=0.1, accumulated_distance=0.2, decision=kind
+            )  # type: ignore[arg-type]
+        )
+    stats.finalize_last_generation(num_inference_steps=len(kinds), cfg_was_active=False)
+    assert bc._streak_telemetry(stats) == {"skip_pattern": "CSSCSSSC", "max_consecutive_skips": 3}

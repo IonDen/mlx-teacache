@@ -87,6 +87,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import streak_telemetry as _streak_telemetry
+
 PROMPT = "a red apple on a wooden table"
 SEED = 42
 HEIGHT = 512
@@ -412,25 +414,6 @@ def _image_path_for(bench_dir: Path, condition: str, rep: int, *, three_way: boo
     if condition == "wrapper_nogate":
         return bench_dir / "wrapper_nogate.png"
     return bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
-
-
-def _skip_pattern(decision_kinds: list[str]) -> str:
-    """Per-step pattern string: ``S`` for a skipped step, ``C`` for everything else."""
-    return "".join("S" if kind == "skipped" else "C" for kind in decision_kinds)
-
-
-def _max_skip_streak(pattern: str) -> int:
-    """Length of the longest run of consecutive ``S`` in a skip pattern (0 if none)."""
-    return max((len(run) for run in pattern.split("C")), default=0)
-
-
-def _streak_telemetry(stats: Any) -> dict[str, Any]:
-    """Skip pattern + max consecutive-skip streak of the last committed generation."""
-    last = stats.last_generation
-    if last is None:
-        return {"skip_pattern": "", "max_consecutive_skips": 0}
-    pattern = _skip_pattern([d.decision for d in last.decisions])
-    return {"skip_pattern": pattern, "max_consecutive_skips": _max_skip_streak(pattern)}
 
 
 def _wrapper_streak_arrays(results: list[dict[str, Any]]) -> dict[str, list[Any]]:

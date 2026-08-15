@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import _bench_telemetry as bt  # noqa: E402
 import bench_speedup as bs  # noqa: E402
 
 _CONDITIONS = ["vanilla", "wrapper_nogate", "wrapper"]
@@ -123,14 +124,14 @@ def test_image_path_names_follow_the_three_way_flag(tmp_path: Path) -> None:
 
 def test_skip_pattern_marks_only_skipped_decisions_as_S() -> None:
     kinds = ["forced", "computed", "skipped", "skipped", "numerical-miss", "computed", "skipped"]
-    assert bs._skip_pattern(kinds) == "CCSSCCS"
+    assert bt.skip_pattern(kinds) == "CCSSCCS"
 
 
 def test_max_skip_streak_is_the_longest_run_of_S() -> None:
-    assert bs._max_skip_streak("CCSSCCS") == 2
-    assert bs._max_skip_streak("CSSSSCSS") == 4
-    assert bs._max_skip_streak("CCCC") == 0
-    assert bs._max_skip_streak("") == 0
+    assert bt.max_skip_streak("CCSSCCS") == 2
+    assert bt.max_skip_streak("CSSSSCSS") == 4
+    assert bt.max_skip_streak("CCCC") == 0
+    assert bt.max_skip_streak("") == 0
 
 
 def test_streak_telemetry_reads_the_last_committed_generation() -> None:

@@ -260,6 +260,7 @@ def _worker_main(args: argparse.Namespace) -> None:
                 "skipped_count": handle.stats.skipped_count,
                 "computed_count": handle.stats.computed_count,
                 "rel_l1_thresh_used": 0.0,
+                **_streak_telemetry(handle.stats),
             }
         print(
             f"  wrapper_nogate rep {rep + 1}: {elapsed:.2f}s "
@@ -280,10 +281,12 @@ def _worker_main(args: argparse.Namespace) -> None:
                 "skipped_count": handle.stats.skipped_count,
                 "computed_count": handle.stats.computed_count,
                 "rel_l1_thresh_used": handle.rel_l1_thresh,
+                **_streak_telemetry(handle.stats),
             }
         print(
             f"  wrapper rep {rep + 1}: {elapsed:.2f}s "
-            f"(skipped {stats_summary['skipped_count']}/{num_inference_steps})",
+            f"(skipped {stats_summary['skipped_count']}/{num_inference_steps}, "
+            f"max streak {stats_summary['max_consecutive_skips']}, pattern {stats_summary['skip_pattern']})",
             flush=True,
         )
     else:
@@ -409,6 +412,25 @@ def _image_path_for(bench_dir: Path, condition: str, rep: int, *, three_way: boo
     if condition == "wrapper_nogate":
         return bench_dir / "wrapper_nogate.png"
     return bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
+
+
+def _skip_pattern(decision_kinds: list[str]) -> str:
+    """Per-step pattern string: ``S`` for a skipped step, ``C`` for everything else."""
+    return "".join("S" if kind == "skipped" else "C" for kind in decision_kinds)
+
+
+def _max_skip_streak(pattern: str) -> int:
+    """Length of the longest run of consecutive ``S`` in a skip pattern (0 if none)."""
+    return max((len(run) for run in pattern.split("C")), default=0)
+
+
+def _streak_telemetry(stats: Any) -> dict[str, Any]:
+    """Skip pattern + max consecutive-skip streak of the last committed generation."""
+    last = stats.last_generation
+    if last is None:
+        return {"skip_pattern": "", "max_consecutive_skips": 0}
+    pattern = _skip_pattern([d.decision for d in last.decisions])
+    return {"skip_pattern": pattern, "max_consecutive_skips": _max_skip_streak(pattern)}
 
 
 # --- Per-chunk persistence + resume ---------------------------------------

@@ -116,3 +116,39 @@ def test_image_path_names_follow_the_three_way_flag(tmp_path: Path) -> None:
     )
     assert bs._image_path_for(tmp_path, "wrapper", 0, three_way=True) == tmp_path / "wrapper_gated.png"
     assert bs._image_path_for(tmp_path, "wrapper", 0, three_way=False) == tmp_path / "wrapper.png"
+
+
+# --- skip-streak telemetry -------------------------------------------------
+
+
+def test_skip_pattern_marks_only_skipped_decisions_as_S() -> None:
+    kinds = ["forced", "computed", "skipped", "skipped", "numerical-miss", "computed", "skipped"]
+    assert bs._skip_pattern(kinds) == "CCSSCCS"
+
+
+def test_max_skip_streak_is_the_longest_run_of_S() -> None:
+    assert bs._max_skip_streak("CCSSCCS") == 2
+    assert bs._max_skip_streak("CSSSSCSS") == 4
+    assert bs._max_skip_streak("CCCC") == 0
+    assert bs._max_skip_streak("") == 0
+
+
+def test_streak_telemetry_reads_the_last_committed_generation() -> None:
+    from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+
+    stats = TeaCacheStats()
+    kinds = ["forced", "skipped", "skipped", "skipped", "computed", "skipped", "computed"]
+    for i, kind in enumerate(kinds):
+        stats.record(
+            StepDecision(
+                step_idx=i, timestep=1.0 - i / 10, rel_l1=0.1, accumulated_distance=0.2, decision=kind
+            )  # type: ignore[arg-type]
+        )
+    stats.finalize_last_generation(num_inference_steps=len(kinds), cfg_was_active=False)
+    assert bs._streak_telemetry(stats) == {"skip_pattern": "CSSSCSC", "max_consecutive_skips": 3}
+
+
+def test_streak_telemetry_is_empty_before_any_committed_generation() -> None:
+    from mlx_teacache._kernel.stats import TeaCacheStats
+
+    assert bs._streak_telemetry(TeaCacheStats()) == {"skip_pattern": "", "max_consecutive_skips": 0}

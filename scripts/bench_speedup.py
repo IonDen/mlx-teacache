@@ -45,6 +45,17 @@ The script also generates and saves a single vanilla + wrapper image pair
 under tests/_artifacts/bench_images/<variant>/ for visual quality comparison.
 The bench_images/ directory is git-ignored.
 
+Chunking / resume
+-----------------
+Every (variant, condition, rep) worker result is persisted the moment the
+worker returns, to ``--results-dir/<variant>/<condition>_rep<N>.json``
+(default ``tests/_artifacts/bench_chunks/``, git-ignored). A re-invocation
+skips chunks whose file exists and the report is written only once every
+chunk is present, so one three-way bench can be split into several short,
+finite jobs — ``--max-chunks 3`` with ``--reps 3`` runs one condition per
+invocation — and an interruption loses at most the in-flight worker. Move the
+variant's chunk subdir to the Trash for a fresh measurement.
+
 Memory safety
 -------------
 
@@ -389,41 +400,62 @@ def _run_one_worker(
     raise RuntimeError(f"worker for {label} did not emit a {WORKER_RESULT_SENTINEL} result line")
 
 
-def _run_condition(
-    *,
-    variant: str,
-    condition: str,
-    reps: int,
-    cap_gb: int | None,
-    num_inference_steps: int | None,
-    guidance: float | None,
-    bench_dir: Path,
-    three_way: bool,
-) -> list[dict[str, Any]]:
-    """Run all reps for one (variant, condition). Returns list of worker result dicts."""
-    results: list[dict[str, Any]] = []
-    for rep in range(reps):
-        # Save image only on rep 0.
-        if rep == 0:
-            if condition == "vanilla":
-                save_to = bench_dir / "vanilla.png"
-            elif condition == "wrapper_nogate":
-                save_to = bench_dir / "wrapper_nogate.png"
-            else:  # wrapper
-                save_to = bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
-        else:
-            save_to = None
-        result = _run_one_worker(
-            variant=variant,
-            condition=condition,
-            rep=rep,
-            cap_gb=cap_gb,
-            num_inference_steps=num_inference_steps,
-            guidance=guidance,
-            save_to=save_to,
-        )
-        results.append(result)
-    return results
+def _image_path_for(bench_dir: Path, condition: str, rep: int, *, three_way: bool) -> Path | None:
+    """Image destination for a worker: only rep 0 of each condition saves an image."""
+    if rep != 0:
+        return None
+    if condition == "vanilla":
+        return bench_dir / "vanilla.png"
+    if condition == "wrapper_nogate":
+        return bench_dir / "wrapper_nogate.png"
+    return bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
+
+
+# --- Per-chunk persistence + resume ---------------------------------------
+# One (condition, rep) worker = one chunk. Each chunk's result is written to
+# disk the instant the worker returns, and a re-invocation skips chunks whose
+# file already exists, so a three-way bench can be split into several short
+# finite jobs (e.g. one condition per invocation via --max-chunks) and an
+# interruption loses at most the in-flight worker.
+
+
+def _chunk_path(results_dir: Path, condition: str, rep: int) -> Path:
+    return results_dir / f"{condition}_rep{rep}.json"
+
+
+def _pending_chunks(conditions: list[str], reps: int, results_dir: Path) -> list[tuple[str, int]]:
+    """(condition, rep) pairs with no persisted result yet, in run order."""
+    return [
+        (condition, rep)
+        for condition in conditions
+        for rep in range(reps)
+        if not _chunk_path(results_dir, condition, rep).exists()
+    ]
+
+
+def _persist_chunk(results_dir: Path, result: dict[str, Any]) -> Path:
+    """Write one worker result to its chunk file (atomic replace); return the path."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    dest = _chunk_path(results_dir, str(result["condition"]), int(result["rep"]))
+    tmp = dest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(result, indent=2))
+    tmp.replace(dest)
+    return dest
+
+
+def _load_chunks(
+    conditions: list[str], reps: int, results_dir: Path
+) -> dict[str, list[dict[str, Any]]] | None:
+    """All persisted worker results keyed by condition (ordered by rep), or None if any is missing."""
+    if _pending_chunks(conditions, reps, results_dir):
+        return None
+    return {
+        condition: [
+            cast(dict[str, Any], json.loads(_chunk_path(results_dir, condition, rep).read_text()))
+            for rep in range(reps)
+        ]
+        for condition in conditions
+    }
 
 
 def main() -> None:
@@ -500,6 +532,28 @@ def main() -> None:
         dest="images_dir",
         help="Root directory for saved bench images (one subdir per variant).",
     )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path(__file__).parent.parent / "tests" / "_artifacts" / "bench_chunks",
+        dest="results_dir",
+        help=(
+            "Root directory for per-chunk worker results (one subdir per variant; one JSON per "
+            "(condition, rep)). Existing chunks are REUSED on re-invocation — move the variant's "
+            "subdir to the Trash for a fresh measurement."
+        ),
+    )
+    parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=None,
+        dest="max_chunks",
+        help=(
+            "Run at most this many pending (condition, rep) chunks this invocation, then exit; "
+            "the report is written only once every chunk exists (re-invoke to continue). "
+            "With --reps 3, --max-chunks 3 = one condition per invocation."
+        ),
+    )
 
     # Legacy alias kept for backward-compat.
     parser.add_argument(
@@ -546,21 +600,39 @@ def main() -> None:
         conditions.append("wrapper_nogate")
     conditions.append("wrapper")
 
-    all_results: dict[str, list[dict[str, Any]]] = {}
+    results_dir: Path = args.results_dir / variant
+    pending = _pending_chunks(conditions, reps, results_dir)
+    total_chunks = len(conditions) * reps
+    if len(pending) < total_chunks:
+        reused = [f"{c}/rep{r}" for c in conditions for r in range(reps) if (c, r) not in pending]
+        print(f"\n== RESUMING: reusing {len(reused)}/{total_chunks} persisted chunks from {results_dir} ==")
+        for name in reused:
+            print(f"   {name}")
+    to_run = pending if args.max_chunks is None else pending[: args.max_chunks]
+    print(f"\n== running {len(to_run)} of {len(pending)} pending chunks (reps={reps}) ==")
 
-    for condition in conditions:
-        print(f"\n== {condition} x{reps} ==")
-        results = _run_condition(
+    for condition, rep in to_run:
+        result = _run_one_worker(
             variant=variant,
             condition=condition,
-            reps=reps,
+            rep=rep,
             cap_gb=cap_gb,
             num_inference_steps=num_inference_steps if args.num_inference_steps is not None else None,
             guidance=guidance if args.guidance is not None else None,
-            bench_dir=bench_dir,
-            three_way=three_way,
+            save_to=_image_path_for(bench_dir, condition, rep, three_way=three_way),
         )
-        all_results[condition] = results
+        written = _persist_chunk(results_dir, result)
+        print(f">> chunk persisted: {written}", flush=True)
+
+    loaded = _load_chunks(conditions, reps, results_dir)
+    if loaded is None:
+        remaining = _pending_chunks(conditions, reps, results_dir)
+        print(
+            f"\n== PARTIAL: {total_chunks - len(remaining)}/{total_chunks} chunks persisted under "
+            f"{results_dir}; {len(remaining)} pending — re-invoke to continue. No report written. =="
+        )
+        return
+    all_results: dict[str, list[dict[str, Any]]] = loaded
 
     # --- Aggregate ---
     def _times(cond: str) -> list[float]:

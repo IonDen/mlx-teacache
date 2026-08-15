@@ -152,3 +152,20 @@ def test_streak_telemetry_is_empty_before_any_committed_generation() -> None:
     from mlx_teacache._kernel.stats import TeaCacheStats
 
     assert bs._streak_telemetry(TeaCacheStats()) == {"skip_pattern": "", "max_consecutive_skips": 0}
+
+
+def test_wrapper_streak_arrays_are_per_rep_in_order() -> None:
+    results = [
+        {**_fake_result("wrapper", 0), "stats_summary": {"skip_pattern": "CSSC", "max_consecutive_skips": 2}},
+        {**_fake_result("wrapper", 1), "stats_summary": {"skip_pattern": "CSCS", "max_consecutive_skips": 1}},
+    ]
+    assert bs._wrapper_streak_arrays(results) == {
+        "skip_patterns": ["CSSC", "CSCS"],
+        "max_consecutive_skips": [2, 1],
+    }
+
+
+def test_wrapper_streak_arrays_tolerate_pre_telemetry_chunks() -> None:
+    # Chunks persisted before the telemetry fields existed carry neither key.
+    results = [_fake_result("wrapper", 0)]
+    assert bs._wrapper_streak_arrays(results) == {"skip_patterns": [""], "max_consecutive_skips": [0]}

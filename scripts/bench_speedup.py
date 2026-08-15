@@ -433,6 +433,14 @@ def _streak_telemetry(stats: Any) -> dict[str, Any]:
     return {"skip_pattern": pattern, "max_consecutive_skips": _max_skip_streak(pattern)}
 
 
+def _wrapper_streak_arrays(results: list[dict[str, Any]]) -> dict[str, list[Any]]:
+    """Per-rep skip patterns + max streaks for the report (empty/0 for pre-telemetry chunks)."""
+    return {
+        "skip_patterns": [str(r["stats_summary"].get("skip_pattern", "")) for r in results],
+        "max_consecutive_skips": [int(r["stats_summary"].get("max_consecutive_skips", 0)) for r in results],
+    }
+
+
 # --- Per-chunk persistence + resume ---------------------------------------
 # One (condition, rep) worker = one chunk. Each chunk's result is written to
 # disk the instant the worker returns, and a re-invocation skips chunks whose
@@ -722,6 +730,7 @@ def main() -> None:
             "speedup_median": speedup,
             "skipped_counts": skipped_counts,
             "computed_counts": computed_counts,
+            **_wrapper_streak_arrays(all_results["wrapper"]),
             "bench_images_dir": str(bench_dir),
             "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
             "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],

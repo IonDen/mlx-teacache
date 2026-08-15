@@ -479,15 +479,77 @@ def _fmt_speedup(x: float | None) -> str:
     return f"{x:.2f}x" if x is not None else "n/a"
 
 
-def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
-    """Run vanilla + wrapper subprocesses for one variant; merge into a JSON entry."""
+# --- Per-condition chunk persistence + resume --------------------------------
+# One (variant, condition) worker = one chunk. The worker result is written to
+# disk the moment the worker returns and a re-invocation reuses persisted
+# chunks, so a variant's ~1-2 h showcase run can be split into two finite jobs
+# (--max-workers 1) and an interruption loses at most the in-flight worker.
+
+_CONDITIONS: tuple[str, ...] = ("vanilla", "wrapper")
+
+
+def _chunk_path(chunks_dir: Path, slug: str, condition: str) -> Path:
+    return chunks_dir / slug / f"{condition}.json"
+
+
+def _pending_conditions(chunks_dir: Path, slug: str) -> list[str]:
+    """Conditions of one variant with no persisted worker result yet, in run order."""
+    return [c for c in _CONDITIONS if not _chunk_path(chunks_dir, slug, c).exists()]
+
+
+def _persist_chunk(chunks_dir: Path, slug: str, result: dict[str, Any]) -> Path:
+    """Write one worker result to its chunk file (atomic replace); return the path."""
+    dest = _chunk_path(chunks_dir, slug, str(result["condition"]))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(result, indent=2))
+    tmp.replace(dest)
+    return dest
+
+
+def _load_chunks(chunks_dir: Path, slug: str) -> dict[str, dict[str, Any]] | None:
+    """Both persisted worker results for one variant, or None while either is missing."""
+    if _pending_conditions(chunks_dir, slug):
+        return None
+    return {
+        c: cast(dict[str, Any], json.loads(_chunk_path(chunks_dir, slug, c).read_text())) for c in _CONDITIONS
+    }
+
+
+def _orchestrate(
+    cfg: VariantConfig, base_dir: Path, *, chunks_dir: Path, worker_budget: list[int]
+) -> dict[str, Any] | None:
+    """Run the pending vanilla / wrapper subprocesses for one variant (within the
+    remaining worker budget), persisting each result; return the merged JSON entry
+    once both conditions are on disk, else None (partial — re-invoke to continue).
+
+    ``worker_budget`` is a one-element list holding the number of workers this
+    invocation may still spawn (a negative value means unlimited); it is decremented
+    in place so the budget spans variants."""
     variant_dir = base_dir / cfg.slug
-
     vanilla_path = variant_dir / "vanilla.webp"
-    vanilla = _run_one_worker(cfg.slug, "vanilla", vanilla_path)
-
     wrapper_path = variant_dir / "wrapper.webp"
-    wrapper = _run_one_worker(cfg.slug, "wrapper", wrapper_path)
+    image_for = {"vanilla": vanilla_path, "wrapper": wrapper_path}
+
+    pending = _pending_conditions(chunks_dir, cfg.slug)
+    reused = [c for c in _CONDITIONS if c not in pending]
+    if reused:
+        print(f"  RESUMING: reusing persisted {reused} from {chunks_dir / cfg.slug}")
+    for condition in pending:
+        if worker_budget[0] == 0:
+            print(f"  worker budget exhausted before {cfg.slug}/{condition}; re-invoke to continue")
+            break
+        result = _run_one_worker(cfg.slug, condition, image_for[condition])
+        written = _persist_chunk(chunks_dir, cfg.slug, result)
+        print(f"  chunk persisted: {written}", flush=True)
+        if worker_budget[0] > 0:
+            worker_budget[0] -= 1
+
+    loaded = _load_chunks(chunks_dir, cfg.slug)
+    if loaded is None:
+        print(f"  PARTIAL: {cfg.slug} still pending {_pending_conditions(chunks_dir, cfg.slug)}; not merged")
+        return None
+    vanilla, wrapper = loaded["vanilla"], loaded["wrapper"]
 
     v = _condition_metrics(vanilla["rep_seconds"])
     w = _condition_metrics(wrapper["rep_seconds"])
@@ -526,6 +588,8 @@ def _orchestrate(cfg: VariantConfig, base_dir: Path) -> dict[str, Any]:
             "warm_median_seconds": w["warm"],
             "skipped_per_rep": wrapper["skipped_per_rep"],
             "computed_per_rep": wrapper["computed_per_rep"],
+            "skip_pattern_per_rep": wrapper.get("skip_pattern_per_rep", []),
+            "max_consecutive_skips_per_rep": wrapper.get("max_consecutive_skips_per_rep", []),
             "rel_l1_thresh_used": wrapper["rel_l1_thresh_used"],
             "peak_memory_gb": wrapper.get("peak_memory_gb"),
         },
@@ -579,6 +643,29 @@ def main() -> None:
         help="Restrict orchestration to a single variant slug (e.g. 'klein-base-4b-cfg'). "
         "Useful for resuming after a partial run.",
     )
+    parser.add_argument(
+        "--chunks-dir",
+        type=Path,
+        default=Path(__file__).parent.parent / "tests" / "_artifacts" / "comparison_chunks",
+        dest="chunks_dir",
+        help=(
+            "Directory for per-(variant, condition) worker results (git-ignored). Existing "
+            "chunks are REUSED on re-invocation — move a variant's subdir to the Trash for a "
+            "fresh measurement."
+        ),
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        dest="max_workers",
+        help=(
+            "Spawn at most this many worker subprocesses this invocation (one worker = one "
+            "(variant, condition), all reps inside it), then exit; a variant is merged into "
+            "the report only once both of its conditions are on disk. --max-workers 1 splits "
+            "each variant's showcase run into two finite jobs."
+        ),
+    )
     args = parser.parse_args()
     if args.reps is not None:  # applies to both orchestrator (report) and worker subprocess
         REPS = args.reps
@@ -612,18 +699,30 @@ def main() -> None:
     if args.only and not variants_to_run:
         raise SystemExit(f"--only {args.only!r} did not match any variant slug")
 
-    if args.only and report_path.exists():
+    if report_path.exists():
+        # Always merge into the existing report: each completed variant overwrites
+        # only its own row, so a --max-workers / --only run that finishes a subset
+        # of variants can never drop the others. Move the report to the Trash for
+        # a from-scratch file.
         report = json.loads(report_path.read_text())
-        print(f"Resuming from existing report at {report_path}")
+        print(f"Merging into existing report at {report_path}")
 
+    worker_budget = [args.max_workers if args.max_workers is not None else -1]
+    merged_any = False
     for cfg in variants_to_run:
         print(
             f"\n=== {cfg.variant_id} (slug={cfg.slug}) — "
             f"{cfg.num_inference_steps} steps, guidance={cfg.guidance} ==="
         )
-        entry = _orchestrate(cfg, base_dir)
+        entry = _orchestrate(cfg, base_dir, chunks_dir=args.chunks_dir, worker_budget=worker_budget)
+        if entry is None:
+            continue
         report = _merge_variant_into_report(report, cfg.slug, entry, provenance)
+        merged_any = True
 
+    if not merged_any:
+        print(f"\nNo variant completed this invocation; report at {report_path} left untouched.")
+        return
     report_path.write_text(json.dumps(report, indent=2))
     print(f"\nReport written: {report_path}")
     for slug, entry in report["variants"].items():

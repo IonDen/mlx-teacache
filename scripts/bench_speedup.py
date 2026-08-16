@@ -218,8 +218,9 @@ def _worker_main(args: argparse.Namespace) -> None:
                     cap_gb = hint
 
     wired_gb = max(1, cap_gb - 2)
-    mx.set_wired_limit(int(wired_gb * 1024**3))
-    mx.set_memory_limit(int(cap_gb * 1024**3))
+    from _mlx_caps import install_caps
+
+    install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
     print(
         f"  [worker] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
         flush=True,
@@ -300,6 +301,8 @@ def _worker_main(args: argparse.Namespace) -> None:
         "variant": variant,
         "condition": condition,
         "rep": rep,
+        "num_inference_steps": num_inference_steps,
+        "guidance": guidance,
         "elapsed_s": elapsed,
         "peak_memory_gb": peak_memory_gb,
         "stats_summary": stats_summary,
@@ -471,6 +474,30 @@ def _load_chunks(
     }
 
 
+def _verify_chunk_recipes(
+    conditions: list[str], reps: int, results_dir: Path, *, num_inference_steps: int, guidance: float
+) -> None:
+    """Refuse to reuse a persisted chunk measured under a different recipe.
+
+    Chunks are keyed by (condition, rep) only, so without this check a re-run
+    with another --num-inference-steps / --guidance would silently aggregate
+    the old timings under the new report header."""
+    expected = {"num_inference_steps": num_inference_steps, "guidance": guidance}
+    for condition in conditions:
+        for r in range(reps):
+            path = _chunk_path(results_dir, condition, r)
+            if not path.exists():
+                continue
+            chunk = json.loads(path.read_text())
+            for key, want in expected.items():
+                got = chunk.get(key)
+                if got is None or float(got) != float(want):
+                    raise SystemExit(
+                        f"persisted chunk {path} was measured with {key}={got} but this invocation "
+                        f"uses {key}={want}; move {results_dir} to the Trash for a fresh measurement"
+                    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -564,7 +591,8 @@ def main() -> None:
         help=(
             "Run at most this many pending (condition, rep) chunks this invocation, then exit; "
             "the report is written only once every chunk exists (re-invoke to continue). "
-            "With --reps 3, --max-chunks 3 = one condition per invocation."
+            "With --reps 3, --max-chunks 3 = one condition per invocation. An invocation that "
+            "leaves chunks pending exits with status 3."
         ),
     )
 
@@ -614,6 +642,9 @@ def main() -> None:
     conditions.append("wrapper")
 
     results_dir: Path = args.results_dir / variant
+    _verify_chunk_recipes(
+        conditions, reps, results_dir, num_inference_steps=num_inference_steps, guidance=guidance
+    )
     pending = _pending_chunks(conditions, reps, results_dir)
     total_chunks = len(conditions) * reps
     if len(pending) < total_chunks:
@@ -644,7 +675,7 @@ def main() -> None:
             f"\n== PARTIAL: {total_chunks - len(remaining)}/{total_chunks} chunks persisted under "
             f"{results_dir}; {len(remaining)} pending — re-invoke to continue. No report written. =="
         )
-        return
+        sys.exit(3)
     all_results: dict[str, list[dict[str, Any]]] = loaded
 
     # --- Aggregate ---

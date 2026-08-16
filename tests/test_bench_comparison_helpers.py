@@ -19,6 +19,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import bench_comparison as bc  # noqa: E402
 
@@ -143,6 +145,20 @@ def _fake_worker(condition: str, secs: list[float]) -> dict[str, object]:
     return out
 
 
+def _stamped(
+    condition: str, secs: list[float], *, teacache: str = "0.10.0", mflux: str = "0.18.0"
+) -> dict[str, object]:
+    return {
+        **_fake_worker(condition, secs),
+        "reps": len(secs),
+        "provenance": {
+            "mlx_teacache_version": teacache,
+            "mflux_version": mflux,
+            "generated_at": "2026-08-16T09:00:00Z",
+        },
+    }
+
+
 def test_chunk_path_is_slug_and_condition_keyed(tmp_path: Path) -> None:
     assert bc._chunk_path(tmp_path, "z-image", "wrapper") == tmp_path / "z-image" / "wrapper.json"
 
@@ -164,10 +180,41 @@ def test_persist_chunk_round_trips_and_creates_dirs(tmp_path: Path) -> None:
 
 
 def test_load_chunks_is_none_until_both_conditions_exist(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "z-image", _fake_worker("vanilla", [3.0, 2.0, 2.0]))
-    assert bc._load_chunks(tmp_path, "z-image") is None
-    bc._persist_chunk(tmp_path, "z-image", _fake_worker("wrapper", [2.0, 1.0, 1.0]))
-    loaded = bc._load_chunks(tmp_path, "z-image")
+    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0]))
+    assert bc._load_chunks(tmp_path, "z-image", reps=3) is None
+    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    loaded = bc._load_chunks(tmp_path, "z-image", reps=3)
     assert loaded is not None
     assert loaded["vanilla"]["rep_seconds"] == [3.0, 2.0, 2.0]
     assert loaded["wrapper"]["skipped_per_rep"] == [4, 4, 4]
+
+
+# --- provenance / reps stamps: both conditions of a row must come from one measurement setup ---
+
+
+def test_load_chunks_accepts_a_pair_from_the_same_setup(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0]))
+    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    loaded = bc._load_chunks(tmp_path, "z-image", reps=3)
+    assert loaded is not None and loaded["wrapper"]["provenance"]["mlx_teacache_version"] == "0.10.0"
+
+
+def test_load_chunks_refuses_a_pair_measured_on_different_versions(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0], teacache="0.9.0"))
+    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0], teacache="0.10.0"))
+    with pytest.raises(SystemExit, match="mlx_teacache_version.*0.9.0.*0.10.0"):
+        bc._load_chunks(tmp_path, "z-image", reps=3)
+
+
+def test_load_chunks_refuses_a_chunk_with_the_wrong_rep_count(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("vanilla", [3.0]))  # a --reps 1 preview
+    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    with pytest.raises(SystemExit, match="vanilla.json.*reps=1.*3"):
+        bc._load_chunks(tmp_path, "flux1-dev", reps=3)
+
+
+def test_load_chunks_refuses_an_unstamped_chunk(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "flux1-dev", _fake_worker("vanilla", [3.0, 2.0, 2.0]))
+    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    with pytest.raises(SystemExit, match="vanilla.json"):
+        bc._load_chunks(tmp_path, "flux1-dev", reps=3)

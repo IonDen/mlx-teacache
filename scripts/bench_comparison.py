@@ -284,6 +284,7 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
             flush=True,
         )
         del image
+        del handle  # release the rep's cached residuals before clearing MLX's cache pool
         if cfg.clear_cache_between_reps:
             mx.clear_cache()
     return {
@@ -301,16 +302,15 @@ def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
 def _worker_main(args: argparse.Namespace) -> None:
     """Subprocess entrypoint. Runs one (variant, condition) pair and prints
     a single JSON line prefixed by WORKER_RESULT_SENTINEL on stdout."""
-    import mlx.core as mx
-
     cfg = next(v for v in VARIANTS if v.slug == args.variant)
     # Memory guardrail — before any model load. wired must stay strictly below
     # max_recommended_working_set_size (25 GB on M1 Max 32GB) so the worst case
     # is a clean MLX OOM, never a kernel watchdog panic.
     wired = cfg.wired_cap_gb
     soft = cfg.soft_cap_gb or (wired + 1)
-    mx.set_wired_limit(int(wired * 1024**3))
-    mx.set_memory_limit(int(soft * 1024**3))
+    from _mlx_caps import install_caps
+
+    install_caps(wired_gb=wired, soft_gb=soft)  # device-clamped: never above the system wired limit
     print(
         f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired} GB soft={soft} GB, "
         f"res={cfg.width}x{cfg.height} q{cfg.quantize}",
@@ -507,17 +507,49 @@ def _persist_chunk(chunks_dir: Path, slug: str, result: dict[str, Any]) -> Path:
     return dest
 
 
-def _load_chunks(chunks_dir: Path, slug: str) -> dict[str, dict[str, Any]] | None:
-    """Both persisted worker results for one variant, or None while either is missing."""
+_PROVENANCE_KEYS: tuple[str, ...] = ("mlx_teacache_version", "mflux_version")
+
+
+def _load_chunks(chunks_dir: Path, slug: str, *, reps: int) -> dict[str, dict[str, Any]] | None:
+    """Both persisted worker results for one variant, or None while either is missing.
+
+    Refuses (SystemExit) to pair chunks that were not measured under one setup:
+    each chunk must be stamped with ``reps`` equal to this invocation's and with a
+    ``provenance`` whose package versions match across the pair — otherwise a row
+    could silently combine a vanilla timing from one release with a wrapper timing
+    from another under a single provenance stamp."""
     if _pending_conditions(chunks_dir, slug):
         return None
-    return {
+    loaded = {
         c: cast(dict[str, Any], json.loads(_chunk_path(chunks_dir, slug, c).read_text())) for c in _CONDITIONS
     }
+    hint = f"move {chunks_dir / slug} to the Trash for a fresh measurement"
+    for c, chunk in loaded.items():
+        path = _chunk_path(chunks_dir, slug, c)
+        if "provenance" not in chunk or "reps" not in chunk:
+            raise SystemExit(f"persisted chunk {path} has no reps/provenance stamp; {hint}")
+        if int(chunk["reps"]) != reps:
+            raise SystemExit(
+                f"persisted chunk {path} was measured with reps={chunk['reps']} but this "
+                f"invocation uses reps={reps}; {hint}"
+            )
+    for key in _PROVENANCE_KEYS:
+        values = {c: loaded[c]["provenance"].get(key) for c in _CONDITIONS}
+        if len(set(values.values())) != 1:
+            raise SystemExit(
+                f"{slug}: vanilla/wrapper chunks were measured on different {key} "
+                f"({values['vanilla']} vs {values['wrapper']}); {hint}"
+            )
+    return loaded
 
 
 def _orchestrate(
-    cfg: VariantConfig, base_dir: Path, *, chunks_dir: Path, worker_budget: list[int]
+    cfg: VariantConfig,
+    base_dir: Path,
+    *,
+    chunks_dir: Path,
+    worker_budget: list[int],
+    provenance: dict[str, str],
 ) -> dict[str, Any] | None:
     """Run the pending vanilla / wrapper subprocesses for one variant (within the
     remaining worker budget), persisting each result; return the merged JSON entry
@@ -540,12 +572,14 @@ def _orchestrate(
             print(f"  worker budget exhausted before {cfg.slug}/{condition}; re-invoke to continue")
             break
         result = _run_one_worker(cfg.slug, condition, image_for[condition])
-        written = _persist_chunk(chunks_dir, cfg.slug, result)
+        # Stamp the chunk with this run's reps + provenance so a later invocation can
+        # refuse to pair it with a chunk from a different setup.
+        written = _persist_chunk(chunks_dir, cfg.slug, {**result, "reps": REPS, "provenance": provenance})
         print(f"  chunk persisted: {written}", flush=True)
         if worker_budget[0] > 0:
             worker_budget[0] -= 1
 
-    loaded = _load_chunks(chunks_dir, cfg.slug)
+    loaded = _load_chunks(chunks_dir, cfg.slug, reps=REPS)
     if loaded is None:
         print(f"  PARTIAL: {cfg.slug} still pending {_pending_conditions(chunks_dir, cfg.slug)}; not merged")
         return None
@@ -595,6 +629,7 @@ def _orchestrate(
         },
         "speedup_warm": speedup_warm,
         "speedup_cold": speedup_cold,
+        "chunk_provenance": {c: loaded[c]["provenance"] for c in _CONDITIONS},
         "image_paths": {
             "vanilla": str(vanilla_path.relative_to(base_dir.parent.parent)),
             "wrapper": str(wrapper_path.relative_to(base_dir.parent.parent)),
@@ -663,7 +698,8 @@ def main() -> None:
             "Spawn at most this many worker subprocesses this invocation (one worker = one "
             "(variant, condition), all reps inside it), then exit; a variant is merged into "
             "the report only once both of its conditions are on disk. --max-workers 1 splits "
-            "each variant's showcase run into two finite jobs."
+            "each variant's showcase run into two finite jobs; an invocation that completes "
+            "no variant exits with status 3."
         ),
     )
     args = parser.parse_args()
@@ -714,7 +750,9 @@ def main() -> None:
             f"\n=== {cfg.variant_id} (slug={cfg.slug}) — "
             f"{cfg.num_inference_steps} steps, guidance={cfg.guidance} ==="
         )
-        entry = _orchestrate(cfg, base_dir, chunks_dir=args.chunks_dir, worker_budget=worker_budget)
+        entry = _orchestrate(
+            cfg, base_dir, chunks_dir=args.chunks_dir, worker_budget=worker_budget, provenance=provenance
+        )
         if entry is None:
             continue
         report = _merge_variant_into_report(report, cfg.slug, entry, provenance)
@@ -722,7 +760,7 @@ def main() -> None:
 
     if not merged_any:
         print(f"\nNo variant completed this invocation; report at {report_path} left untouched.")
-        return
+        sys.exit(3)
     report_path.write_text(json.dumps(report, indent=2))
     print(f"\nReport written: {report_path}")
     for slug, entry in report["variants"].items():

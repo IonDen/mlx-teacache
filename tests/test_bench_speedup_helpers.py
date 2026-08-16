@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import _bench_telemetry as bt  # noqa: E402
 import bench_speedup as bs  # noqa: E402
@@ -170,3 +172,49 @@ def test_wrapper_streak_arrays_tolerate_pre_telemetry_chunks() -> None:
     # Chunks persisted before the telemetry fields existed carry neither key.
     results = [_fake_result("wrapper", 0)]
     assert bs._wrapper_streak_arrays(results) == {"skip_patterns": [""], "max_consecutive_skips": [0]}
+
+
+# --- recipe stamp: a persisted chunk must match the invocation that reuses it ---
+
+
+def test_verify_chunk_recipes_accepts_matching_stamps(tmp_path: Path) -> None:
+    bs._persist_chunk(tmp_path, {**_fake_result("vanilla", 0), "num_inference_steps": 25, "guidance": 3.5})
+    bs._verify_chunk_recipes(["vanilla", "wrapper"], 1, tmp_path, num_inference_steps=25, guidance=3.5)
+
+
+def test_verify_chunk_recipes_refuses_a_chunk_from_a_different_recipe(tmp_path: Path) -> None:
+    bs._persist_chunk(tmp_path, {**_fake_result("vanilla", 0), "num_inference_steps": 20, "guidance": 3.5})
+    with pytest.raises(SystemExit, match="vanilla_rep0.json.*num_inference_steps=20.*25"):
+        bs._verify_chunk_recipes(["vanilla"], 1, tmp_path, num_inference_steps=25, guidance=3.5)
+
+
+def test_verify_chunk_recipes_refuses_an_unstamped_chunk(tmp_path: Path) -> None:
+    bs._persist_chunk(tmp_path, _fake_result("wrapper", 2))  # no recipe keys at all
+    with pytest.raises(SystemExit, match="wrapper_rep2.json"):
+        bs._verify_chunk_recipes(["wrapper"], 3, tmp_path, num_inference_steps=25, guidance=3.5)
+
+
+# --- wired-cap clamp (shared scripts/_mlx_caps.py) --------------------------
+
+
+def test_clamped_wired_bytes_keeps_a_request_below_the_device_ceiling() -> None:
+    import _mlx_caps
+
+    gib = 1024**3
+    # 20 GB requested on a 32 GB M1 Max (recommended working set ~25 GB): the request wins.
+    assert _mlx_caps.clamped_wired_bytes(20, 25 * gib) == 20 * gib
+
+
+def test_clamped_wired_bytes_clamps_to_a_fraction_of_a_small_device_ceiling() -> None:
+    import _mlx_caps
+
+    gib = 1024**3
+    # 22 GB requested on a 16 GB Mac (recommended ~10.6 GB): clamp to 85% of the ceiling, not raise.
+    assert _mlx_caps.clamped_wired_bytes(22, int(10.6 * gib)) == int(int(10.6 * gib) * 0.85)
+
+
+def test_clamped_wired_bytes_rejects_nonpositive_requests() -> None:
+    import _mlx_caps
+
+    with pytest.raises(ValueError):
+        _mlx_caps.clamped_wired_bytes(0, 25 * 1024**3)

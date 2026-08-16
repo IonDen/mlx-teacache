@@ -209,8 +209,9 @@ def _run_worker(unit: str, *, chunk_dir: Path, dry_run: bool) -> None:
     hint = registry_entry["META"].get("memory_cap_hint_gb") if registry_entry is not None else None
     cap_gb = hint if hint is not None else _DEFAULT_CAP_GB
     wired_gb = max(1, cap_gb - 2)
-    mx.set_wired_limit(int(wired_gb * 1024**3))
-    mx.set_memory_limit(int(cap_gb * 1024**3))
+    from _mlx_caps import install_caps
+
+    install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
     print(
         f"[worker {unit}] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
         flush=True,

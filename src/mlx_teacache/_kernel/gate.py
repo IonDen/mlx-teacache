@@ -85,11 +85,13 @@ def gate_step(  # type: ignore[no-untyped-def]
         )
 
     # Forced windows: full forward, but DO NOT update the cache so a forced
-    # output doesn't poison the cache for a later threshold-gated step. The
-    # ANCHOR does advance (upstream-faithful): the signal is real, and the
-    # next gated step must measure a consecutive delta against it.
+    # output doesn't poison the cache for a later threshold-gated step. In the
+    # LEADING window the anchor does advance (upstream-faithful): the signal is
+    # real, and the first gated step must measure a consecutive delta against
+    # it. In the TRAILING window nothing gated follows, so the anchor is left
+    # alone (writing it would only cost a host sync per trailing step).
     if step_idx < skip_first or step_idx >= num_steps - skip_last:
-        if _all_finite(mod_in):
+        if step_idx < skip_first and _all_finite(mod_in):
             state.previous_mod_input = mod_in
         return GateDecision(
             kind="forced",
@@ -100,15 +102,24 @@ def gate_step(  # type: ignore[no-untyped-def]
             accumulated_distance=state.accumulated_distance,
         )
 
-    # Numerical safety: non-finite mod_in. Compute (recover), but NEVER cache.
+    # Numerical safety: non-finite mod_in. Compute (recover), but NEVER cache —
+    # and drop the residual cached BEFORE the miss, so the next finite step
+    # re-seeds (compute + cache) instead of skipping on a residual that is now
+    # >= 2 diffusion steps stale, judged against a pre-miss anchor. The anchor
+    # itself cannot advance to a non-finite value; it stays where it was, and
+    # the re-seed refreshes it. Accumulator and streak restart with the cache.
     if not _all_finite(mod_in):
+        state.cached_residual = None
+        state.cached_residual_neg = None
+        state.accumulated_distance = 0.0
+        state.consecutive_skips = 0
         return GateDecision(
             kind="numerical-miss",
             should_compute=True,
             should_update_cache=False,
             rel_l1=None,
             predicted_distance=None,
-            accumulated_distance=state.accumulated_distance,
+            accumulated_distance=0.0,
         )
 
     # Seed / re-seed: no anchor yet, OR an anchor without a cached residual

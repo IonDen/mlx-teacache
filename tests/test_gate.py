@@ -337,3 +337,47 @@ def test_forced_step_advances_anchor_but_not_streak():
     assert decision.kind == "forced"
     assert state.previous_mod_input is mod_in
     assert state.consecutive_skips == 3
+
+
+def test_numerical_miss_drops_the_cache_so_the_next_step_reseeds():
+    """A non-finite mod_in computes-without-caching; it must ALSO invalidate the
+    residual cached before the miss and zero the accumulator/streak, so the next
+    finite step re-seeds (compute + cache) instead of skipping on a residual that
+    is now >= 2 diffusion steps stale, judged against a pre-miss anchor."""
+    state = _fresh_state()
+    state.previous_mod_input = mx.ones((1, 16, 64))
+    state.cached_residual = mx.ones((1, 16, 64))
+    state.cached_residual_neg = mx.ones((1, 16, 64))
+    state.accumulated_distance = 0.2
+    state.consecutive_skips = 3
+    kw = dict(rel_l1_thresh=10.0, coefficients=COEFFS, skip_first=1, skip_last=1, num_steps=25)
+
+    miss = gate_step(state, step_idx=5, mod_in=mx.full((1, 16, 64), float("nan")), **kw)
+    assert miss.kind == "numerical-miss"
+    assert state.cached_residual is None and state.cached_residual_neg is None
+    assert state.accumulated_distance == 0.0 and state.consecutive_skips == 0
+
+    # Huge threshold: without the cache drop this step would be a "skipped" on the stale residual.
+    nxt = gate_step(state, step_idx=6, mod_in=mx.ones((1, 16, 64)) * 1.01, **kw)
+    assert nxt.kind == "computed"
+    assert nxt.should_compute is True and nxt.should_update_cache is True
+
+
+def test_trailing_forced_window_leaves_the_anchor_alone():
+    """Once step_idx >= num_steps - skip_last every remaining step is forced, so
+    an anchor written there could never be read (the next generation resets it).
+    Skipping the write also skips its host sync on the trailing steps."""
+    state = _seeded_state()
+    old_anchor = state.previous_mod_input
+    decision = gate_step(
+        state,
+        coefficients=_FLAT_COEFFS,
+        rel_l1_thresh=0.5,
+        skip_first=1,
+        skip_last=2,
+        num_steps=25,
+        step_idx=23,  # inside the skip_last window
+        mod_in=mx.ones((4,)) * 2.0,
+    )
+    assert decision.kind == "forced"
+    assert state.previous_mod_input is old_anchor

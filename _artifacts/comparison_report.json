@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-18T08:09Z",
+  "generated_at": "2026-08-16T20:34Z",
   "hardware": {
     "chip": "Apple M1 Max",
     "ram_gb": 32,
     "machine": "arm64",
     "os": "Darwin 25.4.0",
-    "mlx_teacache_version": "0.9.0",
-    "mflux_version": "0.17.5",
+    "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+    "mflux_version": "0.18.0",
     "quantize": 4,
     "dtype": "bf16"
   },
@@ -23,23 +23,28 @@
       "variant_id": "flux1-dev",
       "num_inference_steps": 25,
       "guidance": 3.5,
+      "height": 1024,
+      "width": 768,
+      "quantize": 4,
+      "build": "uniform q4",
       "vanilla": {
         "rep_seconds": [
-          237.96820179198403,
-          233.94918287498876,
-          232.413415041985
+          239.08206845796667,
+          235.6923711670097,
+          235.2484175839927
         ],
-        "cold_seconds": 237.96820179198403,
-        "warm_median_seconds": 233.18129895848688
+        "cold_seconds": 239.08206845796667,
+        "warm_median_seconds": 235.4703943755012,
+        "peak_memory_gb": 14.599537156522274
       },
       "wrapper": {
         "rep_seconds": [
-          200.12005654198583,
-          199.75026800000342,
-          196.75738862500293
+          198.8665495000314,
+          198.72125154099194,
+          197.57800808298634
         ],
-        "cold_seconds": 200.12005654198583,
-        "warm_median_seconds": 198.25382831250317,
+        "cold_seconds": 198.8665495000314,
+        "warm_median_seconds": 198.14962981198914,
         "skipped_per_rep": [
           4,
           4,
@@ -50,36 +55,57 @@
           19,
           19
         ],
-        "rel_l1_thresh_used": 0.2
+        "skip_pattern_per_rep": [
+          "CCCCCSCSCSCCSCCCCCCCCCCCC",
+          "CCCCCSCSCSCCSCCCCCCCCCCCC",
+          "CCCCCSCSCSCCSCCCCCCCCCCCC"
+        ],
+        "max_consecutive_skips_per_rep": [
+          1,
+          1,
+          1
+        ],
+        "rel_l1_thresh_used": 0.2,
+        "peak_memory_gb": 17.196059826761484
       },
-      "speedup_warm": 1.1761755167266092,
-      "speedup_cold": 1.1891271964639762,
+      "speedup_warm": 1.188346375407934,
+      "speedup_cold": 1.2022236472601389,
       "image_paths": {
         "vanilla": "_artifacts/comparison/flux1-dev/vanilla.webp",
         "wrapper": "_artifacts/comparison/flux1-dev/wrapper.webp"
+      },
+      "provenance": {
+        "generated_at": "2026-08-16T08:34Z",
+        "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+        "mflux_version": "0.18.0"
       }
     },
     "klein-base-4b-cfg": {
       "variant_id": "flux2-klein-base-4b",
       "num_inference_steps": 50,
       "guidance": 4.0,
+      "height": 1024,
+      "width": 768,
+      "quantize": 4,
+      "build": "uniform q4",
       "vanilla": {
         "rep_seconds": [
-          576.2358970000059,
-          600.1176347080036,
-          603.0950726660085
+          575.0535123749869,
+          573.8259964589961,
+          573.1435732499813
         ],
-        "cold_seconds": 576.2358970000059,
-        "warm_median_seconds": 601.606353687006
+        "cold_seconds": 575.0535123749869,
+        "warm_median_seconds": 573.4847848544887,
+        "peak_memory_gb": 13.905159439891577
       },
       "wrapper": {
         "rep_seconds": [
-          486.4021731669782,
-          503.05899770901306,
-          503.57297800004017
+          485.43375708401436,
+          485.3760986250127,
+          486.0018649160047
         ],
-        "cold_seconds": 486.4021731669782,
-        "warm_median_seconds": 503.3159878545266,
+        "cold_seconds": 485.43375708401436,
+        "warm_median_seconds": 485.6889817705087,
         "skipped_per_rep": [
           8,
           8,
@@ -90,13 +116,41 @@
           40,
           40
         ],
-        "rel_l1_thresh_used": 0.17
+        "skip_pattern_per_rep": [
+          "CCCSCSCSCSCCCCSCCSCSCCCCCCCCCCCCCCCCCCCCCCCCSCCCCC",
+          "CCCSCSCSCSCCCCSCCSCSCCCCCCCCCCCCCCCCCCCCCCCCSCCCCC",
+          "CCCSCSCSCSCCCCSCCSCSCCCCCCCCCCCCCCCCCCCCCCCCSCCCCC"
+        ],
+        "max_consecutive_skips_per_rep": [
+          1,
+          1,
+          1
+        ],
+        "rel_l1_thresh_used": 0.17,
+        "peak_memory_gb": 10.054234255105257
       },
-      "speedup_warm": 1.1952856022942158,
-      "speedup_cold": 1.1846902188946193,
+      "speedup_warm": 1.1807654823956129,
+      "speedup_cold": 1.1846178886060905,
+      "chunk_provenance": {
+        "vanilla": {
+          "generated_at": "2026-08-16T10:34Z",
+          "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+          "mflux_version": "0.18.0"
+        },
+        "wrapper": {
+          "generated_at": "2026-08-16T12:45Z",
+          "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+          "mflux_version": "0.18.0"
+        }
+      },
       "image_paths": {
         "vanilla": "_artifacts/comparison/klein-base-4b-cfg/vanilla.webp",
         "wrapper": "_artifacts/comparison/klein-base-4b-cfg/wrapper.webp"
+      },
+      "provenance": {
+        "generated_at": "2026-08-16T12:45Z",
+        "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+        "mflux_version": "0.18.0"
       }
     },
     "z-image": {
@@ -106,24 +160,25 @@
       "height": 896,
       "width": 640,
       "quantize": 8,
+      "build": "uniform q8",
       "vanilla": {
         "rep_seconds": [
-          530.3882517910097,
-          550.208780416986,
-          576.3461245000362
+          510.1152169170091,
+          510.7886509170057,
+          510.8516350829741
         ],
-        "cold_seconds": 530.3882517910097,
-        "warm_median_seconds": 563.2774524585111,
-        "peak_memory_gb": 18.711246106773615
+        "cold_seconds": 510.1152169170091,
+        "warm_median_seconds": 510.8201429999899,
+        "peak_memory_gb": 18.709770968183875
       },
       "wrapper": {
         "rep_seconds": [
-          414.98582854197593,
-          425.0204505419824,
-          424.6363683340023
+          381.869477417029,
+          380.31676937500015,
+          379.84685995802283
         ],
-        "cold_seconds": 414.98582854197593,
-        "warm_median_seconds": 424.8284094379924,
+        "cold_seconds": 381.869477417029,
+        "warm_median_seconds": 380.0818146665115,
         "skipped_per_rep": [
           14,
           14,
@@ -134,14 +189,41 @@
           34,
           34
         ],
+        "skip_pattern_per_rep": [
+          "CCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCCCCC",
+          "CCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCCCCC",
+          "CCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCCCCC"
+        ],
+        "max_consecutive_skips_per_rep": [
+          1,
+          1,
+          1
+        ],
         "rel_l1_thresh_used": 0.12,
-        "peak_memory_gb": 13.062947861850262
+        "peak_memory_gb": 13.887308984994888
       },
-      "speedup_warm": 1.3258940314365362,
-      "speedup_cold": 1.2780876244726047,
+      "speedup_warm": 1.343974174213491,
+      "speedup_cold": 1.3358365805181296,
+      "chunk_provenance": {
+        "vanilla": {
+          "generated_at": "2026-08-16T14:48Z",
+          "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+          "mflux_version": "0.18.0"
+        },
+        "wrapper": {
+          "generated_at": "2026-08-16T20:34Z",
+          "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+          "mflux_version": "0.18.0"
+        }
+      },
       "image_paths": {
         "vanilla": "_artifacts/comparison/z-image/vanilla.webp",
         "wrapper": "_artifacts/comparison/z-image/wrapper.webp"
+      },
+      "provenance": {
+        "generated_at": "2026-08-16T20:34Z",
+        "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+        "mflux_version": "0.18.0"
       }
     },
     "qwen-image": {

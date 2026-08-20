@@ -3,6 +3,8 @@
 *A case study from `mlx-teacache` and the test-oracle discipline that replaced a
 bit-exactness gate*
 
+> 📄 [Read on the website](https://ineshin.space/papers/why-byte-exact-parity-is-a-poor-mlx-integration-oracle/) — same paper, formatted for reading.
+
 Byte-exact fixtures looked like the safest way to test `mlx-teacache`. They were not.
 One day before the library's first release in May 2026, its threshold-zero wrapper failed against
 stored vanilla [mflux](https://github.com/filipstrand/mflux) output on **5 of 5** FLUX.1-dev

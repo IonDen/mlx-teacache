@@ -1,0 +1,80 @@
+{
+  "schema_version": 2,
+  "isolation": "subprocess-per-rep",
+  "variant": "qwen",
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 768,
+  "width": 768,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.6.0",
+    "mlx_teacache_version": "0.9.4.dev8+g90fca33c9",
+    "mflux_version": "0.18.0",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "vanilla_seconds": [
+    851.4714406250002,
+    850.3233786249998,
+    849.0287250830002
+  ],
+  "wrapper_seconds": [
+    279.16124508400026,
+    296.44283320900104,
+    282.01663587499934
+  ],
+  "vanilla_median": 850.3233786249998,
+  "wrapper_median": 282.01663587499934,
+  "speedup_median": 3.015153258554208,
+  "skipped_counts": [
+    33,
+    33,
+    33
+  ],
+  "computed_counts": [
+    15,
+    15,
+    15
+  ],
+  "skip_patterns": [
+    "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC",
+    "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC",
+    "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC"
+  ],
+  "max_consecutive_skips": [
+    4,
+    4,
+    4
+  ],
+  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/qwen",
+  "vanilla_peak_memory_gb": [
+    26.160133339464664,
+    26.160082794725895,
+    26.16013429313898
+  ],
+  "wrapper_peak_memory_gb": [
+    26.239252977073193,
+    26.23925106972456,
+    26.23924534767866
+  ],
+  "nogate_seconds": [
+    770.6973016250004,
+    769.5421543749999,
+    780.8207841250005
+  ],
+  "nogate_median": 770.6973016250004,
+  "compile_avoidance_ratio": 1.1033169271932177,
+  "gating_ratio": 2.732807939623119,
+  "combined_ratio": 3.015153258554208,
+  "nogate_peak_memory_gb": [
+    26.160133339464664,
+    26.160112358629704,
+    26.160156704485416
+  ]
+}

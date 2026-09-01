@@ -7,13 +7,15 @@ Visual showcase of what the wrapper does on real generations. Two harnesses cont
 
 The two harnesses use different prompts and resolutions (the bench_comparison rows use the 768×1024 portrait listed below, except z-image-base at 640×896 and qwen-image at 768×768; bench_speedup is the 512×512 red-apple recipe described in the README's Benchmarks section). Cross-reading the numbers across rows therefore requires care.
 
-The `flux1-dev`, `flux2-klein-base-4b`, and `z-image-base` images were regenerated on 2026-08-16 under the v0.10.0 gate and came out byte-identical to the files the previous release committed, so the timings below are re-measured while the pictures are the same ones you saw before. The `qwen-image` row is carried over from its v0.9.0 measurement.
+The `flux1-dev`, `flux2-klein-base-4b`, and `z-image-base` images were regenerated on 2026-08-16 under the v0.10.0 gate and came out byte-identical to the files the previous release committed, so the timings below are re-measured while the pictures are the same ones you saw before.
+
+The `qwen-image` row is different, and should not be read as one of those. It is carried over from its v0.9.0 measurement and v0.10.0 would **not** reproduce it: the corrected gate anchoring makes Qwen skip more of its schedule, so both its timing and its image move. Measured on the red-apple recipe, Qwen goes from 24 skipped steps to 33 and from SSIM 0.978 to 0.967 against vanilla. The portrait below was not re-run — the recipe peaks above 30 GB on this 32 GB machine — so it stands as a record of what 0.9.x produced, not of what this release does.
 
 Only non-distilled variants are listed here. Distilled schedules (`flux1-schnell`, `flux2-klein-4b`, `flux2-klein-9b`) skip zero steps and gain nothing from the wrapper. See the "When to use mlx-teacache" section in the README for the recommendation.
 
 ## Test machine
 
-Apple M1 Max, 32 GB unified memory, macOS Darwin 25.4.0. Models loaded at `quantize=4` in bf16 via mflux 0.17.5 (q8 for the `z-image-base` row — its pinned recipe). mlx-teacache 0.9.2.
+Apple M1 Max, 32 GB unified memory. Models loaded at `quantize=4` in bf16 (q8 for the `z-image-base` row — its pinned recipe). The `flux1-dev`, `flux2-klein-base-4b`, `flux2-klein-base-9b`, and `z-image-base` rows were measured under mlx-teacache 0.10.0 on mflux 0.18.0 (macOS Darwin 25.4.0, and 25.6.0 for the 9B row); the `qwen-image` row is the earlier mlx-teacache 0.9.0 measurement on mflux 0.17.5.
 
 Shared inputs across every cell:
 
@@ -105,7 +107,9 @@ Two notes on the numbers. The warm 1.34× here sits next to the 1.31× the READM
 
 This row uses the shared portrait prompt and seed at **768×768** rather than the page's 768×1024 — same portrait subject as the other rows, only the resolution (and incidentally the aspect) differs. Qwen-Image is a ~20B model; on a 32 GB Mac, stock 4-bit quantization is grainy (a Qwen + q4 limitation, not TeaCache), so these portraits were rendered with a mixed-precision build (8-bit edge transformer blocks + bf16 embeddings), which clears the artifact and peaks ~30.4 GB. mlx-teacache itself stays quantization-agnostic; the [variant page](docs/variants/qwen-image.md) has the construction snippet.
 
-Qwen-Image (Alibaba, Apache-2.0) is a dual-stream MMDiT, FLUX-shaped, so it gets the FLUX-canonical gate signal — the modulated block-0 image input — calibrated at R² 0.849. At the quality-first threshold of 0.30 the wrapper skips 25 of the 48 active steps (~52%), each skip avoiding both CFG branches' 60-block bodies, and the two portraits are perceptually equivalent (SSIM 0.987). The speedup is entirely step-skipping: Qwen-Image's `_predict` is not `mx.compile`-wrapped in mflux, so unlike the FLUX.2 variants there is no compile-path effect to attribute separately.
+Qwen-Image (Alibaba, Apache-2.0) is a dual-stream MMDiT, FLUX-shaped, so it gets the FLUX-canonical gate signal — the modulated block-0 image input — calibrated at R² 0.849. At the quality-first threshold of 0.30 the wrapper skips 25 of the 48 active steps (~52%) here, each skip avoiding both CFG branches' 60-block bodies, and the two portraits are perceptually equivalent (SSIM 0.987).
+
+Both numbers are v0.9.0's. Under v0.10.0 the same threshold skips more — 33 of 48 on the red-apple recipe the README benchmarks use, at SSIM 0.967 against vanilla — for a 3.02× speedup there. The attribution also changed: the three-way bench shows the no-gate wrapper running 1.10× faster than vanilla with nothing skipped, so the claim that Qwen's win is purely step-skipping no longer holds, and that residual has no established cause. See the README's Benchmarks footnote ⁷.
 
 ## What is excluded and why
 

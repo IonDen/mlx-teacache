@@ -32,10 +32,12 @@ monotonic instead of matching upstream's raw polynomial exactly.
 ### Observed max consecutive-skip streaks
 
 Measured at each variant's default threshold on the committed bench recipes
-(M1 Max 32 GB, mflux 0.18.0, three cold reps per condition, 2026-08-15). The
-bench reports carry a per-rep `skip_patterns` string (`S` = skipped, `C` =
-computed) and `max_consecutive_skips`; the streak below is the maximum across
-reps, and in every case each rep produced the same pattern.
+(M1 Max 32 GB, mflux 0.18.0, three cold reps per condition; the first four on
+2026-08-15, qwen-image on 2026-09-01). Every row but qwen-image renders at
+512×512; qwen-image uses its pinned 768×768. The bench reports carry a per-rep
+`skip_patterns` string (`S` = skipped, `C` = computed) and
+`max_consecutive_skips`; the streak below is the maximum across reps, and in
+every case each rep produced the same pattern.
 
 | Variant | Default threshold | Skips (active steps) | Max observed streak | Source |
 |---|---|---|---|---|
@@ -43,13 +45,22 @@ reps, and in every case each rep produced the same pattern.
 | `flux2-klein-base-4b` | 0.17 | 9 / 48 | 2 | `_artifacts/v0.10.0_bench_klein_base_4b.json` (50 steps, g=4.0) |
 | `flux2-klein-base-9b` | 0.17 | 13 / 48 | 1 | `_artifacts/v0.10.0_bench_klein_base_9b.json` (50 steps, g=4.0) |
 | `z-image-base` | 0.12 | 15 / 48 | 1 | `_artifacts/v0.10.0_bench_z_image.json` (50 steps, g=4.0, q8) |
-| `qwen-image` | 0.30 | — | — | *pending the v0.10.0 showcase run* |
+| `qwen-image` | 0.30 | 33 / 48 | 4 | `_artifacts/v0.10.0_bench_qwen_image.json` (50 steps, g=4.0, 768×768) |
 
-Every measured streak is 1 or 2: at the shipped defaults the gate mostly
-alternates compute / skip and reuses a residual at most twice in a row, so
-the `MAX_CONSECUTIVE_SKIPS = 8` cap is far from the operating point and only
-matters for degenerate settings (an all-zero polynomial, or a threshold well
-above the sweep range).
+Four of the five stay at 1 or 2: the gate mostly alternates compute / skip and
+reuses a residual at most twice in a row. `qwen-image` runs longer, reaching 4,
+because at its 0.30 default it skips roughly two-thirds of its active steps —
+much the largest share in the table. Even there the `MAX_CONSECUTIVE_SKIPS = 8`
+cap sits at twice the longest observed streak, so it engages at no shipped
+default and mainly matters for degenerate settings (an all-zero polynomial, or
+a threshold well above the sweep range).
+
+Qwen's streak grew with the v0.10.0 anchoring change. Replaying the shipped
+polynomial over the committed calibration trace under the previous
+last-computed-step anchoring gives streaks of 2 and around 28 skips; under
+consecutive-delta anchoring the same trace gives streaks of 4 and 33 skips,
+which is what the bench then measured. It is the variant the anchoring fix
+moves most, because its accumulator sits nearest the threshold.
 
 ## Built-in coefficient sources
 

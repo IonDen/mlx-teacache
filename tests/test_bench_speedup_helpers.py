@@ -218,3 +218,30 @@ def test_clamped_wired_bytes_rejects_nonpositive_requests() -> None:
 
     with pytest.raises(ValueError):
         _mlx_caps.clamped_wired_bytes(0, 25 * 1024**3)
+
+
+# --- Qwen-Image bench support -------------------------------------------------
+# Qwen was absent from the bench harness entirely, so its max consecutive-skip
+# streak had no committed source and docs/calibration.md carried an empty row.
+
+
+def test_qwen_is_a_supported_bench_variant():
+    """RED if the harness cannot bench Qwen at all (its slug is unmapped),
+    which is why the v0.10.0 streak table had no qwen-image row."""
+    assert bs._VARIANT_SLUG_TO_ID["qwen"] == "qwen-image"
+    assert bs._VARIANT_RECIPE["qwen"] == {"num_inference_steps": 50, "guidance": 4.0}
+    assert bs._VARIANT_QUANTIZE["qwen"] == 4
+
+
+def test_qwen_benches_at_its_pinned_768_resolution():
+    """RED if Qwen benched at the shared 512x512 recipe. Its DEFAULT_THRESH=0.30
+    was calibrated and swept at 768x768, so a 512x512 bench would report a skip
+    pattern for an operating point the threshold was never tuned against."""
+    assert bs._resolution_for("qwen") == (768, 768)
+
+
+@pytest.mark.parametrize("variant", ["flux1-dev", "klein-base-4b", "klein-base-9b", "z-image"])
+def test_non_qwen_variants_keep_the_shared_512_recipe(variant):
+    """RED if adding Qwen's override silently moved every other variant's
+    resolution, which would invalidate every committed bench JSON."""
+    assert bs._resolution_for(variant) == (512, 512)

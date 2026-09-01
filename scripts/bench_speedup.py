@@ -106,6 +106,7 @@ _VARIANT_SLUG_TO_ID: dict[str, str] = {
     "flux1-dev": "flux1-dev",
     "flux1-schnell": "flux1-schnell",
     "z-image": "z-image-base",
+    "qwen": "qwen-image",
 }
 
 # Default bench recipe per variant (num_inference_steps, guidance).
@@ -117,6 +118,7 @@ _VARIANT_RECIPE: dict[str, dict[str, Any]] = {
     "flux1-dev": {"num_inference_steps": 25, "guidance": 3.5},
     "flux1-schnell": {"num_inference_steps": 4, "guidance": 1.0},
     "z-image": {"num_inference_steps": 50, "guidance": 4.0},
+    "qwen": {"num_inference_steps": 50, "guidance": 4.0},
 }
 
 # Quantization bits per variant. FLUX variants bench at q4; Z-Image at q8 (its
@@ -129,7 +131,23 @@ _VARIANT_QUANTIZE: dict[str, int] = {
     "flux1-dev": 4,
     "flux1-schnell": 4,
     "z-image": 8,
+    "qwen": 4,
 }
+
+# Per-variant render size. Everything benches at the shared 512x512 recipe
+# except qwen-image, whose DEFAULT_THRESH=0.30 was calibrated and swept at
+# 768x768 (scripts/calibrate_qwen.py, scripts/sweep_threshold_qwen.py) — the
+# same size its parity gate uses. Benching it at 512x512 would report a skip
+# pattern for an operating point the threshold was never tuned against.
+_VARIANT_RESOLUTION: dict[str, tuple[int, int]] = {
+    "qwen": (768, 768),
+}
+
+
+def _resolution_for(variant: str) -> tuple[int, int]:
+    """Return (height, width) for a CLI variant slug."""
+    return _VARIANT_RESOLUTION.get(variant, (HEIGHT, WIDTH))
+
 
 # Default soft memory cap (GB) per variant when _REGISTRY META is absent.
 # Workers derive the hard wired cap as (soft_cap - 2) GB.
@@ -164,6 +182,11 @@ def _load_flux(variant: str) -> Any:
         from mflux.models.z_image.variants.z_image import ZImage
 
         flux = ZImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.z_image())
+    elif variant == "qwen":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
+
+        flux = QwenImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.qwen_image())
     else:
         raise ValueError(f"unsupported variant: {variant!r}")
     flux.freeze()
@@ -175,6 +198,8 @@ def _generate(
     *,
     num_inference_steps: int,
     guidance: float,
+    height: int,
+    width: int,
     save_path: Path | None = None,
 ) -> tuple[float, Any]:
     """Time one generation. Flushes GPU before stopping the clock."""
@@ -185,8 +210,8 @@ def _generate(
         prompt=PROMPT,
         seed=SEED,
         num_inference_steps=num_inference_steps,
-        height=HEIGHT,
-        width=WIDTH,
+        height=height,
+        width=width,
         guidance=guidance,
     )
     mx.eval(mx.zeros(1))  # flush GPU work before stopping the clock
@@ -234,6 +259,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
     )
     guidance: float = args.guidance if args.guidance is not None else recipe["guidance"]
+    height, width = _resolution_for(variant)
     save_path: Path | None = Path(args.save_to) if args.save_to else None
 
     flux = _load_flux(variant)
@@ -246,6 +272,8 @@ def _worker_main(args: argparse.Namespace) -> None:
             flux,
             num_inference_steps=num_inference_steps,
             guidance=guidance,
+            height=height,
+            width=width,
             save_path=save_path,
         )
         print(f"  vanilla rep {rep + 1}: {elapsed:.2f}s", flush=True)
@@ -257,6 +285,8 @@ def _worker_main(args: argparse.Namespace) -> None:
                 flux,
                 num_inference_steps=num_inference_steps,
                 guidance=guidance,
+                height=height,
+                width=width,
                 save_path=save_path,
             )
             stats_summary = {
@@ -278,6 +308,8 @@ def _worker_main(args: argparse.Namespace) -> None:
                 flux,
                 num_inference_steps=num_inference_steps,
                 guidance=guidance,
+                height=height,
+                width=width,
                 save_path=save_path,
             )
             stats_summary = {
@@ -733,8 +765,8 @@ def main() -> None:
             "guidance": guidance,
             "prompt": PROMPT,
             "seed": SEED,
-            "height": HEIGHT,
-            "width": WIDTH,
+            "height": _resolution_for(variant)[0],
+            "width": _resolution_for(variant)[1],
             "reps": reps,
             "hardware": _detect_hardware(quantize=_VARIANT_QUANTIZE[variant]),
             "vanilla_seconds": vanilla_times,

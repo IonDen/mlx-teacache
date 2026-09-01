@@ -110,11 +110,18 @@ class InternalStateError(TeaCacheError):
 
 
 class TeaCacheNoBenefitWarning(UserWarning):
-    """Emitted once per TeaCacheHandle when the active step configuration
-    leaves no possible cache skips (i.e., `active_num_steps - skip_first -
-    skip_last <= 1`, so the polynomial gate cannot seed AND consume the
-    cache within this generation). Triggers on very short schedules and
-    aggressive skip windows.
+    """Emitted when the gate cannot deliver step-skipping. Two triggers:
+
+    At `apply_teacache()` time, on a distilled variant whose few-step
+    schedule never lets the polynomial gate engage. The wrapper still adds
+    per-step gate overhead, and any wall-clock gain comes from bypassing
+    `mx.compile`, not from skipping steps.
+
+    Once per TeaCacheHandle during a generation, when the active step
+    configuration leaves no possible cache skips (i.e., `active_num_steps -
+    skip_first - skip_last <= 1`, so the polynomial gate cannot seed AND
+    consume the cache within this generation). Triggers on very short
+    schedules and aggressive skip windows.
 
     Suppress via the standard `warnings` module:
         warnings.filterwarnings("ignore", category=TeaCacheNoBenefitWarning)

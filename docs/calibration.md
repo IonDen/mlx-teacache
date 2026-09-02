@@ -17,12 +17,13 @@ never against an older, non-adjacent step.
 ## Runaway guard
 
 The gate accumulates the polynomial's predicted change across consecutive
-skips and resets it to zero on every real compute. The calibrated
-polynomials clamp to 0 for small deltas (all three in-repo fits go negative
-past x≈0.27-0.8), so a run of small consecutive deltas can leave the
-accumulator stalled under `rel_l1_thresh` indefinitely — without a guard,
-that would let the wrapper reuse the same cached residual for an unbounded
-number of steps. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
+skips and resets it to zero on every real compute. The
+origin-constrained in-repo fits are positive for small deltas but cross zero
+at large ones (base-4b at x≈0.24, z-image at x≈0.29, qwen at x≈0.78), beyond
+the range they were fit on; there the clamp turns a large, real change into
+a predicted change of zero, so the accumulator stops advancing — without a
+guard, that would let the wrapper reuse the same cached residual for an
+unbounded number of steps. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
 forces a recompute after 8 consecutive skips regardless of the accumulated
 total. This is an intentional divergence from upstream ali-vilab TeaCache,
 which has no such cap — the same kind of deliberate departure as the gate's
@@ -55,12 +56,12 @@ cap sits at twice the longest observed streak, so it engages at no shipped
 default and mainly matters for degenerate settings (an all-zero polynomial, or
 a threshold well above the sweep range).
 
-Qwen's streak grew with the v0.10.0 anchoring change. Replaying the shipped
-polynomial over the committed calibration trace under the previous
-last-computed-step anchoring gives streaks of 2 and around 28 skips; under
-consecutive-delta anchoring the same trace gives streaks of 4 and 33 skips,
-which is what the bench then measured. It is the variant the anchoring fix
-moves most, because its accumulator sits nearest the threshold.
+Qwen's streak grew with the v0.10.0 anchoring change: 0.9.x documented 24
+skips at this threshold and recipe, and the gate replayed over the committed
+calibration trace under consecutive-delta anchoring gives 33 skips with a
+streak of 4, which is exactly what the bench then measured. It is the variant
+the anchoring fix moves most, because its accumulator sits nearest the
+threshold.
 
 ## Built-in coefficient sources
 

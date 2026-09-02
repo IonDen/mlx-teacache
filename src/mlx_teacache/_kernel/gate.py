@@ -14,14 +14,15 @@ GateKind = Literal["computed", "forced", "skipped", "numerical-miss"]
 
 MAX_CONSECUTIVE_SKIPS = 8
 """Runaway-skip guard, not a tuning knob (intentional divergence from
-upstream ali-vilab TeaCache, like the max(0,·) clamp below). With
-consecutive-delta anchoring the accumulator can stall below the threshold
-when the calibrated polynomial evaluates to ≤0 for small deltas (all three
-in-repo fits go negative past x≈0.27–0.8 and are clamped to 0), which
-would otherwise allow unbounded reuse of a stale residual at user-raised
-thresholds. Observed max streaks at per-variant default thresholds are
-recorded in docs/calibration.md; raise this constant only from a
-re-measured run."""
+upstream ali-vilab TeaCache, like the max(0,·) clamp below). The
+origin-constrained in-repo fits are positive for small deltas but cross
+zero at large ones (base-4b x≈0.24, z-image x≈0.29, qwen x≈0.78), past the
+range they were calibrated on; there the max(0,·) clamp turns a large,
+real change into a predicted change of zero, so the accumulator stops
+advancing and a stale residual could be reused without bound at a
+user-raised threshold. Observed max streaks at per-variant default
+thresholds are recorded in docs/calibration.md; raise this constant only
+from a re-measured run."""
 
 
 @dataclass(frozen=True)

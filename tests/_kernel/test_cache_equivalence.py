@@ -20,6 +20,8 @@ def test_field_set_matches_v05():
         "last_timestep",
         "skip_window_validated",
         "num_steps",
+        # v0.10.0: consecutive-delta anchoring (Option A) — runaway-skip streak counter.
+        "consecutive_skips",
     }
     actual = {f.name for f in dataclasses.fields(TeaCacheState)}
     assert actual == expected_field_names

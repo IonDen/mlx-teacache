@@ -280,7 +280,6 @@ def zimage_forward_with_gate(
         main_out = _run_main_layers(transformer, h1, pre, t_emb, start=1)
         if decision.should_update_cache:
             state.cached_residual = main_out - pre.unified_in
-            state.previous_mod_input = signal_b
     else:
         if state.cached_residual is None:
             raise InternalStateError(
@@ -367,7 +366,6 @@ def zimage_cfg_forward_with_gate(
         if decision.should_update_cache:
             state.cached_residual = main_out_pos - pre_pos.unified_in
             state.cached_residual_neg = main_out_neg - pre_neg.unified_in
-            state.previous_mod_input = signal_b
     else:
         if state.cached_residual is None or state.cached_residual_neg is None:
             raise InternalStateError(

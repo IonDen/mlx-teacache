@@ -31,8 +31,8 @@ To keep TeaCache's gating live on every chip where mflux compiles, `mlx-teacache
 replaces `flux._predict` with an **uncompiled** eager-Python closure. Users on
 those chips lose mflux's compile gain on this code path. The tradeoff: when the
 gate actually engages we skip ~25% of steps, which more than compensates on
-M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.46× on FLUX.1-dev / 25 steps
-on M1 Max, 2026-05-31). The magnitude of the compile-loss tax grows on newer
+M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.57× on FLUX.1-dev / 25 steps
+on M1 Max, 2026-08-15). The magnitude of the compile-loss tax grows on newer
 hardware.
 
 On chips that mflux already runs eager (base + Pro M1/M2), the wrapper does
@@ -83,6 +83,53 @@ print(f"vanilla: {vanilla:.2f}s  teacache: {teacache:.2f}s  speedup: {vanilla/te
 
 If `vanilla/teacache > 1.0` on your hardware, mlx-teacache helps. Otherwise file an
 issue with your timings.
+
+The snippet above is a quick single-shot sanity check, not a submission-quality
+measurement — it runs one vanilla and one wrapped generation back to back in the
+same process, with no warmup and no repetition. For timings you want to report
+in an issue or a PR, follow the protocol below.
+
+## Benchmark protocol for community numbers
+
+This is the standard we ask for when a submitted number is going to be compared
+against the numbers already in this repo's README or `COMPARISON.md`. It applies
+whether you use `scripts/bench_speedup.py` or your own timing harness.
+
+- Report the environment: chip (`sysctl -n machdep.cpu.brand_string`), macOS
+  version, Python version, and the installed `mlx`, `mflux`, and `mlx-teacache`
+  versions, plus the dtype and quantization bits used for the run.
+- Isolate each condition in its own process. Run vanilla and wrapped
+  generations as separate process invocations, not back to back in one
+  interpreter, so a compiled graph or a warm allocator from one condition
+  cannot bias the other's timing.
+- Discard a warmup repetition. The first generation in a process pays for
+  Metal shader compilation and disk-cache population; discard its timing and
+  measure only the repetitions after it.
+- Time at least 3 repetitions per condition and report the median and the
+  minimum. A single timing is noise: the median reflects the typical case,
+  the minimum is the least affected by background load on the host.
+- Record computed vs. skipped step counts alongside the timing, so a reader
+  can tell whether an improvement comes from step-skipping or from
+  `mx.compile` avoidance (see "Why" above); the two mechanisms are separate
+  and a submitted number should attribute to the right one.
+- Use one shared recipe across every condition being compared: identical
+  prompt, seed, step count, guidance, and image dimensions. Changing any of
+  these between the vanilla and wrapped runs invalidates the comparison.
+- Run on mains power with a charger that can out-supply the GPU load, and
+  start with the battery near full. A low-wattage brick (a 35 W adapter, say)
+  lets the battery drain under a sustained generation load, and macOS starts
+  throttling as it drops; timings taken on a draining battery are not
+  comparable to timings taken on a fully powered machine. Check
+  `pmset -g ac` for the adapter wattage and `pmset -g batt` before a run, and
+  discard any repetition during which the battery fell into low-power
+  territory.
+
+`scripts/bench_speedup.py` in this repo follows the process-isolation and
+environment-capture parts of this protocol: every (variant, condition,
+repetition) triple runs in its own subprocess, and its report includes the
+chip, OS, and package versions alongside the per-condition median. Use it, or
+match its methodology, when submitting a number for a variant already in this
+repo.
 
 ## v0.2+ plans
 

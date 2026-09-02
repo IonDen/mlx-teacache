@@ -21,11 +21,40 @@ For each calibration prompt:
   with `numpy.polyfit` (returns coefficients high-to-low, matching the
   `poly_eval` convention used at runtime in `mlx_teacache.gate`).
 
-Output: a JSON report at `scripts/_calibration_flux2_<variant>.json`."""
+Output: a JSON report at `scripts/_calibration_flux2_<variant>.json`.
 
-from __future__ import annotations
+CHUNKED + RESUMABLE. The orchestrator spawns one worker SUBPROCESS per
+calibration prompt (fresh MLX memory each, no cross-prompt accumulation),
+each writing scripts/_calibration_chunks/<variant>_prompt<NN>.json the
+instant it finishes. An interrupted run (throttle, sleep, crash, an approved
+kill) RESUMES by re-running only the prompts whose chunk is missing —
+completed prompts are never recomputed. Under CFG (`--guidance > 1.0`) each
+chunk stores the per-branch (positive/negative) rel-L1 series; the
+`--fit-branch-policy` selection (worst/average/positive/negative) is applied
+at AGGREGATION time, so re-aggregating under a different policy does not
+require re-running the capture.
 
+Validate the chunk/resume/aggregate plumbing with NO model load (seconds, no
+GPU):
+
+    uv run python scripts/calibrate_flux2.py --variant klein-4b --dry-run \
+        --chunk-dir /tmp/calib_flux2_dry
+
+Memory safety
+-------------
+
+Each worker subprocess sets a hard wired-memory cap (`mx.set_wired_limit`)
+and a soft cap (`mx.set_memory_limit`) BEFORE constructing the model, taken
+from the variant's `META["memory_cap_hint_gb"]` in the mlx-teacache variant
+registry when present, else a 20 GB wired / 22 GB soft fallback. An
+unconstrained wired peak kernel-panics rather than cleanly OOMing on a 32 GB
+M1 Max — see CLAUDE.md "Memory guardrails".
+"""
+
+import argparse
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -57,6 +86,13 @@ HEIGHT = 512
 WIDTH = 512
 GUIDANCE = 1.0
 SEED = 42
+
+# Default soft memory cap (GB) when the variant's registry META has no
+# memory_cap_hint_gb. Worker derives the hard wired cap as (soft_cap - 2) GB —
+# mirrors scripts/bench_speedup.py's worker cap convention.
+_DEFAULT_CAP_GB = 22
+
+CHUNK_DIR_DEFAULT = Path(__file__).parent / "_calibration_chunks"
 
 
 def _model_config_klein_4b() -> Any:
@@ -113,6 +149,103 @@ _VARIANTS: dict[str, dict[str, Any]] = {
         "output_json": "_calibration_flux2_klein_base_9b.json",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (unit-testable without weights — see
+# tests/test_calibrate_flux2_chunking.py).
+# ---------------------------------------------------------------------------
+
+
+def _chunk_filename(variant: str, idx: int) -> str:
+    """Per-prompt chunk filename. Zero-padded so lexical order == numeric order."""
+    return f"{variant}_prompt{idx:02d}.json"
+
+
+def _pending_prompt_indices(chunk_dir: Path, variant: str, n_prompts: int) -> list[int]:
+    """Prompt indices in [0, n_prompts) whose chunk file does NOT yet exist.
+
+    The resume contract: a finished prompt has written its chunk and is skipped
+    on a rerun; an interrupted prompt left no chunk, so it (and only it) reruns.
+    """
+    return [i for i in range(n_prompts) if not (chunk_dir / _chunk_filename(variant, i)).exists()]
+
+
+def _select_y(y_pos: float, y_neg: float, *, policy: str) -> float:
+    """Apply the CFG fit-branch policy to one (positive, negative) pair.
+
+    Mirrors the per-step branch selection the monolithic script used to make
+    inline during capture; extracted so it can run at AGGREGATION time (a
+    re-aggregate under a different --fit-branch-policy no longer requires
+    re-running the heavy capture)."""
+    if policy == "worst":
+        return max(y_pos, y_neg)
+    if policy == "average":
+        return 0.5 * (y_pos + y_neg)
+    if policy == "positive":
+        return y_pos
+    if policy == "negative":
+        return y_neg
+    raise ValueError(f"unknown fit_branch_policy={policy!r}")
+
+
+def _accumulate_chunks(
+    chunks: list[dict[str, Any]], *, cfg: bool, fit_branch_policy: str = "worst"
+) -> dict[str, list[float]]:
+    """Merge per-prompt chunk dicts (sorted by idx) into flat xs/ys(/ys_pos/ys_neg)
+    lists, preserving prompt order then within-prompt step order — matching the
+    order the original monolithic capture loop produced. Pure — no MLX, no I/O —
+    so the resume/aggregation logic is unit-testable without weights."""
+    acc: dict[str, list[float]] = {"xs": [], "ys": []}
+    if cfg:
+        acc["ys_pos"] = []
+        acc["ys_neg"] = []
+    for chunk in sorted(chunks, key=lambda c: int(c["idx"])):
+        acc["xs"] += [float(x) for x in chunk["xs"]]
+        if cfg:
+            pos = [float(y) for y in chunk["ys_pos"]]
+            neg = [float(y) for y in chunk["ys_neg"]]
+            acc["ys_pos"] += pos
+            acc["ys_neg"] += neg
+            acc["ys"] += [_select_y(p, n, policy=fit_branch_policy) for p, n in zip(pos, neg, strict=True)]
+        else:
+            acc["ys"] += [float(y) for y in chunk["ys"]]
+    return acc
+
+
+def _fit_polynomial(xs: list[float], ys: list[float], *, fit_mode: str) -> tuple[list[float], float]:
+    """Degree-4 polynomial fit. 'free' = standard numpy.polyfit (c0
+    unconstrained); 'origin' = constrained least squares through (0, 0) (c0
+    padded to 0.0). Returns (coefficients_c4_to_c0, r_squared) — same math as
+    the pre-chunking inline fit, so a full run reproduces the prior output
+    byte-for-byte given the same captures."""
+    xs_np = np.array(xs)
+    ys_np = np.array(ys)
+    if fit_mode == "free":
+        coeffs = np.polyfit(xs_np, ys_np, 4)
+    elif fit_mode == "origin":
+        X = np.column_stack([xs_np**4, xs_np**3, xs_np**2, xs_np])
+        a, *_ = np.linalg.lstsq(X, ys_np, rcond=None)
+        coeffs = np.array([a[0], a[1], a[2], a[3], 0.0])
+    else:
+        raise ValueError(f"unknown fit_mode={fit_mode!r}")
+    p = np.poly1d(coeffs)
+    y_pred = p(xs_np)
+    ss_res = float(np.sum((ys_np - y_pred) ** 2))
+    ss_tot = float(np.sum((ys_np - np.mean(ys_np)) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return [float(c) for c in coeffs], r2
+
+
+def _aggregate_path(chunk_dir: Path, variant: str, *, dry_run: bool) -> Path:
+    """Where the final aggregated calibration JSON lands. The committed
+    scripts/_calibration_flux2_<variant>.json is written ONLY by a real run
+    into the default chunk dir; a dry-run or a custom chunk dir writes beside
+    its chunks so a smoke never clobbers a committed artifact."""
+    output_json: str = _VARIANTS[variant]["output_json"]
+    if not dry_run and chunk_dir.resolve() == CHUNK_DIR_DEFAULT.resolve():
+        return Path(__file__).parent / output_json
+    return chunk_dir / output_json
 
 
 def _rel_l1(curr: mx.array, prev: mx.array) -> float:
@@ -312,9 +445,195 @@ def _capture_one_prompt(
     return captures
 
 
-def main() -> None:
-    import argparse
+# ---------------------------------------------------------------------------
+# WORKER side — captures ONE prompt in a subprocess, writes its chunk file.
+# ---------------------------------------------------------------------------
 
+
+def _run_worker(
+    *, variant: str, idx: int, guidance: float, num_inference_steps: int, chunk_dir: Path, dry_run: bool
+) -> None:
+    """Capture ONE prompt and write its chunk file, then exit. A fresh
+    subprocess per prompt = fresh MLX memory (no cross-prompt accumulation) AND
+    a durable checkpoint: an interrupted run resumes from the last written
+    chunk instead of from zero."""
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    out = chunk_dir / _chunk_filename(variant, idx)
+    prompt = CALIBRATION_PROMPTS[idx]
+    cfg_capture = guidance > 1.0
+
+    if dry_run:
+        # Plumbing smoke: synthetic monotonic pairs, NO model load — exercises the
+        # worker -> chunk -> resume -> aggregate -> fit path end-to-end without weights.
+        m = max(1, num_inference_steps - 1)
+        xs = [round(0.01 * (k + 1), 5) for k in range(m)]
+        ys = [round(0.02 * (k + 1), 5) for k in range(m)]
+        chunk: dict[str, Any] = {
+            "idx": idx,
+            "prompt": prompt,
+            "num_captures": num_inference_steps,
+            "dry_run": True,
+            "xs": xs,
+            "ys": ys,
+        }
+        if cfg_capture:
+            chunk["ys_pos"] = ys
+            chunk["ys_neg"] = ys
+        out.write_text(json.dumps(chunk, indent=2))
+        print(f"[worker {idx}] dry-run chunk -> {out}", flush=True)
+        return
+
+    # --- Memory guardrail (MUST come before the model load). ---
+    variant_cfg = _VARIANTS[variant]
+    variant_id: str = variant_cfg["variant_id"]
+    from mlx_teacache.variants import _REGISTRY
+
+    registry_entry = _REGISTRY.get(variant_id)
+    hint = registry_entry["META"].get("memory_cap_hint_gb") if registry_entry is not None else None
+    cap_gb = hint if hint is not None else _DEFAULT_CAP_GB
+    wired_gb = max(1, cap_gb - 2)
+    from _mlx_caps import install_caps
+
+    install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
+    print(
+        f"[worker {idx}] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
+        flush=True,
+    )
+
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+
+    print(f"[worker {idx}] loading {variant_id} (quantize=4) for {prompt!r} ...", flush=True)
+    flux = Flux2Klein(quantize=4, model_config=variant_cfg["model_config_factory"]())
+    flux.freeze()
+
+    capture = _capture_one_prompt(flux, prompt, num_inference_steps=num_inference_steps, guidance=guidance)
+    assert len(capture) == num_inference_steps, f"expected {num_inference_steps} captures, got {len(capture)}"
+
+    xs: list[float] = []
+    ys: list[float] = []
+    ys_pos: list[float] = []
+    ys_neg: list[float] = []
+    for t in range(1, len(capture)):
+        x = _rel_l1(capture[t]["mod_in"], capture[t - 1]["mod_in"])
+        if cfg_capture:
+            y_pos = _rel_l1(capture[t]["body_out_pos"], capture[t - 1]["body_out_pos"])
+            y_neg = _rel_l1(capture[t]["body_out_neg"], capture[t - 1]["body_out_neg"])
+            ys_pos.append(y_pos)
+            ys_neg.append(y_neg)
+        else:
+            ys.append(_rel_l1(capture[t]["body_out"], capture[t - 1]["body_out"]))
+        xs.append(x)
+
+    chunk: dict[str, Any] = {"idx": idx, "prompt": prompt, "num_captures": len(capture), "xs": xs}
+    if cfg_capture:
+        # Per-branch series only; the fit-branch policy is applied at
+        # aggregation time (see _accumulate_chunks / _select_y).
+        chunk["ys_pos"] = ys_pos
+        chunk["ys_neg"] = ys_neg
+    else:
+        chunk["ys"] = ys
+    out.write_text(json.dumps(chunk, indent=2))
+    print(f"[worker {idx}] wrote {out} (peak {mx.get_peak_memory() / 1024**3:.2f} GB)", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# ORCHESTRATOR side — spawns one worker subprocess per pending prompt, then
+# aggregates + fits once every chunk is present.
+# ---------------------------------------------------------------------------
+
+
+def _run_orchestrator(
+    *,
+    variant: str,
+    fit_mode: str,
+    guidance: float,
+    num_inference_steps: int,
+    fit_branch_policy: str,
+    chunk_dir: Path,
+    dry_run: bool,
+) -> None:
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    n_prompts = len(CALIBRATION_PROMPTS)
+    pending = _pending_prompt_indices(chunk_dir, variant, n_prompts)
+    done = n_prompts - len(pending)
+    print(
+        f"[orchestrator] variant={variant} {n_prompts} prompts, {done} already done, "
+        f"{len(pending)} pending: {pending}",
+        flush=True,
+    )
+    t0 = time.time()
+    for idx in pending:
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--variant",
+            variant,
+            "--single-prompt-index",
+            str(idx),
+            "--guidance",
+            str(guidance),
+            "--num-inference-steps",
+            str(num_inference_steps),
+            "--chunk-dir",
+            str(chunk_dir),
+        ]
+        if dry_run:
+            cmd.append("--dry-run")
+        print(f"[orchestrator] -> prompt {idx} ({CALIBRATION_PROMPTS[idx]!r})", flush=True)
+        result = subprocess.run(cmd)
+        if result.returncode != 0 or not (chunk_dir / _chunk_filename(variant, idx)).exists():
+            raise SystemExit(
+                f"[orchestrator] worker for prompt {idx} failed (rc={result.returncode}); chunk not "
+                f"written. Fix the cause and rerun — completed chunks in {chunk_dir} are reused."
+            )
+    elapsed = time.time() - t0
+    print(f"\nCaptured {n_prompts} prompts in {elapsed:.1f}s ({len(pending)} run this pass)")
+
+    chunks = [json.loads((chunk_dir / _chunk_filename(variant, i)).read_text()) for i in range(n_prompts)]
+    cfg_capture = guidance > 1.0
+    acc = _accumulate_chunks(chunks, cfg=cfg_capture, fit_branch_policy=fit_branch_policy)
+    xs, ys = acc["xs"], acc["ys"]
+
+    coeffs, r2 = _fit_polynomial(xs, ys, fit_mode=fit_mode)
+    print(f"fit_mode = {fit_mode}")
+    print(f"R^2 = {r2:.6f}")
+    print("Coefficients (c4, c3, c2, c1, c0):")
+    for c in coeffs:
+        print(f"  {c:.10g}")
+
+    variant_id: str = _VARIANTS[variant]["variant_id"]
+    report: dict[str, Any] = {
+        "variant": variant_id,
+        "num_inference_steps": num_inference_steps,
+        "height": HEIGHT,
+        "width": WIDTH,
+        "guidance": guidance,
+        "seed": SEED,
+        "num_prompts": n_prompts,
+        "num_pairs": len(xs),
+        "elapsed_seconds": elapsed,
+        "fit_mode": fit_mode,
+        "coefficients_c4_to_c0": coeffs,
+        "fit_r_squared": r2,
+        "calibration_prompts": list(CALIBRATION_PROMPTS),
+        "x_values": xs,  # raw x array for offline refit
+        "y_values": ys,  # raw y array for offline refit
+        "x_min": min(xs),
+        "x_max": max(xs),
+        "y_min": min(ys),
+        "y_max": max(ys),
+    }
+    if cfg_capture:
+        report["fit_branch_policy"] = fit_branch_policy
+        report["y_values_pos"] = acc["ys_pos"]
+        report["y_values_neg"] = acc["ys_neg"]
+
+    out_path = _aggregate_path(chunk_dir, variant, dry_run=dry_run)
+    out_path.write_text(json.dumps(report, indent=2))
+    print(f"\nWrote {out_path}")
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--variant",
@@ -349,115 +668,58 @@ def main() -> None:
         "--fit-branch-policy",
         default="worst",
         choices=["worst", "average", "positive", "negative"],
-        help="Under CFG calibration, which per-step y target to fit: worst-branch (default), average, positive only, or negative only.",
+        help="Under CFG calibration, which per-step y target to fit: worst-branch (default), average, positive only, or negative only. Applied at aggregation time.",
+    )
+    parser.add_argument(
+        "--single-prompt-index",
+        type=int,
+        default=None,
+        dest="single_prompt_index",
+        help="(internal) worker mode: capture ONE prompt index and write its chunk file, then exit.",
+    )
+    parser.add_argument(
+        "--chunk-dir",
+        type=Path,
+        default=None,
+        dest="chunk_dir",
+        help="Override the per-prompt chunk directory (default scripts/_calibration_chunks/).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Worker: write a synthetic chunk with no model load — validates the chunk/resume/aggregate plumbing.",
     )
     args = parser.parse_args()
-    cfg = _VARIANTS[args.variant]
-    variant_id: str = cfg["variant_id"]
+
+    variant_cfg = _VARIANTS[args.variant]
     num_inference_steps: int = (
-        args.num_inference_steps if args.num_inference_steps is not None else cfg["num_inference_steps"]
+        args.num_inference_steps
+        if args.num_inference_steps is not None
+        else variant_cfg["num_inference_steps"]
     )
-    output_json: str = cfg["output_json"]
-    fit_mode: str = args.fit_mode
+    chunk_dir: Path = args.chunk_dir if args.chunk_dir is not None else CHUNK_DIR_DEFAULT
 
-    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
-
-    flux = Flux2Klein(quantize=4, model_config=cfg["model_config_factory"]())
-    flux.freeze()
-
-    xs: list[float] = []
-    ys: list[float] = []
-    ys_pos: list[float] = []
-    ys_neg: list[float] = []
-    per_prompt: list[dict[str, Any]] = []
-    t_start = time.time()
-    for i, prompt in enumerate(CALIBRATION_PROMPTS, 1):
-        print(f"[{i}/{len(CALIBRATION_PROMPTS)}] {prompt!r}")
-        capture = _capture_one_prompt(
-            flux, prompt, num_inference_steps=num_inference_steps, guidance=args.guidance
+    if args.single_prompt_index is not None:
+        _run_worker(
+            variant=args.variant,
+            idx=args.single_prompt_index,
+            guidance=args.guidance,
+            num_inference_steps=num_inference_steps,
+            chunk_dir=chunk_dir,
+            dry_run=args.dry_run,
         )
-        assert len(capture) == num_inference_steps, (
-            f"expected {num_inference_steps} captures, got {len(capture)}"
-        )
-        prompt_pairs: list[tuple[float, float]] = []
-        for t in range(1, len(capture)):
-            x = _rel_l1(capture[t]["mod_in"], capture[t - 1]["mod_in"])
-            if args.guidance > 1.0:
-                y_pos = _rel_l1(capture[t]["body_out_pos"], capture[t - 1]["body_out_pos"])
-                y_neg = _rel_l1(capture[t]["body_out_neg"], capture[t - 1]["body_out_neg"])
-                if args.fit_branch_policy == "worst":
-                    y = max(y_pos, y_neg)
-                elif args.fit_branch_policy == "average":
-                    y = 0.5 * (y_pos + y_neg)
-                elif args.fit_branch_policy == "positive":
-                    y = y_pos
-                else:  # negative
-                    y = y_neg
-                ys_pos.append(y_pos)
-                ys_neg.append(y_neg)
-            else:
-                y = _rel_l1(capture[t]["body_out"], capture[t - 1]["body_out"])
-            xs.append(x)
-            ys.append(y)
-            prompt_pairs.append((x, y))
-        per_prompt.append({"prompt": prompt, "pairs": prompt_pairs})
+        return
 
-    elapsed = time.time() - t_start
-    print(f"\nCaptured {len(xs)} (x, y) pairs in {elapsed:.1f}s")
-
-    # Degree-4 polynomial. numpy.polyfit returns high-to-low which matches
-    # the (c4, c3, c2, c1, c0) convention used by gate.poly_eval.
-    xs_np = np.array(xs)
-    ys_np = np.array(ys)
-    if fit_mode == "free":
-        coeffs = np.polyfit(xs_np, ys_np, 4)
-    elif fit_mode == "origin":
-        # Constrained least squares: fit y = a4*x^4 + a3*x^3 + a2*x^2 + a1*x
-        # (no intercept), then pad c0 = 0 so the returned shape is still (5,).
-        X = np.column_stack([xs_np**4, xs_np**3, xs_np**2, xs_np])
-        a, *_ = np.linalg.lstsq(X, ys_np, rcond=None)
-        coeffs = np.array([a[0], a[1], a[2], a[3], 0.0])
-    else:
-        raise ValueError(f"unknown fit_mode={fit_mode!r}")
-    p = np.poly1d(coeffs)
-    y_pred = p(xs_np)
-    ss_res = float(np.sum((ys_np - y_pred) ** 2))
-    ss_tot = float(np.sum((ys_np - np.mean(ys_np)) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    print(f"fit_mode = {fit_mode}")
-    print(f"R^2 = {r2:.6f}")
-    print("Coefficients (c4, c3, c2, c1, c0):")
-    for c in coeffs:
-        print(f"  {c:.10g}")
-
-    report: dict[str, Any] = {
-        "variant": variant_id,
-        "num_inference_steps": num_inference_steps,
-        "height": HEIGHT,
-        "width": WIDTH,
-        "guidance": args.guidance,
-        "seed": SEED,
-        "num_prompts": len(CALIBRATION_PROMPTS),
-        "num_pairs": len(xs),
-        "elapsed_seconds": elapsed,
-        "fit_mode": fit_mode,
-        "coefficients_c4_to_c0": [float(c) for c in coeffs],
-        "fit_r_squared": r2,
-        "calibration_prompts": list(CALIBRATION_PROMPTS),
-        "x_values": [float(x) for x in xs],  # raw x array for offline refit
-        "y_values": [float(y) for y in ys],  # raw y array for offline refit
-        "x_min": float(min(xs)),
-        "x_max": float(max(xs)),
-        "y_min": float(min(ys)),
-        "y_max": float(max(ys)),
-    }
-    if args.guidance > 1.0:
-        report["fit_branch_policy"] = args.fit_branch_policy
-        report["y_values_pos"] = [float(y) for y in ys_pos]
-        report["y_values_neg"] = [float(y) for y in ys_neg]
-    out_path = Path(__file__).parent / output_json
-    out_path.write_text(json.dumps(report, indent=2))
-    print(f"\nWrote {out_path}")
+    _run_orchestrator(
+        variant=args.variant,
+        fit_mode=args.fit_mode,
+        guidance=args.guidance,
+        num_inference_steps=num_inference_steps,
+        fit_branch_policy=args.fit_branch_policy,
+        chunk_dir=chunk_dir,
+        dry_run=args.dry_run,
+    )
 
 
 if __name__ == "__main__":

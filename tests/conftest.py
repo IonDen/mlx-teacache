@@ -20,7 +20,9 @@ memory — not the soft `set_memory_limit` — is the root cause."""
 
 from __future__ import annotations
 
+import contextlib
 import sys
+from collections.abc import Iterator
 
 import pytest
 
@@ -61,3 +63,27 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         path = str(item.path.name)
         if path in _MFLUX_FILES:
             item.add_marker(pytest.mark.mflux)
+
+
+@contextlib.contextmanager
+def expect_distilled_warning(variant_id: str) -> Iterator[None]:
+    """Wrap an `apply_teacache(...)` call site that may touch a distilled
+    variant (registry `default_thresh is None` — currently flux2-klein-4b
+    and flux2-klein-9b): asserts `TeaCacheNoBenefitWarning` under
+    `pytest.warns(...)` for those variants, and is a no-op otherwise.
+
+    Centralizing this against the live `_REGISTRY` (rather than a hardcoded
+    variant-id set) means a parity/slow-lane test parametrized across engaged
+    AND distilled variants stays correct if a future variant ships with no
+    per-variant default: distilled variants get the warning asserted, and
+    every other variant in the same parametrize still fails loudly under the
+    repo's `filterwarnings = error` if the warning ever fires there."""
+    from mlx_teacache import TeaCacheNoBenefitWarning
+    from mlx_teacache.variants import _REGISTRY
+
+    entry = _REGISTRY.get(variant_id)
+    if entry is not None and entry["default_thresh"] is None:
+        with pytest.warns(TeaCacheNoBenefitWarning, match="distilled"):
+            yield
+    else:
+        yield

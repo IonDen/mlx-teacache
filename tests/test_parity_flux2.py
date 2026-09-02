@@ -42,6 +42,7 @@ from mlx_teacache import (
     apply_teacache,
 )
 from mlx_teacache.errors import TeaCacheDisabledWarning
+from tests.conftest import expect_distilled_warning
 
 pytestmark = pytest.mark.parity
 
@@ -141,6 +142,7 @@ def _paired_parity(
     flux: Any,
     gen_kwargs: dict[str, Any],
     *,
+    variant_id: str,
     rel_l1_thresh: float = 0.0,
     **apply_kwargs: Any,
 ) -> tuple[mx.array, mx.array, mx.array, int]:
@@ -154,7 +156,8 @@ def _paired_parity(
         # the filterwarnings=error regime fully live inside the block.
         if rel_l1_thresh == 0.0:
             _w.simplefilter("ignore", TeaCacheDisabledWarning)
-        ctx = apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs)
+        with expect_distilled_warning(variant_id):
+            ctx = apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs)
     with ctx as h:
         wrapper = _capture(flux, **gen_kwargs)
         skipped = h.stats.skipped_count
@@ -214,7 +217,7 @@ def test_paired_parity_klein_pr_gate(flux2_klein: tuple[Any, str]) -> None:
     similarity, not bit-exact — see module docstring."""
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
-    vb, w, va, skipped = _paired_parity(flux, kw)
+    vb, w, va, skipped = _paired_parity(flux, kw, variant_id=variant_id)
     cos = _cosine(vb, w)
     assert cos >= _FLUX2_COSINE_GATE, (
         f"wrapper at rel_l1_thresh=0 cosine vs same-process vanilla "
@@ -238,18 +241,25 @@ def test_paired_parity_at_threshold_zero_klein_pr_gate(
 
     Distilled klein @ strength=0.7 is xfail (strict): the 8-step schedule
     reduces to ~3 active steps; with default skip_first=1 + skip_last=1 only
-    1 eligible step remains (0 possible skips) and TeaCacheNoBenefitWarning
-    fires from lifecycle.py:120 (commit a1524de, pre-v0.6.0). The warning is
+    1 eligible step remains (0 possible skips) and the PER-GENERATION
+    TeaCacheNoBenefitWarning fires from lifecycle.py:120 during
+    flux.generate_image() (commit a1524de, pre-v0.6.0). The warning is
     correct production behavior, not a port regression — same forward code
-    passes at strength=0.7 on klein-base-4b/9b which have ≥17 active steps."""
+    passes at strength=0.7 on klein-base-4b/9b which have ≥17 active steps.
+
+    The apply-time TeaCacheNoBenefitWarning (distilled Kleins always warn at
+    apply(), independent of image_strength) is expected separately via
+    expect_distilled_warning below so the xfail above is satisfied by the
+    documented per-generation reason, not by the apply-time warning firing
+    first."""
     flux, variant_id = flux2_klein
     if variant_id in ("flux2-klein-4b", "flux2-klein-9b") and image_strength == 0.7:
         request.applymarker(
             pytest.mark.xfail(
                 strict=True,
-                reason="distilled klein @ strength=0.7 triggers TeaCacheNoBenefitWarning "
-                "(active_num_steps≈3, 0 possible skips with default skip-window); "
-                "warning predates v0.6.0",
+                reason="distilled klein @ strength=0.7 triggers the per-generation "
+                "TeaCacheNoBenefitWarning (active_num_steps≈3, 0 possible skips with "
+                "default skip-window); warning predates v0.6.0",
             )
         )
     kw = _gen_kwargs_klein("a red apple on a wooden table", variant_id=variant_id)
@@ -260,7 +270,8 @@ def test_paired_parity_at_threshold_zero_klein_pr_gate(
     vanilla_latent = _capture(flux, **kw)
     with _w.catch_warnings():
         _w.simplefilter("ignore", TeaCacheDisabledWarning)
-        ctx = apply_teacache(flux, rel_l1_thresh=0.0)
+        with expect_distilled_warning(variant_id):
+            ctx = apply_teacache(flux, rel_l1_thresh=0.0)
     with ctx:
         wrapper_latent = _capture(flux, **kw)
 
@@ -326,7 +337,7 @@ def test_paired_parity_klein_full(flux2_klein: tuple[Any, str], prompt: str) -> 
     """Nightly correctness gate. All 5 reference prompts."""
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(prompt, variant_id=variant_id)
-    vb, w, va, skipped = _paired_parity(flux, kw)
+    vb, w, va, skipped = _paired_parity(flux, kw, variant_id=variant_id)
     cos = _cosine(vb, w)
     assert cos >= _FLUX2_COSINE_GATE, f"prompt={prompt!r} cosine={cos:.6f} < {_FLUX2_COSINE_GATE}"
     assert mx.array_equal(vb, va)
@@ -339,7 +350,8 @@ def test_paired_parity_reverse_order_klein(flux2_klein: tuple[Any, str]) -> None
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
     with _w.catch_warnings():
         _w.simplefilter("ignore", TeaCacheDisabledWarning)
-        ctx = apply_teacache(flux, rel_l1_thresh=0.0)
+        with expect_distilled_warning(variant_id):
+            ctx = apply_teacache(flux, rel_l1_thresh=0.0)
     with ctx:
         wrapper = _capture(flux, **kw)
     vanilla = _capture(flux, **kw)
@@ -361,7 +373,7 @@ def test_cfg_fallback_matches_vanilla(flux2_klein: tuple[Any, str]) -> None:
     similarity stays >= 0.97 — see the module docstring."""
     flux, variant_id = flux2_klein
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id, guidance=3.5)
-    vb, w, va, _ = _paired_parity(flux, kw)
+    vb, w, va, _ = _paired_parity(flux, kw, variant_id=variant_id)
     cos = _cosine(vb, w)
     assert cos >= _FLUX2_COSINE_GATE, (
         f"CFG-gated wrapper cosine vs vanilla = {cos:.6f} "
@@ -385,7 +397,8 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: tuple[An
     vanilla = _capture(flux, **kw)
     with _w.catch_warnings():
         _w.simplefilter("ignore", TeaCacheDisabledWarning)
-        ctx = apply_teacache(flux, rel_l1_thresh=0.0, coefficients=pathological)
+        with expect_distilled_warning(variant_id):
+            ctx = apply_teacache(flux, rel_l1_thresh=0.0, coefficients=pathological)
     with ctx as h:
         wrapper = _capture(flux, **kw)
         skipped = h.stats.skipped_count
@@ -400,8 +413,11 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: tuple[An
 
 def test_idempotency_raises_already_patched(flux2_klein: tuple[Any, str]) -> None:
     flux, variant_id = flux2_klein
-    h = apply_teacache(flux, rel_l1_thresh=0.25)
+    with expect_distilled_warning(variant_id):
+        h = apply_teacache(flux, rel_l1_thresh=0.25)
     try:
+        # Already-patched sentinel check runs before the registry match, so
+        # this second call never reaches the apply-time warning — no wrap.
         with pytest.raises(AlreadyPatchedError):
             apply_teacache(flux, rel_l1_thresh=0.4)
     finally:
@@ -416,7 +432,8 @@ def test_restore_completeness(flux2_klein: tuple[Any, str]) -> None:
     original_predict = flux._predict if original_predict_was_instance_attr else None
     original_generate = flux.generate_image if "generate_image" in vars(flux) else None
 
-    h = apply_teacache(flux, rel_l1_thresh=0.25)
+    with expect_distilled_warning(variant_id):
+        h = apply_teacache(flux, rel_l1_thresh=0.25)
     cb = h._callback_instance
     h.restore()
 
@@ -432,5 +449,6 @@ def test_restore_completeness(flux2_klein: tuple[Any, str]) -> None:
     assert cb not in flux.callbacks.before_loop
     assert getattr(flux, "_teacache_handle", None) is None
     # Re-apply succeeds.
-    h2 = apply_teacache(flux)
+    with expect_distilled_warning(variant_id):
+        h2 = apply_teacache(flux)
     h2.restore()

@@ -8,6 +8,61 @@ with the matching `Provenance` in that variant's `integration.py`. The top-level
 `coefficients.py` is a thin re-export shim, extracted in v0.6.0; editing it
 changes nothing.
 
+**Anchoring convention.** `t-1` is the immediately previous gated step,
+whether that step was computed or skipped — the comparison anchor advances
+on every gated step. This matches how the calibration script measures its
+training pairs: `rel_l1(mod_in_t, mod_in_{t-1})` between consecutive steps,
+never against an older, non-adjacent step.
+
+## Runaway guard
+
+The gate accumulates the polynomial's predicted change across consecutive
+skips and resets it to zero on every real compute. The
+origin-constrained in-repo fits are positive for small deltas but cross zero
+at large ones (base-4b at x≈0.24, z-image at x≈0.29, qwen at x≈0.78), beyond
+the range they were fit on; there the clamp turns a large, real change into
+a predicted change of zero, so the accumulator stops advancing — without a
+guard, that would let the wrapper reuse the same cached residual for an
+unbounded number of steps. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
+forces a recompute after 8 consecutive skips regardless of the accumulated
+total. This is an intentional divergence from upstream ali-vilab TeaCache,
+which has no such cap — the same kind of deliberate departure as the gate's
+`max(0.0, ...)` clamp on the polynomial output, which keeps the accumulator
+monotonic instead of matching upstream's raw polynomial exactly.
+
+### Observed max consecutive-skip streaks
+
+Measured at each variant's default threshold on the committed bench recipes
+(M1 Max 32 GB, mflux 0.18.0, three cold reps per condition; the first four on
+2026-08-15, qwen-image on 2026-09-01). Every row but qwen-image renders at
+512×512; qwen-image uses its pinned 768×768. The bench reports carry a per-rep
+`skip_patterns` string (`S` = skipped, `C` = computed) and
+`max_consecutive_skips`; the streak below is the maximum across reps, and in
+every case each rep produced the same pattern.
+
+| Variant | Default threshold | Skips (active steps) | Max observed streak | Source |
+|---|---|---|---|---|
+| `flux1-dev` | 0.20 | 6 / 23 | 1 | `_artifacts/v0.10.0_bench_flux1_dev.json` (25 steps, g=3.5) |
+| `flux2-klein-base-4b` | 0.17 | 9 / 48 | 2 | `_artifacts/v0.10.0_bench_klein_base_4b.json` (50 steps, g=4.0) |
+| `flux2-klein-base-9b` | 0.17 | 13 / 48 | 1 | `_artifacts/v0.10.0_bench_klein_base_9b.json` (50 steps, g=4.0) |
+| `z-image-base` | 0.12 | 15 / 48 | 1 | `_artifacts/v0.10.0_bench_z_image.json` (50 steps, g=4.0, q8) |
+| `qwen-image` | 0.30 | 33 / 48 | 4 | `_artifacts/v0.10.0_bench_qwen_image.json` (50 steps, g=4.0, 768×768) |
+
+Four of the five stay at 1 or 2: the gate mostly alternates compute / skip and
+reuses a residual at most twice in a row. `qwen-image` runs longer, reaching 4,
+because at its 0.30 default it skips roughly two-thirds of its active steps —
+much the largest share in the table. Even there the `MAX_CONSECUTIVE_SKIPS = 8`
+cap sits at twice the longest observed streak, so it engages at no shipped
+default and mainly matters for degenerate settings (an all-zero polynomial, or
+a threshold well above the sweep range).
+
+Qwen's streak grew with the v0.10.0 anchoring change: 0.9.x documented 24
+skips at this threshold and recipe, and the gate replayed over the committed
+calibration trace under consecutive-delta anchoring gives 33 skips with a
+streak of 4, which is exactly what the bench then measured. It is the variant
+the anchoring fix moves most, because its accumulator sits nearest the
+threshold.
+
 ## Built-in coefficient sources
 
 | Variant | Source | Provenance |

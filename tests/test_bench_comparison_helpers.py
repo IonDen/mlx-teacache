@@ -15,8 +15,11 @@ Covers two harness defects:
 functions), so this module imports cleanly in the pure-core lane.
 """
 
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import bench_comparison as bc  # noqa: E402
@@ -104,3 +107,114 @@ def test_merge_is_pure_and_does_not_mutate_input() -> None:
     assert report["generated_at"] == "old"
     assert report["variants"] == {}
     assert report["hardware"]["mlx_teacache_version"] == "0.1.0"
+
+
+# --- skip-streak telemetry (shared with bench_speedup via scripts/_bench_telemetry) ---
+
+
+def test_streak_telemetry_reads_the_last_committed_generation() -> None:
+    from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+
+    stats = TeaCacheStats()
+    kinds = ["forced", "skipped", "skipped", "computed", "skipped", "skipped", "skipped", "computed"]
+    for i, kind in enumerate(kinds):
+        stats.record(
+            StepDecision(
+                step_idx=i, timestep=1.0 - i / 10, rel_l1=0.1, accumulated_distance=0.2, decision=kind
+            )  # type: ignore[arg-type]
+        )
+    stats.finalize_last_generation(num_inference_steps=len(kinds), cfg_was_active=False)
+    assert bc._streak_telemetry(stats) == {"skip_pattern": "CSSCSSSC", "max_consecutive_skips": 3}
+
+
+# --- per-condition chunk persistence + resume ---------------------------------
+
+
+def _fake_worker(condition: str, secs: list[float]) -> dict[str, object]:
+    out: dict[str, object] = {"condition": condition, "rep_seconds": secs, "peak_memory_gb": 9.0}
+    if condition == "wrapper":
+        out.update(
+            {
+                "skipped_per_rep": [4, 4, 4],
+                "computed_per_rep": [19, 19, 19],
+                "rel_l1_thresh_used": 0.2,
+                "skip_pattern_per_rep": ["CSC"] * 3,
+                "max_consecutive_skips_per_rep": [1, 1, 1],
+            }
+        )
+    return out
+
+
+def _stamped(
+    condition: str, secs: list[float], *, teacache: str = "0.10.0", mflux: str = "0.18.0"
+) -> dict[str, object]:
+    return {
+        **_fake_worker(condition, secs),
+        "reps": len(secs),
+        "provenance": {
+            "mlx_teacache_version": teacache,
+            "mflux_version": mflux,
+            "generated_at": "2026-08-16T09:00:00Z",
+        },
+    }
+
+
+def test_chunk_path_is_slug_and_condition_keyed(tmp_path: Path) -> None:
+    assert bc._chunk_path(tmp_path, "z-image", "wrapper") == tmp_path / "z-image" / "wrapper.json"
+
+
+def test_pending_conditions_lists_both_when_nothing_persisted(tmp_path: Path) -> None:
+    assert bc._pending_conditions(tmp_path, "flux1-dev") == ["vanilla", "wrapper"]
+
+
+def test_pending_conditions_skips_a_persisted_condition(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "flux1-dev", _fake_worker("vanilla", [3.0, 2.0, 2.0]))
+    assert bc._pending_conditions(tmp_path, "flux1-dev") == ["wrapper"]
+
+
+def test_persist_chunk_round_trips_and_creates_dirs(tmp_path: Path) -> None:
+    result = _fake_worker("wrapper", [2.0, 1.0, 1.0])
+    written = bc._persist_chunk(tmp_path / "nested", "qwen-image", result)
+    assert written == bc._chunk_path(tmp_path / "nested", "qwen-image", "wrapper")
+    assert json.loads(written.read_text()) == result
+
+
+def test_load_chunks_is_none_until_both_conditions_exist(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0]))
+    assert bc._load_chunks(tmp_path, "z-image", reps=3) is None
+    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    loaded = bc._load_chunks(tmp_path, "z-image", reps=3)
+    assert loaded is not None
+    assert loaded["vanilla"]["rep_seconds"] == [3.0, 2.0, 2.0]
+    assert loaded["wrapper"]["skipped_per_rep"] == [4, 4, 4]
+
+
+# --- provenance / reps stamps: both conditions of a row must come from one measurement setup ---
+
+
+def test_load_chunks_accepts_a_pair_from_the_same_setup(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0]))
+    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    loaded = bc._load_chunks(tmp_path, "z-image", reps=3)
+    assert loaded is not None and loaded["wrapper"]["provenance"]["mlx_teacache_version"] == "0.10.0"
+
+
+def test_load_chunks_refuses_a_pair_measured_on_different_versions(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0], teacache="0.9.0"))
+    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0], teacache="0.10.0"))
+    with pytest.raises(SystemExit, match="mlx_teacache_version.*0.9.0.*0.10.0"):
+        bc._load_chunks(tmp_path, "z-image", reps=3)
+
+
+def test_load_chunks_refuses_a_chunk_with_the_wrong_rep_count(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("vanilla", [3.0]))  # a --reps 1 preview
+    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    with pytest.raises(SystemExit, match="vanilla.json.*reps=1.*3"):
+        bc._load_chunks(tmp_path, "flux1-dev", reps=3)
+
+
+def test_load_chunks_refuses_an_unstamped_chunk(tmp_path: Path) -> None:
+    bc._persist_chunk(tmp_path, "flux1-dev", _fake_worker("vanilla", [3.0, 2.0, 2.0]))
+    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
+    with pytest.raises(SystemExit, match="vanilla.json"):
+        bc._load_chunks(tmp_path, "flux1-dev", reps=3)

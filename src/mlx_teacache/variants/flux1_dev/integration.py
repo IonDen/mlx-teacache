@@ -353,7 +353,6 @@ def flux1_forward_with_gate(
         )
         if decision.should_update_cache:
             state.cached_residual = body_out_concat - body_in_concat
-            state.previous_mod_input = mod_in
     else:
         # decision.kind == "skipped"
         if state.cached_residual is None:

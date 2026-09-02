@@ -12,6 +12,18 @@ import mlx.core as mx
 
 GateKind = Literal["computed", "forced", "skipped", "numerical-miss"]
 
+MAX_CONSECUTIVE_SKIPS = 8
+"""Runaway-skip guard, not a tuning knob (intentional divergence from
+upstream ali-vilab TeaCache, like the max(0,·) clamp below). The
+origin-constrained in-repo fits are positive for small deltas but cross
+zero at large ones (base-4b x≈0.24, z-image x≈0.29, qwen x≈0.78), past the
+range they were calibrated on; there the max(0,·) clamp turns a large,
+real change into a predicted change of zero, so the accumulator stops
+advancing and a stale residual could be reused without bound at a
+user-raised threshold. Observed max streaks at per-variant default
+thresholds are recorded in docs/calibration.md; raise this constant only
+from a re-measured run."""
+
 
 @dataclass(frozen=True)
 class GateDecision:
@@ -74,8 +86,14 @@ def gate_step(  # type: ignore[no-untyped-def]
         )
 
     # Forced windows: full forward, but DO NOT update the cache so a forced
-    # output doesn't poison the cache for a later threshold-gated step.
+    # output doesn't poison the cache for a later threshold-gated step. In the
+    # LEADING window the anchor does advance (upstream-faithful): the signal is
+    # real, and the first gated step must measure a consecutive delta against
+    # it. In the TRAILING window nothing gated follows, so the anchor is left
+    # alone (writing it would only cost a host sync per trailing step).
     if step_idx < skip_first or step_idx >= num_steps - skip_last:
+        if step_idx < skip_first and _all_finite(mod_in):
+            state.previous_mod_input = mod_in
         return GateDecision(
             kind="forced",
             should_compute=True,
@@ -85,19 +103,32 @@ def gate_step(  # type: ignore[no-untyped-def]
             accumulated_distance=state.accumulated_distance,
         )
 
-    # Numerical safety: non-finite mod_in. Compute (recover), but NEVER cache.
+    # Numerical safety: non-finite mod_in. Compute (recover), but NEVER cache —
+    # and drop the residual cached BEFORE the miss, so the next finite step
+    # re-seeds (compute + cache) instead of skipping on a residual that is now
+    # >= 2 diffusion steps stale, judged against a pre-miss anchor. The anchor
+    # itself cannot advance to a non-finite value; it stays where it was, and
+    # the re-seed refreshes it. Accumulator and streak restart with the cache.
     if not _all_finite(mod_in):
+        state.cached_residual = None
+        state.cached_residual_neg = None
+        state.accumulated_distance = 0.0
+        state.consecutive_skips = 0
         return GateDecision(
             kind="numerical-miss",
             should_compute=True,
             should_update_cache=False,
             rel_l1=None,
             predicted_distance=None,
-            accumulated_distance=state.accumulated_distance,
+            accumulated_distance=0.0,
         )
 
-    # First eligible step with no cache yet: compute and cache (seeds the cache).
-    if state.previous_mod_input is None:
+    # Seed / re-seed: no anchor yet, OR an anchor without a cached residual
+    # (possible now that the anchor advances on forced steps while the cache
+    # does not). A skip without a residual to reuse must never be issued.
+    if state.previous_mod_input is None or state.cached_residual is None:
+        state.previous_mod_input = mod_in
+        state.consecutive_skips = 0
         return GateDecision(
             kind="computed",
             should_compute=True,
@@ -107,18 +138,25 @@ def gate_step(  # type: ignore[no-untyped-def]
             accumulated_distance=state.accumulated_distance,
         )
 
-    # Compute rel_l1 and predicted distance; clamp at 0 so the accumulator is
-    # monotonic non-decreasing within a generation. The `max(0.0, ...)` clamp is an
-    # INTENTIONAL divergence from upstream ali-vilab TeaCache (which uses the raw
-    # polynomial): it keeps the accumulator monotonic for origin-constrained FLUX.2
-    # fits and arbitrary user coefficients whose polynomial can dip negative near
-    # the origin. Don't remove it to "match upstream".
     rel_l1 = mean_abs_rel_l1(mod_in, state.previous_mod_input)
+    # Option A anchoring (upstream-faithful, v0.10.0): advance on EVERY gated
+    # step so rel_l1 is always the consecutive delta d(M_t, M_{t-1}) the
+    # degree-4 polynomials were calibrated on. Before v0.10.0 the anchor
+    # advanced only on computed steps, feeding cumulative drift into a
+    # consecutive-delta calibration (backlog-confirmed divergence).
+    state.previous_mod_input = mod_in
+    # Clamp at 0 so the accumulator is monotonic non-decreasing within a
+    # generation. The `max(0.0, ...)` clamp is an INTENTIONAL divergence from
+    # upstream ali-vilab TeaCache (which uses the raw polynomial): it keeps
+    # the accumulator monotonic for origin-constrained FLUX.2 fits and
+    # arbitrary user coefficients whose polynomial can dip negative near the
+    # origin. Don't remove it to "match upstream".
     predicted = max(0.0, poly_eval(coefficients, rel_l1))
     new_acc = state.accumulated_distance + predicted
 
-    if new_acc < rel_l1_thresh:
+    if new_acc < rel_l1_thresh and state.consecutive_skips < MAX_CONSECUTIVE_SKIPS:
         state.accumulated_distance = new_acc
+        state.consecutive_skips += 1
         return GateDecision(
             kind="skipped",
             should_compute=False,
@@ -129,6 +167,7 @@ def gate_step(  # type: ignore[no-untyped-def]
         )
 
     state.accumulated_distance = 0.0
+    state.consecutive_skips = 0
     return GateDecision(
         kind="computed",
         should_compute=True,

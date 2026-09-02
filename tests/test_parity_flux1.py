@@ -405,13 +405,22 @@ def test_restore_completeness(flux1_dev: Any) -> None:
 
 def test_custom_zero_coefficients_skip_count(flux1_dev: Any) -> None:
     """coefficients=[0]*5 at rel_l1_thresh=0.25 → polynomial=0 → accumulator
-    stays 0 → every eligible step skips. Skip count == num_steps -
-    skip_first - skip_last - 1 (the -1 is for the first eligible step
-    that forces a compute to seed the cache)."""
+    stays 0 — the exact stalled-accumulator pathology the runaway guard
+    bounds. Every eligible step WANTS to skip, but MAX_CONSECUTIVE_SKIPS
+    forces a recompute after each full streak, so the count is the eligible
+    window minus one cap-compute per (MAX_CONSECUTIVE_SKIPS + 1) slots.
+
+    v0.10.0: consecutive-delta anchoring (Option A) + runaway cap. Observed
+    2026-08-14 on real weights: 20 skips (streaks 8+8+4, cap-computes at
+    steps 10 and 19), observed on the 2026-08-15 parity run."""
+    from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS
+
     num_steps = 25
     skip_first = 1
     skip_last = 1
-    expected_skips = num_steps - skip_first - skip_last - 1
+    eligible = num_steps - skip_first - skip_last - 1  # -1: seed compute
+    cap_computes = eligible // (MAX_CONSECUTIVE_SKIPS + 1)
+    expected_skips = eligible - cap_computes
     with apply_teacache(
         flux1_dev,
         rel_l1_thresh=0.25,

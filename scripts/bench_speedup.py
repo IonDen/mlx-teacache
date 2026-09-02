@@ -45,6 +45,17 @@ The script also generates and saves a single vanilla + wrapper image pair
 under tests/_artifacts/bench_images/<variant>/ for visual quality comparison.
 The bench_images/ directory is git-ignored.
 
+Chunking / resume
+-----------------
+Every (variant, condition, rep) worker result is persisted the moment the
+worker returns, to ``--results-dir/<variant>/<condition>_rep<N>.json``
+(default ``tests/_artifacts/bench_chunks/``, git-ignored). A re-invocation
+skips chunks whose file exists and the report is written only once every
+chunk is present, so one three-way bench can be split into several short,
+finite jobs — ``--max-chunks 3`` with ``--reps 3`` runs one condition per
+invocation — and an interruption loses at most the in-flight worker. Move the
+variant's chunk subdir to the Trash for a fresh measurement.
+
 Memory safety
 -------------
 
@@ -76,6 +87,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import streak_telemetry as _streak_telemetry
+
 PROMPT = "a red apple on a wooden table"
 SEED = 42
 HEIGHT = 512
@@ -93,6 +106,7 @@ _VARIANT_SLUG_TO_ID: dict[str, str] = {
     "flux1-dev": "flux1-dev",
     "flux1-schnell": "flux1-schnell",
     "z-image": "z-image-base",
+    "qwen": "qwen-image",
 }
 
 # Default bench recipe per variant (num_inference_steps, guidance).
@@ -104,6 +118,7 @@ _VARIANT_RECIPE: dict[str, dict[str, Any]] = {
     "flux1-dev": {"num_inference_steps": 25, "guidance": 3.5},
     "flux1-schnell": {"num_inference_steps": 4, "guidance": 1.0},
     "z-image": {"num_inference_steps": 50, "guidance": 4.0},
+    "qwen": {"num_inference_steps": 50, "guidance": 4.0},
 }
 
 # Quantization bits per variant. FLUX variants bench at q4; Z-Image at q8 (its
@@ -116,7 +131,23 @@ _VARIANT_QUANTIZE: dict[str, int] = {
     "flux1-dev": 4,
     "flux1-schnell": 4,
     "z-image": 8,
+    "qwen": 4,
 }
+
+# Per-variant render size. Everything benches at the shared 512x512 recipe
+# except qwen-image, whose DEFAULT_THRESH=0.30 was calibrated and swept at
+# 768x768 (scripts/calibrate_qwen.py, scripts/sweep_threshold_qwen.py) — the
+# same size its parity gate uses. Benching it at 512x512 would report a skip
+# pattern for an operating point the threshold was never tuned against.
+_VARIANT_RESOLUTION: dict[str, tuple[int, int]] = {
+    "qwen": (768, 768),
+}
+
+
+def _resolution_for(variant: str) -> tuple[int, int]:
+    """Return (height, width) for a CLI variant slug."""
+    return _VARIANT_RESOLUTION.get(variant, (HEIGHT, WIDTH))
+
 
 # Default soft memory cap (GB) per variant when _REGISTRY META is absent.
 # Workers derive the hard wired cap as (soft_cap - 2) GB.
@@ -151,6 +182,11 @@ def _load_flux(variant: str) -> Any:
         from mflux.models.z_image.variants.z_image import ZImage
 
         flux = ZImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.z_image())
+    elif variant == "qwen":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
+
+        flux = QwenImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.qwen_image())
     else:
         raise ValueError(f"unsupported variant: {variant!r}")
     flux.freeze()
@@ -162,6 +198,8 @@ def _generate(
     *,
     num_inference_steps: int,
     guidance: float,
+    height: int,
+    width: int,
     save_path: Path | None = None,
 ) -> tuple[float, Any]:
     """Time one generation. Flushes GPU before stopping the clock."""
@@ -172,8 +210,8 @@ def _generate(
         prompt=PROMPT,
         seed=SEED,
         num_inference_steps=num_inference_steps,
-        height=HEIGHT,
-        width=WIDTH,
+        height=height,
+        width=width,
         guidance=guidance,
     )
     mx.eval(mx.zeros(1))  # flush GPU work before stopping the clock
@@ -205,8 +243,9 @@ def _worker_main(args: argparse.Namespace) -> None:
                     cap_gb = hint
 
     wired_gb = max(1, cap_gb - 2)
-    mx.set_wired_limit(int(wired_gb * 1024**3))
-    mx.set_memory_limit(int(cap_gb * 1024**3))
+    from _mlx_caps import install_caps
+
+    install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
     print(
         f"  [worker] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
         flush=True,
@@ -220,6 +259,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
     )
     guidance: float = args.guidance if args.guidance is not None else recipe["guidance"]
+    height, width = _resolution_for(variant)
     save_path: Path | None = Path(args.save_to) if args.save_to else None
 
     flux = _load_flux(variant)
@@ -232,6 +272,8 @@ def _worker_main(args: argparse.Namespace) -> None:
             flux,
             num_inference_steps=num_inference_steps,
             guidance=guidance,
+            height=height,
+            width=width,
             save_path=save_path,
         )
         print(f"  vanilla rep {rep + 1}: {elapsed:.2f}s", flush=True)
@@ -243,12 +285,15 @@ def _worker_main(args: argparse.Namespace) -> None:
                 flux,
                 num_inference_steps=num_inference_steps,
                 guidance=guidance,
+                height=height,
+                width=width,
                 save_path=save_path,
             )
             stats_summary = {
                 "skipped_count": handle.stats.skipped_count,
                 "computed_count": handle.stats.computed_count,
                 "rel_l1_thresh_used": 0.0,
+                **_streak_telemetry(handle.stats),
             }
         print(
             f"  wrapper_nogate rep {rep + 1}: {elapsed:.2f}s "
@@ -263,16 +308,20 @@ def _worker_main(args: argparse.Namespace) -> None:
                 flux,
                 num_inference_steps=num_inference_steps,
                 guidance=guidance,
+                height=height,
+                width=width,
                 save_path=save_path,
             )
             stats_summary = {
                 "skipped_count": handle.stats.skipped_count,
                 "computed_count": handle.stats.computed_count,
                 "rel_l1_thresh_used": handle.rel_l1_thresh,
+                **_streak_telemetry(handle.stats),
             }
         print(
             f"  wrapper rep {rep + 1}: {elapsed:.2f}s "
-            f"(skipped {stats_summary['skipped_count']}/{num_inference_steps})",
+            f"(skipped {stats_summary['skipped_count']}/{num_inference_steps}, "
+            f"max streak {stats_summary['max_consecutive_skips']}, pattern {stats_summary['skip_pattern']})",
             flush=True,
         )
     else:
@@ -284,6 +333,8 @@ def _worker_main(args: argparse.Namespace) -> None:
         "variant": variant,
         "condition": condition,
         "rep": rep,
+        "num_inference_steps": num_inference_steps,
+        "guidance": guidance,
         "elapsed_s": elapsed,
         "peak_memory_gb": peak_memory_gb,
         "stats_summary": stats_summary,
@@ -389,41 +440,94 @@ def _run_one_worker(
     raise RuntimeError(f"worker for {label} did not emit a {WORKER_RESULT_SENTINEL} result line")
 
 
-def _run_condition(
-    *,
-    variant: str,
-    condition: str,
-    reps: int,
-    cap_gb: int | None,
-    num_inference_steps: int | None,
-    guidance: float | None,
-    bench_dir: Path,
-    three_way: bool,
-) -> list[dict[str, Any]]:
-    """Run all reps for one (variant, condition). Returns list of worker result dicts."""
-    results: list[dict[str, Any]] = []
-    for rep in range(reps):
-        # Save image only on rep 0.
-        if rep == 0:
-            if condition == "vanilla":
-                save_to = bench_dir / "vanilla.png"
-            elif condition == "wrapper_nogate":
-                save_to = bench_dir / "wrapper_nogate.png"
-            else:  # wrapper
-                save_to = bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
-        else:
-            save_to = None
-        result = _run_one_worker(
-            variant=variant,
-            condition=condition,
-            rep=rep,
-            cap_gb=cap_gb,
-            num_inference_steps=num_inference_steps,
-            guidance=guidance,
-            save_to=save_to,
-        )
-        results.append(result)
-    return results
+def _image_path_for(bench_dir: Path, condition: str, rep: int, *, three_way: bool) -> Path | None:
+    """Image destination for a worker: only rep 0 of each condition saves an image."""
+    if rep != 0:
+        return None
+    if condition == "vanilla":
+        return bench_dir / "vanilla.png"
+    if condition == "wrapper_nogate":
+        return bench_dir / "wrapper_nogate.png"
+    return bench_dir / ("wrapper_gated.png" if three_way else "wrapper.png")
+
+
+def _wrapper_streak_arrays(results: list[dict[str, Any]]) -> dict[str, list[Any]]:
+    """Per-rep skip patterns + max streaks for the report (empty/0 for pre-telemetry chunks)."""
+    return {
+        "skip_patterns": [str(r["stats_summary"].get("skip_pattern", "")) for r in results],
+        "max_consecutive_skips": [int(r["stats_summary"].get("max_consecutive_skips", 0)) for r in results],
+    }
+
+
+# --- Per-chunk persistence + resume ---------------------------------------
+# One (condition, rep) worker = one chunk. Each chunk's result is written to
+# disk the instant the worker returns, and a re-invocation skips chunks whose
+# file already exists, so a three-way bench can be split into several short
+# finite jobs (e.g. one condition per invocation via --max-chunks) and an
+# interruption loses at most the in-flight worker.
+
+
+def _chunk_path(results_dir: Path, condition: str, rep: int) -> Path:
+    return results_dir / f"{condition}_rep{rep}.json"
+
+
+def _pending_chunks(conditions: list[str], reps: int, results_dir: Path) -> list[tuple[str, int]]:
+    """(condition, rep) pairs with no persisted result yet, in run order."""
+    return [
+        (condition, rep)
+        for condition in conditions
+        for rep in range(reps)
+        if not _chunk_path(results_dir, condition, rep).exists()
+    ]
+
+
+def _persist_chunk(results_dir: Path, result: dict[str, Any]) -> Path:
+    """Write one worker result to its chunk file (atomic replace); return the path."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    dest = _chunk_path(results_dir, str(result["condition"]), int(result["rep"]))
+    tmp = dest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(result, indent=2))
+    tmp.replace(dest)
+    return dest
+
+
+def _load_chunks(
+    conditions: list[str], reps: int, results_dir: Path
+) -> dict[str, list[dict[str, Any]]] | None:
+    """All persisted worker results keyed by condition (ordered by rep), or None if any is missing."""
+    if _pending_chunks(conditions, reps, results_dir):
+        return None
+    return {
+        condition: [
+            cast(dict[str, Any], json.loads(_chunk_path(results_dir, condition, rep).read_text()))
+            for rep in range(reps)
+        ]
+        for condition in conditions
+    }
+
+
+def _verify_chunk_recipes(
+    conditions: list[str], reps: int, results_dir: Path, *, num_inference_steps: int, guidance: float
+) -> None:
+    """Refuse to reuse a persisted chunk measured under a different recipe.
+
+    Chunks are keyed by (condition, rep) only, so without this check a re-run
+    with another --num-inference-steps / --guidance would silently aggregate
+    the old timings under the new report header."""
+    expected = {"num_inference_steps": num_inference_steps, "guidance": guidance}
+    for condition in conditions:
+        for r in range(reps):
+            path = _chunk_path(results_dir, condition, r)
+            if not path.exists():
+                continue
+            chunk = json.loads(path.read_text())
+            for key, want in expected.items():
+                got = chunk.get(key)
+                if got is None or float(got) != float(want):
+                    raise SystemExit(
+                        f"persisted chunk {path} was measured with {key}={got} but this invocation "
+                        f"uses {key}={want}; move {results_dir} to the Trash for a fresh measurement"
+                    )
 
 
 def main() -> None:
@@ -500,6 +604,29 @@ def main() -> None:
         dest="images_dir",
         help="Root directory for saved bench images (one subdir per variant).",
     )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path(__file__).parent.parent / "tests" / "_artifacts" / "bench_chunks",
+        dest="results_dir",
+        help=(
+            "Root directory for per-chunk worker results (one subdir per variant; one JSON per "
+            "(condition, rep)). Existing chunks are REUSED on re-invocation — move the variant's "
+            "subdir to the Trash for a fresh measurement."
+        ),
+    )
+    parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=None,
+        dest="max_chunks",
+        help=(
+            "Run at most this many pending (condition, rep) chunks this invocation, then exit; "
+            "the report is written only once every chunk exists (re-invoke to continue). "
+            "With --reps 3, --max-chunks 3 = one condition per invocation. An invocation that "
+            "leaves chunks pending exits with status 3."
+        ),
+    )
 
     # Legacy alias kept for backward-compat.
     parser.add_argument(
@@ -546,21 +673,42 @@ def main() -> None:
         conditions.append("wrapper_nogate")
     conditions.append("wrapper")
 
-    all_results: dict[str, list[dict[str, Any]]] = {}
+    results_dir: Path = args.results_dir / variant
+    _verify_chunk_recipes(
+        conditions, reps, results_dir, num_inference_steps=num_inference_steps, guidance=guidance
+    )
+    pending = _pending_chunks(conditions, reps, results_dir)
+    total_chunks = len(conditions) * reps
+    if len(pending) < total_chunks:
+        reused = [f"{c}/rep{r}" for c in conditions for r in range(reps) if (c, r) not in pending]
+        print(f"\n== RESUMING: reusing {len(reused)}/{total_chunks} persisted chunks from {results_dir} ==")
+        for name in reused:
+            print(f"   {name}")
+    to_run = pending if args.max_chunks is None else pending[: args.max_chunks]
+    print(f"\n== running {len(to_run)} of {len(pending)} pending chunks (reps={reps}) ==")
 
-    for condition in conditions:
-        print(f"\n== {condition} x{reps} ==")
-        results = _run_condition(
+    for condition, rep in to_run:
+        result = _run_one_worker(
             variant=variant,
             condition=condition,
-            reps=reps,
+            rep=rep,
             cap_gb=cap_gb,
             num_inference_steps=num_inference_steps if args.num_inference_steps is not None else None,
             guidance=guidance if args.guidance is not None else None,
-            bench_dir=bench_dir,
-            three_way=three_way,
+            save_to=_image_path_for(bench_dir, condition, rep, three_way=three_way),
         )
-        all_results[condition] = results
+        written = _persist_chunk(results_dir, result)
+        print(f">> chunk persisted: {written}", flush=True)
+
+    loaded = _load_chunks(conditions, reps, results_dir)
+    if loaded is None:
+        remaining = _pending_chunks(conditions, reps, results_dir)
+        print(
+            f"\n== PARTIAL: {total_chunks - len(remaining)}/{total_chunks} chunks persisted under "
+            f"{results_dir}; {len(remaining)} pending — re-invoke to continue. No report written. =="
+        )
+        sys.exit(3)
+    all_results: dict[str, list[dict[str, Any]]] = loaded
 
     # --- Aggregate ---
     def _times(cond: str) -> list[float]:
@@ -617,8 +765,8 @@ def main() -> None:
             "guidance": guidance,
             "prompt": PROMPT,
             "seed": SEED,
-            "height": HEIGHT,
-            "width": WIDTH,
+            "height": _resolution_for(variant)[0],
+            "width": _resolution_for(variant)[1],
             "reps": reps,
             "hardware": _detect_hardware(quantize=_VARIANT_QUANTIZE[variant]),
             "vanilla_seconds": vanilla_times,
@@ -628,6 +776,7 @@ def main() -> None:
             "speedup_median": speedup,
             "skipped_counts": skipped_counts,
             "computed_counts": computed_counts,
+            **_wrapper_streak_arrays(all_results["wrapper"]),
             "bench_images_dir": str(bench_dir),
             "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
             "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],

@@ -19,12 +19,12 @@ import statistics
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_FLUX1_DEV_BENCH = _REPO_ROOT / "_artifacts" / "v0.6.3_bench_flux1_dev.json"
+_FLUX1_DEV_BENCH = _REPO_ROOT / "_artifacts" / "v0.10.0_bench_flux1_dev.json"
 _README = _REPO_ROOT / "README.md"
 
 _RUN_HINT = (
     "uv run python scripts/bench_speedup.py --variant flux1-dev "
-    "--three-way --reps 3 --report _artifacts/v0.6.3_bench_flux1_dev.json"
+    "--three-way --reps 3 --report _artifacts/v0.10.0_bench_flux1_dev.json"
 )
 
 
@@ -168,3 +168,86 @@ def test_flux1_dev_bench_artifact_is_meaningful():
     for i, (sk, cp) in enumerate(zip(skipped, computed, strict=True)):
         assert sk >= 0 and cp > 0, f"rep {i}: counts must be non-negative / computed>0 ({sk}, {cp})"
         assert sk + cp <= steps, f"rep {i}: skipped+computed {sk + cp} exceeds {steps} steps"
+
+
+# --- qwen-image ---------------------------------------------------------------
+# Qwen joined the bench harness in v0.10.0. Its README row carries the largest
+# speedup in the table, so it gets the same artifact pin as the flux1-dev row.
+
+_QWEN_BENCH = _REPO_ROOT / "_artifacts" / "v0.10.0_bench_qwen_image.json"
+
+
+def _load_qwen_bench() -> dict:
+    return json.loads(_QWEN_BENCH.read_text())
+
+
+def _qwen_benchmark_row() -> list[str]:
+    """Cells of the README Benchmarks-table row for ``qwen-image``.
+
+    Disambiguated from the Supported-models row (same leading cell) by the
+    7-column shape with a numeric Steps cell.
+    """
+    for line in _README.read_text().splitlines():
+        s = line.strip()
+        if s.startswith("| `qwen-image`"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) >= 7 and cells[1].isdigit():
+                return cells
+    raise AssertionError("No `qwen-image` row found in the README Benchmarks table")
+
+
+def test_qwen_bench_artifact_is_committed_and_valid():
+    """RED if the qwen report is missing or was written with fewer than three
+    reps — the headline would then be a single-run number."""
+    report = _load_qwen_bench()
+    assert report["schema_version"] == 2
+    assert report["variant"] == "qwen"
+    assert report["num_inference_steps"] == 50
+    assert report["height"] == 768 and report["width"] == 768, (
+        "qwen benches at its pinned 768x768, not the shared 512x512 recipe"
+    )
+    reps = report["reps"]
+    assert reps >= 3, f"need >=3 reps for a credible median, got {reps}"
+    assert len(report["vanilla_seconds"]) == reps
+    assert len(report["wrapper_seconds"]) == reps
+    assert len(report["skipped_counts"]) == reps
+
+
+def test_readme_qwen_row_matches_committed_artifact():
+    """RED if the README's qwen numbers drift from the committed report."""
+    h = bench_headline(_load_qwen_bench())
+    cells = _qwen_benchmark_row()
+    assert int(cells[1]) == h["steps"]
+    assert cells[2].endswith("s") and cells[2][:-1] == f"{h['vanilla_s']:.1f}"
+    assert cells[3].endswith("s") and cells[3][:-1] == f"{h['wrapper_s']:.1f}"
+    assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
+    assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"
+
+
+def test_qwen_streak_stays_under_the_runaway_cap():
+    """The release documents the cap as never engaging at a shipped default.
+    Qwen has the longest streak of any variant, so it is the row that would
+    falsify that claim first. RED if a future re-measure reaches the cap."""
+    from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS
+
+    streaks = _load_qwen_bench()["max_consecutive_skips"]
+    assert max(streaks) < MAX_CONSECUTIVE_SKIPS, (
+        f"qwen streak {max(streaks)} reached the cap {MAX_CONSECUTIVE_SKIPS}; "
+        "the documented 'cap never engages at a shipped default' claim is stale"
+    )
+
+
+def test_qwen_bench_artifact_is_meaningful():
+    """Schema validity is not enough: a corrupt artifact with all-zero skips and
+    a sub-1 speedup, with the README synced to match, passes every other qwen
+    test. Pin the *meaning* — the headline is a real speedup and the cache
+    actually engages. RED on a dormant-cache or slower-than-vanilla artifact."""
+    report = _load_qwen_bench()
+    steps = int(report["num_inference_steps"])
+    skipped = report["skipped_counts"]
+    computed = report["computed_counts"]
+    assert report["speedup_median"] > 1.0, "qwen headline must be a real speedup"
+    med = statistics.median(skipped)
+    assert 0 < med < steps, f"median skips {med} must be strictly inside (0, {steps})"
+    for s_, c_ in zip(skipped, computed, strict=True):
+        assert s_ + c_ <= steps, f"skipped {s_} + computed {c_} exceeds {steps} steps"

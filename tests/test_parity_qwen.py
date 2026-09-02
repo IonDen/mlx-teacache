@@ -41,18 +41,18 @@ ssim = pytest.importorskip("skimage.metrics").structural_similarity
 pytestmark = pytest.mark.parity
 
 _COSINE_GATE = 0.99  # threshold=0 re-walk parity (calibration self-check measured >= 0.999)
-# Default-threshold quality floor. The 768x768/50 sweep on the SAME red-apple recipe
-# measured SSIM 0.9873 at the shipped thresh 0.30 (scripts/sweep_threshold_qwen.py). That
-# sweep runs the mixed-precision build; this fixture runs stock q4, whose grain lowers
-# wrapper-vs-vanilla SSIM somewhat — so 0.95 leaves honest margin below ~0.987 while still
-# catching a real regression. The earlier 0.85 FLUX.2-family bar was too loose to protect
-# the "no visible quality loss at the default threshold" claim. (Floor set from committed
-# sweep data, not a fresh stock-q4 measurement; raise it once a stock-q4 number is recorded.)
+# Default-threshold quality floor. Under the v0.10.0 gate this fixture's own saved
+# stock-q4 pair measures SSIM 0.9672 at the shipped thresh 0.30 (0.9781 under 0.9.x, whose
+# 768x768 sweep on the mixed-precision build read 0.9873). 0.95 sits 0.017 below the
+# current number — real margin, but not the ~0.04 it once was; if a re-sweep moves the
+# default, re-derive this from the new pair rather than inheriting it.
 _SSIM_GATE = 0.95
-# Expected skip band at thresh 0.30: the sweep/bench skip ~24-25 of 48 active steps. The
-# band is wide enough for the stock-q4-vs-mixed-precision + prompt delta, tight enough to
-# catch a gate that stopped skipping (dormant cache) or one that over-skips (crater SSIM).
-_MIN_SKIP, _MAX_SKIP = 15, 35
+# Expected skip band at thresh 0.30 under consecutive-delta anchoring: the v0.10.0 bench
+# at this exact recipe (768x768, 50 steps, g=4.0, q4, seed 42, red apple) skipped 33 of 48
+# active steps in every rep. 0.9.x skipped 24 here; the old 15-35 band let that shift pass
+# unnoticed, so this one is centred on the measured value and would go red on either the
+# 0.9.x count or a dormant cache.
+_MIN_SKIP, _MAX_SKIP = 28, 38
 PROMPT = "a red apple on a wooden table"
 SEED = 42
 HEIGHT = WIDTH = 768
@@ -162,7 +162,7 @@ def test_image_quality_ssim_at_default_threshold(qwen_image: Any) -> None:
         skipped, computed = h.stats.skipped_count, h.stats.computed_count
     score = float(ssim(van, wrap, channel_axis=-1, data_range=255))
     assert _MIN_SKIP <= skipped <= _MAX_SKIP, (
-        f"skip count {skipped} outside the expected ~24-25 band [{_MIN_SKIP}, {_MAX_SKIP}] at "
+        f"skip count {skipped} outside the expected ~33 band [{_MIN_SKIP}, {_MAX_SKIP}] at "
         f"DEFAULT_THRESH (computed={computed}) — a dormant or runaway cache"
     )
     assert score >= _SSIM_GATE, f"SSIM {score:.4f} < {_SSIM_GATE} at DEFAULT_THRESH (skipped={skipped})"

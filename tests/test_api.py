@@ -589,3 +589,50 @@ def test_user_coefficients_provenance_all_variants(variant_id: str, make_flux) -
         assert handle.coefficients == custom_coeffs
     finally:
         handle.restore()
+
+
+# --- at-apply distilled warning vs custom coefficients --------------------------
+
+
+class _StopAtIntegration(RuntimeError):
+    """Raised by the stubbed integration loader so the test observes only the
+    pre-dispatch path in apply_teacache (warning check) without importing mflux."""
+
+
+def _fake_distilled_klein_4b():
+    return SimpleNamespace(model_config=SimpleNamespace(aliases=["flux2-klein-4b"]))
+
+
+def _stub_loader(monkeypatch):
+    from mlx_teacache.variants import _REGISTRY
+
+    def _boom():
+        raise _StopAtIntegration
+
+    monkeypatch.setitem(_REGISTRY["flux2-klein-4b"], "load_integration", _boom)
+
+
+def test_distilled_variant_warns_at_apply_with_builtin_coefficients(monkeypatch):
+    """Fast pin of the at-apply trigger: a distilled Klein on builtin
+    coefficients warns before the integration is even loaded."""
+    from mlx_teacache.errors import TeaCacheNoBenefitWarning
+
+    _stub_loader(monkeypatch)
+    with pytest.warns(TeaCacheNoBenefitWarning), pytest.raises(_StopAtIntegration):
+        apply_teacache(_fake_distilled_klein_4b())
+
+
+def test_distilled_variant_does_not_warn_when_caller_supplies_coefficients(monkeypatch):
+    """RED if the at-apply warning fires regardless of `coefficients`. The
+    warning text says the *builtin* polynomial does not engage on a few-step
+    schedule; a caller passing their own tuple is deliberately experimenting
+    and, under filterwarnings=error, would be unable to call apply at all."""
+    import warnings
+
+    from mlx_teacache.errors import TeaCacheNoBenefitWarning
+
+    _stub_loader(monkeypatch)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TeaCacheNoBenefitWarning)
+        with pytest.raises(_StopAtIntegration):
+            apply_teacache(_fake_distilled_klein_4b(), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5))

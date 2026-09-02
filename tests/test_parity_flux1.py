@@ -412,7 +412,7 @@ def test_custom_zero_coefficients_skip_count(flux1_dev: Any) -> None:
 
     v0.10.0: consecutive-delta anchoring (Option A) + runaway cap. Observed
     2026-08-14 on real weights: 20 skips (streaks 8+8+4, cap-computes at
-    steps 10 and 19) — see /tmp/v0100-parity-flux1.log."""
+    steps 10 and 19), observed on the 2026-08-15 parity run."""
     from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS
 
     num_steps = 25

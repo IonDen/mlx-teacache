@@ -84,7 +84,10 @@ def apply_teacache(
 
     for variant_id, entry in _REGISTRY.items():
         if entry["matches"](flux):
-            if entry["default_thresh"] is None:
+            # The warning describes the *builtin* polynomial on a few-step
+            # schedule; a caller supplying coefficients is experimenting on
+            # purpose and must not be blocked under filterwarnings=error.
+            if entry["default_thresh"] is None and coefficients is None:
                 warnings.warn(
                     TeaCacheNoBenefitWarning(
                         f"variant {variant_id!r} runs a distilled few-step schedule where the "

@@ -109,7 +109,7 @@ This row uses the shared portrait prompt and seed at **768×768** rather than th
 
 Qwen-Image (Alibaba, Apache-2.0) is a dual-stream MMDiT, FLUX-shaped, so it gets the FLUX-canonical gate signal — the modulated block-0 image input — calibrated at R² 0.849. At the quality-first threshold of 0.30 the wrapper skips 25 of the 48 active steps (~52%) here, each skip avoiding both CFG branches' 60-block bodies, and the two portraits are perceptually equivalent (SSIM 0.987).
 
-Both numbers are v0.9.0's. Under v0.10.0 the same threshold skips more — 33 of 48 on the red-apple recipe the README benchmarks use, at SSIM 0.967 against vanilla — for a 3.02× speedup there. The attribution also changed: the three-way bench shows the no-gate wrapper running 1.10× faster than vanilla with nothing skipped, so the claim that Qwen's win is purely step-skipping no longer holds, and that residual has no established cause. See the README's Benchmarks footnote ⁷.
+Both numbers are v0.9.0's. Under v0.10.0 the same threshold skips more — 33 of 48 on the red-apple recipe the README benchmarks use, at SSIM 0.967 against vanilla — for a 3.02× speedup there. The three-way bench also timed the no-gate wrapper 1.10× faster than vanilla despite pixel-identical output; that gap is drift between separately timed blocks rather than a wrapper effect, so the honest range is 2.73–3.02×. See the README's Benchmarks footnote ⁷.
 
 ## What is excluded and why
 

@@ -200,6 +200,7 @@ def test_qwen_bench_artifact_is_committed_and_valid():
     """RED if the qwen report is missing or was written with fewer than three
     reps — the headline would then be a single-run number."""
     report = _load_qwen_bench()
+    assert report["schema_version"] == 2
     assert report["variant"] == "qwen"
     assert report["num_inference_steps"] == 50
     assert report["height"] == 768 and report["width"] == 768, (
@@ -208,6 +209,7 @@ def test_qwen_bench_artifact_is_committed_and_valid():
     reps = report["reps"]
     assert reps >= 3, f"need >=3 reps for a credible median, got {reps}"
     assert len(report["vanilla_seconds"]) == reps
+    assert len(report["wrapper_seconds"]) == reps
     assert len(report["skipped_counts"]) == reps
 
 
@@ -216,8 +218,8 @@ def test_readme_qwen_row_matches_committed_artifact():
     h = bench_headline(_load_qwen_bench())
     cells = _qwen_benchmark_row()
     assert int(cells[1]) == h["steps"]
-    assert cells[2][:-1] == f"{h['vanilla_s']:.1f}"
-    assert cells[3][:-1] == f"{h['wrapper_s']:.1f}"
+    assert cells[2].endswith("s") and cells[2][:-1] == f"{h['vanilla_s']:.1f}"
+    assert cells[3].endswith("s") and cells[3][:-1] == f"{h['wrapper_s']:.1f}"
     assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
     assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"
 
@@ -233,3 +235,19 @@ def test_qwen_streak_stays_under_the_runaway_cap():
         f"qwen streak {max(streaks)} reached the cap {MAX_CONSECUTIVE_SKIPS}; "
         "the documented 'cap never engages at a shipped default' claim is stale"
     )
+
+
+def test_qwen_bench_artifact_is_meaningful():
+    """Schema validity is not enough: a corrupt artifact with all-zero skips and
+    a sub-1 speedup, with the README synced to match, passes every other qwen
+    test. Pin the *meaning* — the headline is a real speedup and the cache
+    actually engages. RED on a dormant-cache or slower-than-vanilla artifact."""
+    report = _load_qwen_bench()
+    steps = int(report["num_inference_steps"])
+    skipped = report["skipped_counts"]
+    computed = report["computed_counts"]
+    assert report["speedup_median"] > 1.0, "qwen headline must be a real speedup"
+    med = statistics.median(skipped)
+    assert 0 < med < steps, f"median skips {med} must be strictly inside (0, {steps})"
+    for s_, c_ in zip(skipped, computed, strict=True):
+        assert s_ + c_ <= steps, f"skipped {s_} + computed {c_} exceeds {steps} steps"

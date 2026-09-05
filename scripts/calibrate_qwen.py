@@ -484,8 +484,11 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) 
 
     # Memory guardrail — device-derived wired cap, strictly below the recommended
     # working set, BEFORE any model load (the kernel-panic guard).
-    _max_set = mx.device_info()["max_recommended_working_set_size"]
-    mx.set_wired_limit(int(_max_set * 0.85))
+    from _mlx_caps import install_caps
+
+    install_caps(
+        wired_gb=22, soft_gb=22
+    )  # clamps to 0.85 x the recommended working set; bounds the cache pool
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
@@ -545,7 +548,6 @@ def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: 
                 f"[orchestrator] worker for prompt {idx} failed (rc={result.returncode}); chunk not "
                 f"written. Fix the cause and rerun — completed chunks in {chunk_dir} are reused."
             )
-        mx.clear_cache()
     gen_seconds = time.time() - t0
 
     # All chunks present -> aggregate + fit. Same report schema as the monolith.
@@ -625,8 +627,11 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.memory_probe:
-        _max_set = mx.device_info()["max_recommended_working_set_size"]
-        mx.set_wired_limit(int(_max_set * 0.85))  # device-derived; strictly below the recommended working set
+        from _mlx_caps import install_caps
+
+        install_caps(
+            wired_gb=22, soft_gb=22
+        )  # clamps to 0.85 x the recommended working set; bounds the cache pool
         _run_memory_probe()
         return
     if args.worker:

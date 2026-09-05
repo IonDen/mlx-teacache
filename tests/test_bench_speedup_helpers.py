@@ -342,3 +342,10 @@ def test_parse_worker_line_prefers_an_abort_payload_over_an_earlier_result() -> 
     ok = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'elapsed_s': 1.0})}"
     ab = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'aborted': 'active-memory watchdog'})}"
     assert bs._parse_worker_line(f"{ok}\n{ab}\n") == {"aborted": "active-memory watchdog"}
+
+
+def test_krea_dev_slug_maps_to_the_variant_and_its_model_card_recipe() -> None:
+    # bug caught: benching krea at flux1-dev's 25 / 3.5 instead of its own 28 / 4.5
+    assert bs._VARIANT_SLUG_TO_ID["krea-dev"] == "flux1-krea-dev"
+    assert bs._VARIANT_RECIPE["krea-dev"] == {"num_inference_steps": 28, "guidance": 4.5}
+    assert bs._VARIANT_QUANTIZE["krea-dev"] == 4

@@ -115,6 +115,7 @@ _VARIANT_SLUG_TO_ID: dict[str, str] = {
     "klein-base-9b": "flux2-klein-base-9b",
     "flux1-dev": "flux1-dev",
     "flux1-schnell": "flux1-schnell",
+    "krea-dev": "flux1-krea-dev",
     "z-image": "z-image-base",
     "qwen": "qwen-image",
 }
@@ -127,6 +128,7 @@ _VARIANT_RECIPE: dict[str, dict[str, Any]] = {
     "klein-base-9b": {"num_inference_steps": 50, "guidance": 4.0},
     "flux1-dev": {"num_inference_steps": 25, "guidance": 3.5},
     "flux1-schnell": {"num_inference_steps": 4, "guidance": 1.0},
+    "krea-dev": {"num_inference_steps": 28, "guidance": 4.5},
     "z-image": {"num_inference_steps": 50, "guidance": 4.0},
     "qwen": {"num_inference_steps": 50, "guidance": 4.0},
 }
@@ -140,6 +142,7 @@ _VARIANT_QUANTIZE: dict[str, int] = {
     "klein-base-9b": 4,
     "flux1-dev": 4,
     "flux1-schnell": 4,
+    "krea-dev": 4,
     "z-image": 8,
     "qwen": 4,
 }
@@ -195,6 +198,11 @@ def _load_flux(variant: str) -> Any:
 
         name = "dev" if variant == "flux1-dev" else "schnell"
         flux = Flux1.from_name(name, quantize=4)
+    elif variant == "krea-dev":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.flux.variants.txt2img.flux import Flux1
+
+        flux = Flux1(quantize=4, model_config=ModelConfig.krea_dev())
     elif variant == "z-image":
         from mflux.models.common.config.model_config import ModelConfig
         from mflux.models.z_image.variants.z_image import ZImage

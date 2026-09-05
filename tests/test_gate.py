@@ -381,3 +381,50 @@ def test_trailing_forced_window_leaves_the_anchor_alone():
     )
     assert decision.kind == "forced"
     assert state.previous_mod_input is old_anchor
+
+
+# ---------------------------------------------------------------------------
+# v0.10.1 — reduction dtype and non-finite prediction guard
+# ---------------------------------------------------------------------------
+
+
+def test_mean_abs_rel_l1_accumulates_in_float32_on_bf16_inputs():
+    """bug caught: mx.mean on a bf16 array returns a bf16 scalar, ~1e-3 relative
+    error that grows with element count and is not absorbed by the calibrated
+    polynomials (worst case 3 % on the predicted distance at z-image's threshold)."""
+    import numpy as np
+
+    mx.random.seed(7)
+    n = 1 << 22
+    prev = (mx.random.normal((n,)) * 3.0 + 0.5).astype(mx.bfloat16)
+    cur = (prev.astype(mx.float32) * 1.001 + mx.random.normal((n,)) * 0.01).astype(mx.bfloat16)
+    mx.eval(prev, cur)
+    p64 = np.asarray(prev.astype(mx.float32), dtype=np.float64)
+    c64 = np.asarray(cur.astype(mx.float32), dtype=np.float64)
+    ref = np.abs(c64 - p64).mean() / np.abs(p64).mean()
+    got = mean_abs_rel_l1(cur, prev)
+    assert abs(got - ref) / ref < 1e-4, f"rel error {abs(got - ref) / ref:.2e}"
+
+
+def test_non_finite_rel_l1_from_finite_inputs_is_a_numerical_miss_not_a_skip():
+    """bug caught: max(0.0, nan) == 0.0 → predicted 0 → accumulator never moves →
+    perpetual skip. Reachable with finite inputs: a reduction that overflows to
+    inf gives inf/inf = nan."""
+    state = _fresh_state(num_steps=25)
+    huge = mx.full((1024,), 3.0e38, dtype=mx.float32)
+    state.previous_mod_input = huge
+    state.cached_residual = mx.zeros((1,))
+    d = gate_step(
+        state,
+        rel_l1_thresh=0.2,
+        coefficients=COEFFS,
+        skip_first=1,
+        skip_last=1,
+        num_steps=25,
+        step_idx=5,
+        mod_in=-huge,
+    )
+    assert d.kind == "numerical-miss"
+    assert d.should_compute and not d.should_update_cache
+    assert state.cached_residual is None
+    assert state.accumulated_distance == 0.0

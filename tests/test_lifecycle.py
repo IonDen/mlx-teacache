@@ -237,3 +237,42 @@ def test_wrap_callback_replacement_raises_missing_context():
     flux.callbacks = _ReplacedRegistry()
     with pytest.raises(MissingGenerationContextError):
         flux.generate_image()
+
+
+def test_after_loop_releases_cached_arrays():
+    """bug caught: call_after_loop leaving body-sized residuals resident through
+    VAE decode (where peak memory lands) and for the process lifetime."""
+    import mlx.core as mx
+
+    handle = _FakeHandle()
+    cb = GenerationContextCallback(handle)
+    cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
+    handle._state.cache.previous_mod_input = mx.zeros((2,))
+    handle._state.cache.cached_residual = mx.zeros((2,))
+    handle._state.cache.cached_residual_neg = mx.zeros((2,))
+    cb.call_after_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
+    c = handle._state.cache
+    assert c.previous_mod_input is None
+    assert c.cached_residual is None
+    assert c.cached_residual_neg is None
+
+
+def test_wrapper_releases_cached_arrays_when_generation_raises():
+    """bug caught: an interrupted or failed generation keeping its body-sized
+    arrays resident until the next generation's before_loop."""
+    import mlx.core as mx
+
+    handle = _FakeHandle()
+    cache = handle._state.cache
+
+    def _boom(**kw):
+        cache.cached_residual = mx.zeros((2,))
+        cache.previous_mod_input = mx.zeros((2,))
+        raise KeyboardInterrupt
+
+    flux = SimpleNamespace(callbacks=None, generate_image=_boom)
+    wrap_generate_image(flux, handle)
+    with pytest.raises(KeyboardInterrupt):
+        flux.generate_image(prompt="x")
+    assert cache.cached_residual is None
+    assert cache.previous_mod_input is None

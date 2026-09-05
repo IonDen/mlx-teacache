@@ -5,6 +5,7 @@ Pure-math gating module. No mflux imports; only mlx.core for tensor ops.
 Returns a structured GateDecision so the caller can drive both the compute
 path AND the cache-update path explicitly."""
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -43,10 +44,20 @@ def poly_eval(coeffs: tuple[float, float, float, float, float], x: float) -> flo
 
 def mean_abs_rel_l1(current: mx.array, previous: mx.array) -> float:
     """Mean absolute relative L1 distance: mean(|current - previous|) / mean(|previous|).
-    Guards against division by zero with a small epsilon."""
-    num = float(mx.mean(mx.abs(current - previous)))
-    denom = float(mx.mean(mx.abs(previous)))
-    return num / max(denom, 1e-12)
+
+    The element-wise difference stays in the inputs' dtype (bf16 in every shipped
+    variant); the two reductions return float32 scalars. ``mx.mean`` on a bf16
+    array accumulates in float32 but rounds its result back to bf16, up to half
+    a bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 %
+    on their ratio; that rounding is not something a polynomial calibrated on
+    one trace can absorb. The casts cost one extra pass and a transient float32
+    buffer per reduction, immaterial next to a transformer step. Both scalars
+    are evaluated in one sync. Guards against division by zero with a small
+    epsilon."""
+    num_arr = mx.mean(mx.abs(current - previous).astype(mx.float32))
+    denom_arr = mx.mean(mx.abs(previous).astype(mx.float32))
+    mx.eval(num_arr, denom_arr)
+    return float(num_arr) / max(float(denom_arr), 1e-12)
 
 
 def _all_finite(t: mx.array) -> bool:
@@ -143,15 +154,34 @@ def gate_step(  # type: ignore[no-untyped-def]
     # step so rel_l1 is always the consecutive delta d(M_t, M_{t-1}) the
     # degree-4 polynomials were calibrated on. Before v0.10.0 the anchor
     # advanced only on computed steps, feeding cumulative drift into a
-    # consecutive-delta calibration (backlog-confirmed divergence).
+    # consecutive-delta calibration (a documented deviation, corrected here).
     state.previous_mod_input = mod_in
+    predicted_raw = poly_eval(coefficients, rel_l1) if math.isfinite(rel_l1) else math.nan
+    if not math.isfinite(predicted_raw):
+        # A finite signal whose reduction overflowed (inf / inf = nan), or a
+        # polynomial that blew up. Python's max(0.0, nan) is 0.0, which would
+        # freeze the accumulator and let the gate skip until the runaway cap.
+        # Treat it like a non-finite input: compute, drop the residual, restart
+        # accumulator and streak. The anchor stays advanced (mod_in is finite).
+        state.cached_residual = None
+        state.cached_residual_neg = None
+        state.accumulated_distance = 0.0
+        state.consecutive_skips = 0
+        return GateDecision(
+            kind="numerical-miss",
+            should_compute=True,
+            should_update_cache=False,
+            rel_l1=rel_l1 if math.isfinite(rel_l1) else None,
+            predicted_distance=None,
+            accumulated_distance=0.0,
+        )
     # Clamp at 0 so the accumulator is monotonic non-decreasing within a
     # generation. The `max(0.0, ...)` clamp is an INTENTIONAL divergence from
     # upstream ali-vilab TeaCache (which uses the raw polynomial): it keeps
     # the accumulator monotonic for origin-constrained FLUX.2 fits and
     # arbitrary user coefficients whose polynomial can dip negative near the
     # origin. Don't remove it to "match upstream".
-    predicted = max(0.0, poly_eval(coefficients, rel_l1))
+    predicted = max(0.0, predicted_raw)
     new_acc = state.accumulated_distance + predicted
 
     if new_acc < rel_l1_thresh and state.consecutive_skips < MAX_CONSECUTIVE_SKIPS:

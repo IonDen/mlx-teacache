@@ -272,7 +272,7 @@ def flux2_forward_with_gate(
             concat_rotary_emb,
         )
         if decision.should_update_cache:
-            state.cached_residual = body_out_concat - body_in_concat
+            state.store_residuals(pos=body_out_concat - body_in_concat)
     else:
         if state.cached_residual is None:
             raise InternalStateError(
@@ -413,8 +413,10 @@ def flux2_cfg_forward_with_gate(
             inner, body_in, enc_neg, temb, temb_mod_params_img, temb_mod_params_txt, concat_rot_neg
         )
         if decision.should_update_cache:
-            state.cached_residual = body_out_pos - body_in_concat_pos
-            state.cached_residual_neg = body_out_neg - body_in_concat_neg
+            state.store_residuals(
+                pos=body_out_pos - body_in_concat_pos,
+                neg=body_out_neg - body_in_concat_neg,
+            )
     else:
         if state.cached_residual is None or state.cached_residual_neg is None:
             raise InternalStateError(
@@ -596,7 +598,6 @@ def apply(
     # 4. Register lifecycle callback.
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
-    flux.callbacks.register(callback)
 
     # Eager rollback list for the transactional patch (per audit medium #3):
     # if any mutation after callback registration raises, preceding mutations
@@ -608,6 +609,7 @@ def apply(
     # 5. Wrap generate_image (records _generate_image_was_instance_attr, sets
     #    internal._original_generate_image).
     try:
+        flux.callbacks.register(callback)
         wrap_generate_image(flux, internal)
     except BaseException:
         for _undo in reversed(_rollbacks_so_far):

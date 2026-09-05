@@ -279,7 +279,7 @@ def zimage_forward_with_gate(
     if decision.should_compute:
         main_out = _run_main_layers(transformer, h1, pre, t_emb, start=1)
         if decision.should_update_cache:
-            state.cached_residual = main_out - pre.unified_in
+            state.store_residuals(pos=main_out - pre.unified_in)
     else:
         if state.cached_residual is None:
             raise InternalStateError(
@@ -364,8 +364,10 @@ def zimage_cfg_forward_with_gate(
         )
         main_out_neg = _run_main_layers(transformer, h1_neg, pre_neg, t_emb, start=1)
         if decision.should_update_cache:
-            state.cached_residual = main_out_pos - pre_pos.unified_in
-            state.cached_residual_neg = main_out_neg - pre_neg.unified_in
+            state.store_residuals(
+                pos=main_out_pos - pre_pos.unified_in,
+                neg=main_out_neg - pre_neg.unified_in,
+            )
     else:
         if state.cached_residual is None or state.cached_residual_neg is None:
             raise InternalStateError(
@@ -495,7 +497,6 @@ def apply(
     # 3. Register lifecycle callback.
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
-    flux.callbacks.register(callback)
 
     # Eager rollback list for the transactional patch (per audit medium #3):
     # if any mutation after callback registration raises, preceding mutations
@@ -505,6 +506,7 @@ def apply(
     # Wrap generate_image (records _generate_image_was_instance_attr, sets
     # internal._original_generate_image).
     try:
+        flux.callbacks.register(callback)
         wrap_generate_image(flux, internal)
     except BaseException:
         for _undo in reversed(_rollbacks_so_far):

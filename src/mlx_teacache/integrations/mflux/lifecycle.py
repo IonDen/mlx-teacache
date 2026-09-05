@@ -159,6 +159,10 @@ class GenerationContextCallback:
         # sees None.
         self._handle._gen_ctx.active_num_steps = None
         self._handle._gen_ctx.consumed_at_token = None
+        # The transformer is not called again after the loop; drop the three
+        # body-sized arrays now so they are not resident through VAE decode
+        # (where peak memory lands) or for as long as the handle lives.
+        self._handle._state.cache.release_arrays()
 
     def call_interrupt(
         self,
@@ -222,6 +226,12 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
         finally:
             handle._gen_ctx.active_num_steps = None
             handle._gen_ctx.consumed_at_token = None
+            # call_after_loop releases the cached arrays on the natural path; an
+            # exception or KeyboardInterrupt mid-loop never reaches it, so drop
+            # them here too rather than holding them until the next generation.
+            cache = getattr(handle._state, "cache", None)
+            if cache is not None:
+                cache.release_arrays()
             if completed and handle._pending_finalize is not None:
                 pf: PendingFinalize = handle._pending_finalize
                 handle._state.stats.finalize_last_generation(

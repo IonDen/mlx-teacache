@@ -79,7 +79,6 @@ def apply(
     # 4. Register lifecycle callback.
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
-    flux.callbacks.register(callback)
 
     # Eager rollback list for the transactional patch (per audit medium #3):
     # if any mutation after callback registration raises, preceding mutations
@@ -91,6 +90,7 @@ def apply(
     # 5. Wrap generate_image (records _generate_image_was_instance_attr, sets
     #    internal._original_generate_image).
     try:
+        flux.callbacks.register(callback)
         wrap_generate_image(flux, internal)
     except BaseException:
         for _undo in reversed(_rollbacks_so_far):

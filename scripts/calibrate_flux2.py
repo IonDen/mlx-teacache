@@ -495,6 +495,9 @@ def _run_worker(
     from _mlx_caps import install_caps
 
     install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    arm_mlx_watchdog(on_abort=abort_handler(f"calibrate_flux2-prompt{idx}"))
     print(
         f"[worker {idx}] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
         flush=True,

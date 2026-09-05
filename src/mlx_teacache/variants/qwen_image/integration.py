@@ -311,7 +311,7 @@ def qwen_forward_with_gate(
                 cond_image_grid=cond_image_grid,
             )
             if decision.should_update_cache:
-                state.cached_residual = body_out - pre.h_in
+                state.store_residuals(pos=body_out - pre.h_in)
         else:
             if state.cached_residual is None:
                 raise InternalStateError(
@@ -336,7 +336,7 @@ def qwen_forward_with_gate(
             cond_image_grid=cond_image_grid,
         )
         if decision.should_update_cache:
-            state.cached_residual_neg = body_out - pre.h_in
+            state.store_residuals(neg=body_out - pre.h_in)
     else:
         if state.cached_residual_neg is None:
             raise InternalStateError(

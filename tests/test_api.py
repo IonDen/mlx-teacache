@@ -636,3 +636,18 @@ def test_distilled_variant_does_not_warn_when_caller_supplies_coefficients(monke
         warnings.simplefilter("error", TeaCacheNoBenefitWarning)
         with pytest.raises(_StopAtIntegration):
             apply_teacache(_fake_distilled_klein_4b(), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5))
+
+
+def test_restore_releases_cached_arrays_through_the_public_handle():
+    """bug caught: a torn-down handle kept for handle.stats pinning three
+    body-sized arrays through its finalizer closure."""
+    import mlx.core as mx
+
+    flux = _make_fake_flux1("dev")
+    handle = apply_teacache(flux)
+    state = handle._callback_instance._handle._state.cache
+    state.cached_residual = mx.zeros((4,))
+    state.previous_mod_input = mx.zeros((4,))
+    handle.restore()
+    assert state.cached_residual is None
+    assert state.previous_mod_input is None

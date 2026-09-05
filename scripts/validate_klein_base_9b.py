@@ -14,7 +14,7 @@ before tagging. Heavy generation; expect ~30-90 min on M1 Max.
 Two crashes happened during this script's development:
 - **2026-05-17**: same-process vanilla-then-wrapper triggered a jetsam OOM
   (python peak 25.8 GB).
-- **2026-05-19**: separate subprocesses with `mx.metal.set_memory_limit(24 GB)`
+- **2026-05-19**: separate subprocesses with the advisory memory limit at 24 GB
   triggered a kernel watchdog panic anyway, because `set_memory_limit` is a
   soft guideline and does NOT bound wired (non-pageable Metal) memory.
 
@@ -122,8 +122,12 @@ def _worker(condition: str, save_image_to: Path, mlx_memory_cap_gb: int) -> None
     # `set_memory_limit` is a soft guideline. We need both, and the wired
     # limit must be the smaller of the two.
     wired_gb = max(1, mlx_memory_cap_gb - 2)  # 2 GB headroom under the soft cap
-    mx.set_wired_limit(int(wired_gb * 1024**3))
-    mx.set_memory_limit(int(mlx_memory_cap_gb * 1024**3))
+    from _mlx_caps import install_caps
+
+    install_caps(wired_gb=wired_gb, soft_gb=mlx_memory_cap_gb)  # device-clamped; never above the system limit
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    arm_mlx_watchdog(on_abort=abort_handler("validate_klein_base_9b"))
 
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
@@ -171,7 +175,7 @@ def _worker(condition: str, save_image_to: Path, mlx_memory_cap_gb: int) -> None
     save_image_to.parent.mkdir(parents=True, exist_ok=True)
     image.image.save(save_image_to, format="PNG")
 
-    peak_gb = float(mx.metal.get_peak_memory()) / (1024**3)
+    peak_gb = float(mx.get_peak_memory()) / (1024**3)
 
     result = {
         "condition": condition,

@@ -48,10 +48,10 @@ def test_pending_chunks_lists_every_pair_in_run_order_when_nothing_persisted(tmp
     pending = bs._pending_chunks(_CONDITIONS, 2, tmp_path)
     assert pending == [
         ("vanilla", 0),
-        ("vanilla", 1),
         ("wrapper_nogate", 0),
-        ("wrapper_nogate", 1),
         ("wrapper", 0),
+        ("vanilla", 1),
+        ("wrapper_nogate", 1),
         ("wrapper", 1),
     ]
 
@@ -62,7 +62,7 @@ def test_pending_chunks_skips_pairs_whose_file_exists(tmp_path: Path) -> None:
     pending = bs._pending_chunks(_CONDITIONS, 2, tmp_path)
     assert ("vanilla", 0) not in pending
     assert ("wrapper", 1) not in pending
-    assert pending == [("vanilla", 1), ("wrapper_nogate", 0), ("wrapper_nogate", 1), ("wrapper", 0)]
+    assert pending == [("wrapper_nogate", 0), ("wrapper", 0), ("vanilla", 1), ("wrapper_nogate", 1)]
 
 
 def test_pending_chunks_tolerates_missing_results_dir(tmp_path: Path) -> None:
@@ -245,3 +245,100 @@ def test_non_qwen_variants_keep_the_shared_512_recipe(variant):
     """RED if adding Qwen's override silently moved every other variant's
     resolution, which would invalidate every committed bench JSON."""
     assert bs._resolution_for(variant) == (512, 512)
+
+
+# --- v0.10.1: rep-outer order, memory fields, abort artifact, git stamp ---
+
+
+def test_pending_chunks_are_rep_outer_so_conditions_interleave(tmp_path: Path) -> None:
+    # bug caught: condition-outer order (all vanilla, then all no-gate, then all gated)
+    assert bs._pending_chunks(_CONDITIONS, 2, tmp_path) == [
+        ("vanilla", 0),
+        ("wrapper_nogate", 0),
+        ("wrapper", 0),
+        ("vanilla", 1),
+        ("wrapper_nogate", 1),
+        ("wrapper", 1),
+    ]
+
+
+def test_memory_fields_separate_load_and_loop_and_keep_the_legacy_peak() -> None:
+    # bug caught: reporting the process-lifetime peak as the loop peak
+    gib = 1024**3
+    f = bs._memory_fields(load_peak_bytes=20 * gib, loop_peak_bytes=26 * gib, cache_bytes=gib)
+    assert f == {
+        "peak_memory_gb": 26.0,
+        "load_peak_memory_gb": 20.0,
+        "loop_peak_memory_gb": 26.0,
+        "cache_memory_gb": 1.0,
+    }
+    g = bs._memory_fields(load_peak_bytes=26 * gib, loop_peak_bytes=20 * gib, cache_bytes=0)
+    assert g["peak_memory_gb"] == 26.0  # legacy field is the max of the two
+
+
+def test_abort_artifact_is_persisted_beside_the_chunk_and_never_counts_as_done(tmp_path: Path) -> None:
+    # bug caught: writing the abort payload to the chunk path (a resume would reuse it as a result)
+    payload = {"aborted": "active-memory watchdog", "condition": "wrapper", "rep": 1, "resident_bytes": 1}
+    written = bs._persist_abort(tmp_path, payload)
+    assert written == tmp_path / "wrapper_rep1.aborted.json"
+    assert json.loads(written.read_text()) == payload
+    assert ("wrapper", 1) in bs._pending_chunks(["wrapper"], 2, tmp_path)
+
+
+def test_parse_worker_line_finds_the_sentinel_payload() -> None:
+    line = f"noise\n{bs.WORKER_RESULT_SENTINEL}{json.dumps({'a': 1})}\nmore"
+    assert bs._parse_worker_line(line) == {"a": 1}
+    assert bs._parse_worker_line("no sentinel here") is None
+
+
+def test_git_revision_reports_commit_and_dirty_flag(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ],
+        check=True,
+    )
+    rev = bs._git_revision(tmp_path)
+    assert isinstance(rev["git_commit"], str) and len(rev["git_commit"]) == 40
+    assert rev["git_dirty"] is False
+    (tmp_path / "f").write_text("x")
+    assert bs._git_revision(tmp_path)["git_dirty"] is True
+
+
+def test_git_revision_outside_a_repo_is_none(tmp_path: Path) -> None:
+    assert bs._git_revision(tmp_path) == {"git_commit": None, "git_dirty": None}
+
+
+def test_memory_arrays_fall_back_only_for_the_peak_keys() -> None:
+    # bug caught: reporting a pre-v0.10.1 chunk's process peak as its cache-pool size
+    old = {"peak_memory_gb": 26.0}
+    new = {
+        "peak_memory_gb": 26.2,
+        "load_peak_memory_gb": 20.0,
+        "loop_peak_memory_gb": 26.2,
+        "cache_memory_gb": 0.9,
+    }
+    assert bs._memory_arrays([old, new], "loop_peak_memory_gb") == [26.0, 26.2]
+    assert bs._memory_arrays([old, new], "cache_memory_gb") == [None, 0.9]
+
+
+def test_parse_worker_line_prefers_an_abort_payload_over_an_earlier_result() -> None:
+    # bug caught: taking the first sentinel line, so an abort that fires after the
+    # result was printed (during image.save) reads as "worker failed: exit 3"
+    ok = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'elapsed_s': 1.0})}"
+    ab = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'aborted': 'active-memory watchdog'})}"
+    assert bs._parse_worker_line(f"{ok}\n{ab}\n") == {"aborted": "active-memory watchdog"}

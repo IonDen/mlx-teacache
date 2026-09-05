@@ -212,6 +212,9 @@ def _run_worker(unit: str, *, chunk_dir: Path, dry_run: bool) -> None:
     from _mlx_caps import install_caps
 
     install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    arm_mlx_watchdog(on_abort=abort_handler(f"sweep_klein_base_4b-{unit}"))
     print(
         f"[worker {unit}] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
         flush=True,

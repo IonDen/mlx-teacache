@@ -59,13 +59,21 @@ variant's chunk subdir to the Trash for a fresh measurement.
 Memory safety
 -------------
 
-Each worker calls mx.set_wired_limit (hard cap on non-pageable Metal
-allocations) AND mx.set_memory_limit (soft secondary) BEFORE the model loads.
-The cap is taken from the variant's META["memory_cap_hint_gb"] in _REGISTRY, or
-22 GB by default, or overridden via --cap-gb.  Running vanilla then wrapper in
-the same process was confirmed to panic the kernel watchdog on 2026-05-19
-22:17 and 2026-05-20 20:35 on a 32 GB M1 Max. Subprocess isolation prevents
-wired-memory accumulation.
+Each worker installs three caps BEFORE the model loads (``_mlx_caps.install_caps``):
+a device-clamped wired cap (the only hard ceiling; non-pageable Metal memory),
+the advisory soft cap, and a bound on MLX's retained cache pool (2 GiB, 1 GiB
+for qwen), then arms the active+cache watchdog (``_mlx_watchdog``), which
+aborts the worker with exit 3 and a ``::BENCH_RESULT::{"aborted": ...}`` line
+the moment resident memory exceeds ``memory_size - 4 GiB``. The orchestrator
+persists that payload as ``<condition>_rep<N>.aborted.json`` (never as a chunk)
+and exits 4. The soft cap is taken from the variant's META["memory_cap_hint_gb"]
+(a cap request, not a peak prediction), 22 GB by default, or --cap-gb. Running
+vanilla then wrapper in the same process panicked the kernel on 2026-05-19 and
+2026-05-20 on a 32 GB M1 Max; subprocess isolation prevents wired-memory
+accumulation, and the watchdog is what stops a pageable-memory paging storm.
+
+Exit codes: 0 report written · 3 PARTIAL (chunks pending, re-invoke) · 4 ABORTED
+by the memory watchdog (artifact written, nothing persisted as a result).
 
 Compatibility note
 ------------------
@@ -84,10 +92,12 @@ import statistics
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
 from _bench_telemetry import streak_telemetry as _streak_telemetry
+from _mlx_watchdog import arm_mlx_watchdog
 
 PROMPT = "a red apple on a wooden table"
 SEED = 42
@@ -150,8 +160,16 @@ def _resolution_for(variant: str) -> tuple[int, int]:
 
 
 # Default soft memory cap (GB) per variant when _REGISTRY META is absent.
-# Workers derive the hard wired cap as (soft_cap - 2) GB.
+# Workers derive the hard wired cap as (soft_cap - 2) GB. This is a cap request
+# (the wired cap is clamped to the device anyway), not a prediction of the peak.
 _DEFAULT_CAP_GB = 22
+
+# MLX cache-pool bound per variant. qwen's active peak at 768x768 q4 is ~26.2 GiB
+# on a 32 GiB machine, so its pool gets 1 GiB and still clears the 28 GiB watchdog
+# ceiling by under 2 GiB — the watchdog is a live gate on that recipe, not a
+# distant backstop (see --headroom-gib). Everything else has room for 2 GiB.
+_VARIANT_CACHE_GB: dict[str, float] = {"qwen": 1.0}
+_DEFAULT_CACHE_GB = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +232,7 @@ def _generate(
         width=width,
         guidance=guidance,
     )
-    mx.eval(mx.zeros(1))  # flush GPU work before stopping the clock
+    mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
     elapsed = time.perf_counter() - start
     if save_path is not None:
         save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,15 +263,23 @@ def _worker_main(args: argparse.Namespace) -> None:
     wired_gb = max(1, cap_gb - 2)
     from _mlx_caps import install_caps
 
-    install_caps(wired_gb=wired_gb, soft_gb=cap_gb)  # device-clamped: never above the system wired limit
-    print(
-        f"  [worker] memory caps: wired={wired_gb} GB (hard), memory={cap_gb} GB (soft)",
-        flush=True,
-    )
-
     variant = args.variant
     condition = args.condition
     rep = args.rep
+    cache_gb = _VARIANT_CACHE_GB.get(variant, _DEFAULT_CACHE_GB)
+    wired_b, soft_b, cache_b = install_caps(wired_gb=wired_gb, soft_gb=cap_gb, cache_gb=cache_gb)
+    print(
+        f"  [worker] memory caps: wired={wired_b / 1024**3:.2f} GB (hard), "
+        f"memory={soft_b / 1024**3:.2f} GB (advisory), cache pool={cache_b / 1024**3:.2f} GB",
+        flush=True,
+    )
+
+    def _on_abort(payload: dict[str, int]) -> None:
+        abort = {"aborted": "active-memory watchdog", "variant": variant, "condition": condition, "rep": rep}
+        print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
+
+    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=args.headroom_gib)
+    started_at = datetime.now(timezone.utc).isoformat()
     recipe = _VARIANT_RECIPE[variant]
     num_inference_steps: int = (
         args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
@@ -263,6 +289,8 @@ def _worker_main(args: argparse.Namespace) -> None:
     save_path: Path | None = Path(args.save_to) if args.save_to else None
 
     flux = _load_flux(variant)
+    load_peak = int(mx.get_peak_memory())
+    mx.reset_peak_memory()
 
     stats_summary: dict[str, Any] = {}
     elapsed: float
@@ -327,8 +355,7 @@ def _worker_main(args: argparse.Namespace) -> None:
     else:
         raise ValueError(f"unknown --condition {condition!r}")
 
-    peak_memory_gb = mx.get_peak_memory() / 1024**3
-
+    loop_peak = int(mx.get_peak_memory())
     result: dict[str, Any] = {
         "variant": variant,
         "condition": condition,
@@ -336,10 +363,26 @@ def _worker_main(args: argparse.Namespace) -> None:
         "num_inference_steps": num_inference_steps,
         "guidance": guidance,
         "elapsed_s": elapsed,
-        "peak_memory_gb": peak_memory_gb,
+        "started_at": started_at,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        **_memory_fields(
+            load_peak_bytes=load_peak, loop_peak_bytes=loop_peak, cache_bytes=int(mx.get_cache_memory())
+        ),
         "stats_summary": stats_summary,
     }
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
+
+
+def _memory_fields(*, load_peak_bytes: int, loop_peak_bytes: int, cache_bytes: int) -> dict[str, float]:
+    """Load-time peak, denoising-loop peak (after reset_peak_memory), the cache pool at
+    exit, and the legacy process-lifetime `peak_memory_gb` (max of the two peaks)."""
+    gib = 1024**3
+    return {
+        "peak_memory_gb": max(load_peak_bytes, loop_peak_bytes) / gib,
+        "load_peak_memory_gb": load_peak_bytes / gib,
+        "loop_peak_memory_gb": loop_peak_bytes / gib,
+        "cache_memory_gb": cache_bytes / gib,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +416,21 @@ def _macos_sysctl(key: str) -> str | None:
         return None
 
 
+def _git_revision(cwd: Path) -> dict[str, Any]:
+    """Commit + dirty flag of the checkout the bench ran from (None outside a repo).
+    The package `__version__` freezes at install time, so it cannot identify the code."""
+    try:
+        sha = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(cwd), "status", "--porcelain"], capture_output=True, text=True, check=True
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {"git_commit": None, "git_dirty": None}
+    return {"git_commit": sha, "git_dirty": bool(status.strip())}
+
+
 def _detect_hardware(*, quantize: int) -> dict[str, Any]:
     chip = _macos_sysctl("machdep.cpu.brand_string") or platform.processor() or "Apple Silicon"
     ram_bytes_str = _macos_sysctl("hw.memsize")
@@ -388,6 +446,7 @@ def _detect_hardware(*, quantize: int) -> dict[str, Any]:
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
         "mlx_teacache_version": _mlx_teacache_version(),
+        **_git_revision(Path(__file__).resolve().parent.parent),
         "mflux_version": _mflux_version(),
         "quantize": quantize,
         "dtype": "bf16",
@@ -403,6 +462,7 @@ def _run_one_worker(
     num_inference_steps: int | None,
     guidance: float | None,
     save_to: Path | None,
+    headroom_gib: float = 4.0,
 ) -> dict[str, Any]:
     """Spawn one worker subprocess and return its parsed result dict."""
     cmd = [
@@ -418,6 +478,7 @@ def _run_one_worker(
     ]
     if cap_gb is not None:
         cmd += ["--cap-gb", str(cap_gb)]
+    cmd += ["--headroom-gib", str(headroom_gib)]
     if num_inference_steps is not None:
         cmd += ["--num-inference-steps", str(num_inference_steps)]
     if guidance is not None:
@@ -432,12 +493,28 @@ def _run_one_worker(
         sys.stdout.write(proc.stdout)
     if proc.stderr:
         sys.stderr.write(proc.stderr)
+    payload = _parse_worker_line(proc.stdout)
+    if payload is not None and "aborted" in payload:
+        return payload  # the caller persists the abort artifact and stops
     if proc.returncode != 0:
         raise RuntimeError(f"worker failed for {label}: exit {proc.returncode}")
-    for line in proc.stdout.splitlines():
+    if payload is None:
+        raise RuntimeError(f"worker for {label} did not emit a {WORKER_RESULT_SENTINEL} result line")
+    return payload
+
+
+def _parse_worker_line(stdout: str) -> dict[str, Any] | None:
+    """The worker's sentinel-prefixed JSON payload, or None if it never printed one.
+    An abort payload wins over an earlier result line: the watchdog can fire after
+    the result was printed (during image.save), and that run must not count."""
+    found: dict[str, Any] | None = None
+    for line in stdout.splitlines():
         if line.startswith(WORKER_RESULT_SENTINEL):
-            return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
-    raise RuntimeError(f"worker for {label} did not emit a {WORKER_RESULT_SENTINEL} result line")
+            payload = cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
+            if "aborted" in payload:
+                return payload
+            found = payload
+    return found
 
 
 def _image_path_for(bench_dir: Path, condition: str, rep: int, *, three_way: bool) -> Path | None:
@@ -472,13 +549,45 @@ def _chunk_path(results_dir: Path, condition: str, rep: int) -> Path:
 
 
 def _pending_chunks(conditions: list[str], reps: int, results_dir: Path) -> list[tuple[str, int]]:
-    """(condition, rep) pairs with no persisted result yet, in run order."""
+    """(condition, rep) pairs with no persisted result yet, in run order.
+
+    Rep-outer / condition-inner (A0, B0, C0, A1, B1, C1, ...) so slow host-state
+    drift over a multi-hour run lands on every condition alike instead of on
+    whichever condition happened to run last."""
     return [
         (condition, rep)
-        for condition in conditions
         for rep in range(reps)
+        for condition in conditions
         if not _chunk_path(results_dir, condition, rep).exists()
     ]
+
+
+def _abort_path(results_dir: Path, condition: str, rep: int) -> Path:
+    return results_dir / f"{condition}_rep{rep}.aborted.json"
+
+
+def _persist_abort(results_dir: Path, payload: dict[str, Any]) -> Path:
+    """Write a watchdog-abort payload beside the chunk it failed to produce. It never
+    counts as a result: `_pending_chunks` looks only for `<condition>_rep<N>.json`."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    dest = _abort_path(results_dir, str(payload["condition"]), int(payload["rep"]))
+    dest.write_text(json.dumps(payload, indent=2))
+    return dest
+
+
+def _memory_arrays(results: list[dict[str, Any]], key: str) -> list[float | None]:
+    """Per-rep memory figures. Pre-v0.10.1 chunks carry only `peak_memory_gb`: the
+    two peak keys fall back to it (it was the process-lifetime max of both); any
+    other key (the cache pool) is simply unknown for such a chunk."""
+    out: list[float | None] = []
+    for r in results:
+        if key in r:
+            out.append(float(r[key]))
+        elif key.endswith("peak_memory_gb"):
+            out.append(float(r["peak_memory_gb"]))
+        else:
+            out.append(None)
+    return out
 
 
 def _persist_chunk(results_dir: Path, result: dict[str, Any]) -> Path:
@@ -565,10 +674,22 @@ def main() -> None:
         default=None,
         dest="cap_gb",
         help=(
-            "Soft MLX memory cap in GB (mx.set_memory_limit). The worker also sets a "
-            "hard wired cap at (cap - 2) GB via mx.set_wired_limit. Defaults to the "
-            "variant META's memory_cap_hint_gb (e.g. 24 GB on klein-base-9b) or "
-            f"{_DEFAULT_CAP_GB} GB otherwise. See CLAUDE.md 'Memory guardrails'."
+            "Advisory MLX memory cap in GB. The worker also sets a device-clamped hard "
+            "wired cap at (cap - 2) GB, bounds the MLX cache pool, and arms the "
+            "active+cache watchdog. Defaults to the variant META's memory_cap_hint_gb "
+            f"(a cap request, not a peak prediction) or {_DEFAULT_CAP_GB} GB otherwise."
+        ),
+    )
+
+    parser.add_argument(
+        "--headroom-gib",
+        type=float,
+        default=4.0,
+        dest="headroom_gib",
+        help=(
+            "Memory the watchdog leaves to the OS: the worker aborts once active+cached MLX memory "
+            "exceeds memory_size minus this (default 4 GiB; on a 32 GB Mac the shipped qwen recipe "
+            "clears the resulting 28 GiB ceiling by under 2 GiB)."
         ),
     )
 
@@ -693,10 +814,19 @@ def main() -> None:
             condition=condition,
             rep=rep,
             cap_gb=cap_gb,
+            headroom_gib=args.headroom_gib,
             num_inference_steps=num_inference_steps if args.num_inference_steps is not None else None,
             guidance=guidance if args.guidance is not None else None,
             save_to=_image_path_for(bench_dir, condition, rep, three_way=three_way),
         )
+        if "aborted" in result:
+            written = _persist_abort(results_dir, result)
+            print(
+                f"\n== ABORTED by the memory watchdog: {result['resident_bytes'] / 1024**3:.2f} GB resident "
+                f"> {result['ceiling_bytes'] / 1024**3:.2f} GB ceiling; artifact {written}. "
+                "No chunk persisted; re-invoke only after lowering the recipe or the caps. =="
+            )
+            sys.exit(4)
         written = _persist_chunk(results_dir, result)
         print(f">> chunk persisted: {written}", flush=True)
 
@@ -758,8 +888,9 @@ def main() -> None:
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         report_data: dict[str, Any] = {
-            "schema_version": 2,
+            "schema_version": 3,
             "isolation": "subprocess-per-rep",
+            "chunk_order": "rep-outer",
             "variant": variant,
             "num_inference_steps": num_inference_steps,
             "guidance": guidance,
@@ -780,6 +911,16 @@ def main() -> None:
             "bench_images_dir": str(bench_dir),
             "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
             "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],
+            "vanilla_load_peak_memory_gb": _memory_arrays(all_results["vanilla"], "load_peak_memory_gb"),
+            "vanilla_loop_peak_memory_gb": _memory_arrays(all_results["vanilla"], "loop_peak_memory_gb"),
+            "wrapper_load_peak_memory_gb": _memory_arrays(all_results["wrapper"], "load_peak_memory_gb"),
+            "wrapper_loop_peak_memory_gb": _memory_arrays(all_results["wrapper"], "loop_peak_memory_gb"),
+            "vanilla_cache_memory_gb": _memory_arrays(all_results["vanilla"], "cache_memory_gb"),
+            "wrapper_cache_memory_gb": _memory_arrays(all_results["wrapper"], "cache_memory_gb"),
+            "chunk_timestamps": {
+                cond: [[r.get("started_at"), r.get("finished_at")] for r in all_results[cond]]
+                for cond in conditions
+            },
         }
         if three_way:
             nogate_times = _times("wrapper_nogate")
@@ -795,6 +936,15 @@ def main() -> None:
             report_data["nogate_peak_memory_gb"] = [
                 r["peak_memory_gb"] for r in all_results["wrapper_nogate"]
             ]
+            report_data["nogate_load_peak_memory_gb"] = _memory_arrays(
+                all_results["wrapper_nogate"], "load_peak_memory_gb"
+            )
+            report_data["nogate_loop_peak_memory_gb"] = _memory_arrays(
+                all_results["wrapper_nogate"], "loop_peak_memory_gb"
+            )
+            report_data["nogate_cache_memory_gb"] = _memory_arrays(
+                all_results["wrapper_nogate"], "cache_memory_gb"
+            )
         args.report.write_text(json.dumps(report_data, indent=2))
         print(f"  report:              {args.report}")
 

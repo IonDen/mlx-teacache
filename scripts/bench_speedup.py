@@ -566,9 +566,19 @@ def _persist_abort(results_dir: Path, payload: dict[str, Any]) -> Path:
     return dest
 
 
-def _memory_arrays(results: list[dict[str, Any]], key: str) -> list[float]:
-    """Per-rep memory figures; pre-v0.10.1 chunks fall back to their single peak."""
-    return [float(r.get(key, r["peak_memory_gb"])) for r in results]
+def _memory_arrays(results: list[dict[str, Any]], key: str) -> list[float | None]:
+    """Per-rep memory figures. Pre-v0.10.1 chunks carry only `peak_memory_gb`: the
+    two peak keys fall back to it (it was the process-lifetime max of both); any
+    other key (the cache pool) is simply unknown for such a chunk."""
+    out: list[float | None] = []
+    for r in results:
+        if key in r:
+            out.append(float(r[key]))
+        elif key.endswith("peak_memory_gb"):
+            out.append(float(r["peak_memory_gb"]))
+        else:
+            out.append(None)
+    return out
 
 
 def _persist_chunk(results_dir: Path, result: dict[str, Any]) -> Path:
@@ -883,6 +893,8 @@ def main() -> None:
             "vanilla_loop_peak_memory_gb": _memory_arrays(all_results["vanilla"], "loop_peak_memory_gb"),
             "wrapper_load_peak_memory_gb": _memory_arrays(all_results["wrapper"], "load_peak_memory_gb"),
             "wrapper_loop_peak_memory_gb": _memory_arrays(all_results["wrapper"], "loop_peak_memory_gb"),
+            "vanilla_cache_memory_gb": _memory_arrays(all_results["vanilla"], "cache_memory_gb"),
+            "wrapper_cache_memory_gb": _memory_arrays(all_results["wrapper"], "cache_memory_gb"),
             "chunk_timestamps": {
                 cond: [[r.get("started_at"), r.get("finished_at")] for r in all_results[cond]]
                 for cond in conditions
@@ -907,6 +919,9 @@ def main() -> None:
             )
             report_data["nogate_loop_peak_memory_gb"] = _memory_arrays(
                 all_results["wrapper_nogate"], "loop_peak_memory_gb"
+            )
+            report_data["nogate_cache_memory_gb"] = _memory_arrays(
+                all_results["wrapper_nogate"], "cache_memory_gb"
             )
         args.report.write_text(json.dumps(report_data, indent=2))
         print(f"  report:              {args.report}")

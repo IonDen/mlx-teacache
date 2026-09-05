@@ -27,6 +27,7 @@ def test_ceiling_rejects_non_positive_result() -> None:
 def test_over_ceiling_counts_active_plus_cache() -> None:
     # bug caught: comparing active alone (dropped buffers sit in the cache pool)
     assert not wd.over_ceiling(20 * GIB, 7 * GIB, 28 * GIB)
+    assert not wd.over_ceiling(20 * GIB, 8 * GIB, 28 * GIB)  # exactly at the ceiling is still inside it
     assert wd.over_ceiling(20 * GIB, 9 * GIB, 28 * GIB)
 
 

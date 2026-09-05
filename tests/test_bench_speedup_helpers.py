@@ -321,3 +321,16 @@ def test_git_revision_reports_commit_and_dirty_flag(tmp_path: Path) -> None:
 
 def test_git_revision_outside_a_repo_is_none(tmp_path: Path) -> None:
     assert bs._git_revision(tmp_path) == {"git_commit": None, "git_dirty": None}
+
+
+def test_memory_arrays_fall_back_only_for_the_peak_keys() -> None:
+    # bug caught: reporting a pre-v0.10.1 chunk's process peak as its cache-pool size
+    old = {"peak_memory_gb": 26.0}
+    new = {
+        "peak_memory_gb": 26.2,
+        "load_peak_memory_gb": 20.0,
+        "loop_peak_memory_gb": 26.2,
+        "cache_memory_gb": 0.9,
+    }
+    assert bs._memory_arrays([old, new], "loop_peak_memory_gb") == [26.0, 26.2]
+    assert bs._memory_arrays([old, new], "cache_memory_gb") == [None, 0.9]

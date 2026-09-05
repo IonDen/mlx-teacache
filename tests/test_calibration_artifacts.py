@@ -148,3 +148,42 @@ def test_qwen_config_coefficients_match_calibration_signal_a() -> None:
         f"qwen-image config COEFFICIENTS {COEFFICIENTS} drifted from "
         f"scripts/_calibration_qwen.json signal A {json_a}"
     )
+
+
+# ---------------------------------------------------------------------------
+# flux1-krea-dev: config <-> committed calibration JSON (scripts/calibrate_flux1.py)
+# ---------------------------------------------------------------------------
+
+_KREA_CALIB = _REPO_ROOT / "scripts" / "_calibration_flux1_krea_dev.json"
+
+
+def _load_krea_calibration() -> dict:
+    return json.loads(_KREA_CALIB.read_text())
+
+
+def test_krea_calibration_is_a_full_ten_prompt_capture_at_the_model_card_recipe() -> None:
+    # bug caught: shipping a fit from a partial capture, or at dev's 25-step / 3.5 recipe
+    d = _load_krea_calibration()
+    assert d["model"] == "krea-dev"
+    assert d["recipe"] == {"num_inference_steps": 28, "guidance": 4.5}
+    assert d["n_prompts"] == 10 and d["n_pairs"] == 270
+    assert len(d["x_values"]) == len(d["y_values"]) == 270
+
+
+def test_krea_calibration_r_squared_in_unit_range_and_dev_tuple_scored() -> None:
+    # bug caught: dropping the scored-dev record, which is the evidence reuse was rejected
+    d = _load_krea_calibration()
+    assert 0.0 <= float(d["r2"]) <= 1.0
+    assert math.isfinite(float(d["scored_r2"]))
+    assert float(d["scored_r2"]) < 0.0, (
+        "FLUX.1-dev's tuple does not fit Krea's pairs; if it does now, re-decide"
+    )
+
+
+def test_krea_config_coefficients_match_the_committed_fit() -> None:
+    from mlx_teacache.variants.flux1_krea_dev.config import COEFFICIENTS
+
+    fit = _load_krea_calibration()["coefficients_c4_to_c0"]
+    assert _isclose_seq(COEFFICIENTS, fit, rel_tol=1e-9, abs_tol=1e-12), (
+        f"config {COEFFICIENTS} != scripts/_calibration_flux1_krea_dev.json {fit}"
+    )

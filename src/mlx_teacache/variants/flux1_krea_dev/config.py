@@ -5,27 +5,35 @@ with Krea (``black-forest-labs/FLUX.1-Krea-dev``); mflux exposes it through the
 same FLUX.1 loader as ``dev``. It shares the transformer, so the gate taps the
 same modulated block-0 input and the variant reuses the FLUX.1 proxy strategy.
 
-COEFFICIENTS start as FLUX.1-dev's vendored ali-vilab tuple. A finetune shifts
-the distribution that polynomial was fit on, so the tuple is scored on Krea's
-own calibration pairs by ``scripts/calibrate_flux1.py`` before release; the
-provenance in ``integration.py`` records the measured R² and whether the shared
-tuple was kept or a Krea-specific fit shipped.
+COEFFICIENTS are Krea's own fit. FLUX.1-dev's vendored tuple was scored on
+Krea's calibration pairs by ``scripts/calibrate_flux1.py`` and does not
+transfer: a finetune shifts the per-step change distribution the polynomial
+was fit on (see the note above the tuple), so a Krea-specific fit ships.
 """
 
 from typing import Any
 
-# FLUX.1-dev's vendored tuple (see variants/flux1_dev/config.py for the upstream
-# provenance and the poly(0) note). Replaced only if Krea's own calibration says so.
+# Krea's own fit, read verbatim from scripts/_calibration_flux1_krea_dev.json
+# (free fit over 10 prompts x 27 consecutive-step pairs at 28 steps / g=4.5 /
+# 512x512 / q4 / seed 42; R^2 0.6817). FLUX.1-dev's vendored tuple was
+# scored on the same pairs and does NOT transfer: R^2 -496.3 — its
+# 499*x^4 term explodes at Krea's per-step changes (rel-L1 up to ~0.66, roughly
+# three times dev's). Do not hand-edit; a new calibration bumps the provenance.
 COEFFICIENTS: tuple[float, float, float, float, float] = (
-    498.651651244,
-    -283.781631,
-    55.8554382,
-    -3.82021401,
-    0.264230861,
+    24.18037744588824,
+    -45.41912128506917,
+    26.20213376107934,
+    -3.579234954660995,
+    0.40140693642366004,
 )
 
-# Provisional: FLUX.1-dev's default until the Krea threshold sweep sets it.
-DEFAULT_THRESH: float = 0.20
+# From scripts/calibrate_flux1.py --model krea-dev --sweep (red-apple prompt, 28 steps,
+# g=4.5, 512x512, q4, seed 42, 2026-09-05): SSIM vs vanilla 0.990 at 0.30 with 10 of
+# 26 active steps skipped and no two skips in a row; 0.890 at 0.35, 0.888 at 0.40,
+# 0.866 at 0.60, 0.863 at 0.80. The knee is sharp, so 0.30 ships. The polynomial's
+# intercept (~0.40 predicted change per step, minimum ~0.26 over the calibration
+# trajectories) means the package fallback 0.20 would skip nothing on this model.
+DEFAULT_THRESH: float = 0.30
 
 # Black Forest Labs' published recipe for Krea [dev]: 28 steps, guidance 4.5.
 RECIPES: dict[str, dict[str, Any]] = {

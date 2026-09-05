@@ -51,6 +51,7 @@ _MFLUX_FILES = {
     "test_parity_flux2.py",
     "test_parity_z_image.py",
     "test_parity_qwen.py",
+    "test_parity_krea.py",
     "test_image_quality_flux1.py",
     "test_image_quality_flux2.py",
     "test_detect.py",  # imports mflux types for variant detection

@@ -20,12 +20,15 @@ from .config import COEFFICIENTS, DEFAULT_THRESH
 
 _PROVENANCE = Provenance(
     source="builtin",
-    revision="flux1-dev-shared-pending-krea-scoring",
+    revision="in-repo-2026-09-05",
     calibration_dataset=(
-        "FLUX.1-dev's vendored ali-vilab tuple, reused on the shared FLUX.1 architecture; "
-        "to be scored on Krea's own calibration pairs by scripts/calibrate_flux1.py before release"
+        "10 prompts x 28 steps x seed=42, M1 Max 32GB, bf16, q4, 512x512, guidance=4.5 "
+        "(scripts/calibrate_flux1.py --model krea-dev); FLUX.1-dev's vendored tuple scored R^2 -496 "
+        "on the same pairs, so Krea ships its own fit"
     ),
-    reference_url="https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py",
+    fit_metric="numpy.polyfit R^2 on 270 consecutive-step (mod_in, body_out) rel-L1 pairs",
+    fit_metric_value=0.6817,
+    reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux1.py",
 )
 
 

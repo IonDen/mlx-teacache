@@ -1,0 +1,130 @@
+"""FLUX.1 Krea [dev] integration. Reuses FLUX.1 dev's proxy + forward
+verbatim; Krea is a FLUX.1-dev-architecture finetune, so the transformer,
+the gate signal and the patch strategy are the same. Only the metadata
+(provenance, recipe, default threshold) differs.
+"""
+
+from typing import Any
+
+from mlx_teacache._kernel.coefficients import Provenance
+from mlx_teacache.handle import TeaCacheHandle, VariantPatch
+from mlx_teacache.integrations.mflux.lifecycle import wrap_generate_image
+
+# Reuse the verbatim port from flux1_dev — identical forward code.
+from mlx_teacache.variants.flux1_dev.integration import (
+    ProxyFlux1Transformer,
+    _InternalHandle,
+)
+
+from .config import COEFFICIENTS, DEFAULT_THRESH
+
+_PROVENANCE = Provenance(
+    source="builtin",
+    revision="flux1-dev-shared-pending-krea-scoring",
+    calibration_dataset=(
+        "FLUX.1-dev's vendored ali-vilab tuple, reused on the shared FLUX.1 architecture; "
+        "to be scored on Krea's own calibration pairs by scripts/calibrate_flux1.py before release"
+    ),
+    reference_url="https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py",
+)
+
+
+def apply(
+    flux: Any,
+    *,
+    rel_l1_thresh: float | None = None,
+    coefficients: tuple[float, float, float, float, float] | None = None,
+    skip_first_n_steps: int = 1,
+    skip_last_n_steps: int = 1,
+) -> TeaCacheHandle:
+    """FLUX.1 Krea [dev] apply. Same mechanics as FLUX.1 dev: proxy the
+    transformer, register the lifecycle callback, wrap generate_image."""
+    # 1. Resolve rel_l1_thresh (caller > DEFAULT_THRESH).
+    resolved_thresh: float = rel_l1_thresh if rel_l1_thresh is not None else DEFAULT_THRESH
+
+    # 2. Resolve coefficients and provenance (caller > COEFFICIENTS).
+    # User-supplied coefficients get a user provenance; builtin get _PROVENANCE.
+    if coefficients is not None:
+        resolved_coeffs: tuple[float, float, float, float, float] = coefficients
+        resolved_provenance = Provenance.for_user_supplied()
+    else:
+        resolved_coeffs = COEFFICIENTS
+        resolved_provenance = _PROVENANCE
+
+    # 3. Build internal handle (carries state, gen context, and per-generation
+    #    fields that lifecycle.py and the forward block reference).
+    internal = _InternalHandle(
+        rel_l1_thresh=resolved_thresh,
+        coefficients=resolved_coeffs,
+        skip_first_n_steps=skip_first_n_steps,
+        skip_last_n_steps=skip_last_n_steps,
+    )
+
+    # 4. Save original transformer for rollback.
+    original_transformer = flux.transformer
+
+    import contextlib
+
+    # Eager rollback list for the transactional patch (per audit medium #3):
+    # if any mutation raises after the first, all preceding mutations are reversed.
+    _rollbacks_so_far: list[Any] = []
+
+    # 5. Build proxy and swap onto flux.transformer.
+    proxy = ProxyFlux1Transformer(inner=original_transformer, handle=internal)
+    flux.transformer = proxy
+    _rollbacks_so_far.append(lambda: setattr(flux, "transformer", original_transformer))
+
+    # 6. Register lifecycle callback via wrap_generate_image. This registers
+    #    GenerationContextCallback and wraps flux.generate_image.
+    from mlx_teacache.integrations.mflux.lifecycle import (
+        GenerationContextCallback,
+        _remove_callback_by_identity,
+    )
+
+    callback = GenerationContextCallback(internal)
+    internal._callback_instance = callback
+
+    try:
+        _rollbacks_so_far.append(lambda: _remove_callback_by_identity(flux.callbacks, callback))
+        flux.callbacks.register(callback)
+        wrap_generate_image(flux, internal)
+    except BaseException:
+        for _undo in reversed(_rollbacks_so_far):
+            with contextlib.suppress(Exception):
+                _undo()
+        raise
+
+    # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
+    #    callback + restores generate_image. NO stats finalize call (audit F2).
+    def _restore_transformer() -> None:
+        flux.transformer = original_transformer
+
+    def _unsubscribe_callback() -> None:
+        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
+
+        _remove_callback_by_identity(flux.callbacks, callback)
+
+    def _restore_generate_image() -> None:
+        if internal._generate_image_was_instance_attr:
+            flux.generate_image = internal._original_generate_image
+        else:
+            if "generate_image" in vars(flux):
+                del flux.generate_image
+
+    patch = VariantPatch(
+        rollbacks=[_restore_transformer, _restore_generate_image],
+        finalizers=[_unsubscribe_callback],
+    )
+
+    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    handle = TeaCacheHandle(
+        patch=patch,
+        stats=internal._state.stats,
+        provenance=resolved_provenance,
+        rel_l1_thresh=resolved_thresh,
+    )
+    # Expose resolved coefficients and callback instance as dynamic attributes
+    # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
+    handle.coefficients = resolved_coeffs  # type: ignore[attr-defined]
+    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    return handle

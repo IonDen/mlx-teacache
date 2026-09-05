@@ -174,6 +174,38 @@ def _flux1_extract_mod_input(block_0: Any, hidden_states_pre: mx.array, text_emb
     return block_0.norm1(hidden_states_pre, text_embeddings)[0]
 
 
+def _flux1_prelude(
+    inner: Any,
+    *,
+    t: int,
+    config: Any,
+    hidden_states: mx.array,
+    prompt_embeds: mx.array,
+    pooled_prompt_embeds: mx.array,
+    kwargs: dict[str, Any],
+) -> tuple[mx.array, mx.array, mx.array, mx.array]:
+    """The four intermediates every FLUX.1 step needs before the body: embedded
+    image tokens, embedded text tokens, the timestep/pooled-text embedding, and
+    the rotary embeddings. Mirrors mflux Transformer.__call__ lines 44-47. Shared
+    with scripts/calibrate_flux1.py so the calibrator never re-walks it."""
+    body_in = inner.x_embedder(hidden_states)
+    encoder_hidden_states = inner.context_embedder(prompt_embeds)
+    text_embeddings = inner.compute_text_embeddings(t, pooled_prompt_embeds, inner.time_text_embed, config)
+    image_rotary_embeddings = inner.compute_rotary_embeddings(
+        prompt_embeds, inner.pos_embed, config, kwargs.get("kontext_image_ids")
+    )
+    return body_in, encoder_hidden_states, text_embeddings, image_rotary_embeddings
+
+
+def _flux1_tail(
+    inner: Any, body_out_concat: mx.array, encoder_hidden_states: mx.array, text_embeddings: mx.array
+) -> Any:
+    """Drop the text tokens, final norm, projection (mflux Transformer.__call__ lines 77-80)."""
+    out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
+    out = inner.norm_out(out, text_embeddings)
+    return inner.proj_out(out)
+
+
 def _flux1_run_body(
     inner: Any,
     body_in: mx.array,
@@ -263,19 +295,14 @@ def flux1_forward_with_gate(
 
     # 2. Prelude (mirrors mflux Transformer.__call__ lines 44-47). Both paths
     # below need these intermediates.
-    body_in = inner.x_embedder(hidden_states)
-    encoder_hidden_states = inner.context_embedder(prompt_embeds)
-    text_embeddings = inner.compute_text_embeddings(
-        t,
-        pooled_prompt_embeds,
-        inner.time_text_embed,
-        config,
-    )
-    image_rotary_embeddings = inner.compute_rotary_embeddings(
-        prompt_embeds,
-        inner.pos_embed,
-        config,
-        kwargs.get("kontext_image_ids"),
+    body_in, encoder_hidden_states, text_embeddings, image_rotary_embeddings = _flux1_prelude(
+        inner,
+        t=t,
+        config=config,
+        hidden_states=hidden_states,
+        prompt_embeds=prompt_embeds,
+        pooled_prompt_embeds=pooled_prompt_embeds,
+        kwargs=kwargs,
     )
 
     # 2a. Threshold-zero fast path: every step is "computed", cache is never
@@ -299,9 +326,7 @@ def flux1_forward_with_gate(
                 decision="computed",
             )
         )
-        out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
-        out = inner.norm_out(out, text_embeddings)
-        out = inner.proj_out(out)
+        out = _flux1_tail(inner, body_out_concat, encoder_hidden_states, text_embeddings)
         state.step_counter += 1
         return out
 
@@ -364,9 +389,7 @@ def flux1_forward_with_gate(
         body_out_concat = body_in_concat + state.cached_residual
 
     # 8. Tail (mirrors mflux Transformer.__call__ lines 77-80, always runs).
-    out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
-    out = inner.norm_out(out, text_embeddings)
-    out = inner.proj_out(out)
+    out = _flux1_tail(inner, body_out_concat, encoder_hidden_states, text_embeddings)
 
     # 9. Bump step counter for the next call.
     state.step_counter += 1

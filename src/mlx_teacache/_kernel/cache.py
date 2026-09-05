@@ -56,3 +56,29 @@ class TeaCacheState:
         self.last_timestep = None
         self.skip_window_validated = False
         self.num_steps = num_steps
+
+    def store_residuals(self, *, pos: mx.array | None = None, neg: mx.array | None = None) -> None:
+        """Materialise and keep the body residual(s).
+
+        ``body_out - body_in`` is a sibling of the step's output, not an
+        ancestor, so mflux's per-step ``mx.eval(latents)`` never forces it. Left
+        lazy it pins both operands across the step boundary (twice its own size,
+        four times under CFG). Evaluate here, once, at the only place the
+        residual is written."""
+        arrays = [a for a in (pos, neg) if a is not None]
+        if arrays:
+            mx.eval(*arrays)
+        if pos is not None:
+            self.cached_residual = pos
+        if neg is not None:
+            self.cached_residual_neg = neg
+
+    def release_arrays(self) -> None:
+        """Drop the three body-sized arrays without touching the counters.
+
+        Called after the denoising loop (before VAE decode, where peak memory
+        lands) and on ``handle.restore()``, so a handle kept for its stats does
+        not pin them for the process lifetime."""
+        self.previous_mod_input = None
+        self.cached_residual = None
+        self.cached_residual_neg = None

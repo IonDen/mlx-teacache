@@ -159,6 +159,10 @@ class GenerationContextCallback:
         # sees None.
         self._handle._gen_ctx.active_num_steps = None
         self._handle._gen_ctx.consumed_at_token = None
+        # The transformer is not called again after the loop; drop the three
+        # body-sized arrays now so they are not resident through VAE decode
+        # (where peak memory lands) or for as long as the handle lives.
+        self._handle._state.cache.release_arrays()
 
     def call_interrupt(
         self,

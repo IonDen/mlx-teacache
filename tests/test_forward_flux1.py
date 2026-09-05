@@ -218,8 +218,11 @@ def test_slow_path_raises_on_mod_input_shape_drift():
 
     handle = _make_handle(rel_l1_thresh=0.25)
     handle._state.cache.previous_mod_input = mx.zeros((1, 99, 8))
-    with pytest.raises(TransformerShapeError):
-        _run_one_step(handle, t=0)
+    with pytest.raises(TransformerShapeError) as excinfo:
+        _run_one_step(handle, t=9)
+    # bug caught: reporting mflux's absolute scheduler step (9) instead of the
+    # per-generation counter (0) — every other variant reports the counter.
+    assert excinfo.value.step_idx == 0
 
 
 # ---------------------------------------------------------------------------

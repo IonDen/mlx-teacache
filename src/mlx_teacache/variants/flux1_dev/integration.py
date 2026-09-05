@@ -314,7 +314,7 @@ def flux1_forward_with_gate(
     # 4. Defensive shape check.
     if state.previous_mod_input is not None and mod_in.shape != state.previous_mod_input.shape:
         raise TransformerShapeError(
-            step_idx=t,
+            step_idx=state.step_counter,
             expected=state.previous_mod_input.shape,
             actual=mod_in.shape,
         )
@@ -352,7 +352,7 @@ def flux1_forward_with_gate(
             kwargs,
         )
         if decision.should_update_cache:
-            state.cached_residual = body_out_concat - body_in_concat
+            state.store_residuals(pos=body_out_concat - body_in_concat)
     else:
         # decision.kind == "skipped"
         if state.cached_residual is None:

@@ -218,3 +218,11 @@ def test_load_chunks_refuses_an_unstamped_chunk(tmp_path: Path) -> None:
     bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
     with pytest.raises(SystemExit, match="vanilla.json"):
         bc._load_chunks(tmp_path, "flux1-dev", reps=3)
+
+
+# --- v0.10.1: worker result parsing (shared shape with bench_speedup) ---------
+
+
+def test_parse_worker_line_finds_the_sentinel_payload() -> None:
+    assert bc._parse_worker_line(f"x\n{bc.WORKER_RESULT_SENTINEL}{json.dumps({'k': 2})}") == {"k": 2}
+    assert bc._parse_worker_line("nothing") is None

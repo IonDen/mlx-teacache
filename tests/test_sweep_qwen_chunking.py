@@ -66,3 +66,42 @@ def test_build_summary_sorts_by_threshold_and_derives_speedup() -> None:
     assert summary["vanilla_seconds"] == 10.0
     assert summary["signal"] == "A"
     assert summary["num_inference_steps"] == sw.STEPS
+
+
+# --- v0.10.1: streak telemetry, threshold override, build label ---
+
+
+def test_build_summary_carries_streak_telemetry_per_threshold() -> None:
+    # bug caught: dropping skip_pattern / max_consecutive_skips when assembling the rows
+    chunks = [
+        {
+            "threshold": 0.2,
+            "wrapper_seconds": 5.0,
+            "skipped": 6,
+            "computed": 44,
+            "ssim_vs_vanilla": 0.99,
+            "skip_pattern": "CSSC",
+            "max_consecutive_skips": 2,
+        }
+    ]
+    row = sw._build_summary(chunks, vanilla_seconds=10.0)["thresholds"][0]
+    assert row["skip_pattern"] == "CSSC"
+    assert row["max_consecutive_skips"] == 2
+
+
+def test_build_summary_tolerates_pre_telemetry_chunks() -> None:
+    chunks = [
+        {"threshold": 0.2, "wrapper_seconds": 5.0, "skipped": 6, "computed": 44, "ssim_vs_vanilla": 0.99}
+    ]
+    row = sw._build_summary(chunks, vanilla_seconds=10.0)["thresholds"][0]
+    assert row["skip_pattern"] == ""
+    assert row["max_consecutive_skips"] == 0
+
+
+def test_units_honour_an_explicit_threshold_list() -> None:
+    # bug caught: ignoring the CLI override and always sweeping the module constant
+    assert sw._units([0.15, 0.3]) == ["vanilla", "t0.150", "t0.300"]
+
+
+def test_build_summary_records_the_build() -> None:
+    assert sw._build_summary([], vanilla_seconds=1.0, build="plain-q4")["build"] == "plain-q4"

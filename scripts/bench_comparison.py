@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from _bench_telemetry import streak_telemetry as _streak_telemetry
+from _mlx_watchdog import arm_mlx_watchdog
 
 # Shared portrait prompt — same across every variant. Single variable = recipe.
 PROMPT = (
@@ -141,7 +142,10 @@ VARIANTS: tuple[VariantConfig, ...] = (
         quantize=4,
         build="mixed-precision: q8 first/last-6 transformer blocks + bf16 embeddings/projection (quantize=4 base)",
         wired_cap_gb=21,  # device-derived ~0.85*24.96; bounds wired memory (peak ~30.4 GB total is pageable)
-        soft_cap_gb=31,  # advisory, above the ~30.4 GB mixed-precision peak so timing isn't inflated by forced eviction
+        # Advisory only. The watchdog now bounds the run at memory_size - 4 GiB (28 GiB on
+        # this machine), so the mixed-precision build's ~30.4 GB peak will trip it: this row
+        # cannot run on a 32 GB Mac until its build or resolution is lowered.
+        soft_cap_gb=31,
         clear_cache_between_reps=True,  # 20B near the 32 GB edge; cache accumulation OOMs reps without this
     ),
 )
@@ -197,7 +201,7 @@ def _generate(
         width=width,
         guidance=guidance,
     )
-    mx.eval(mx.zeros(1))  # flush GPU work before stopping the clock
+    mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
     elapsed = time.perf_counter() - start
     return elapsed, image
 
@@ -310,12 +314,20 @@ def _worker_main(args: argparse.Namespace) -> None:
     soft = cfg.soft_cap_gb or (wired + 1)
     from _mlx_caps import install_caps
 
-    install_caps(wired_gb=wired, soft_gb=soft)  # device-clamped: never above the system wired limit
+    cache_gb = 1.0 if cfg.slug == "qwen-image" else 2.0  # qwen's active peak leaves ~1 GiB under the ceiling
+    wired_b, soft_b, cache_b = install_caps(wired_gb=wired, soft_gb=soft, cache_gb=cache_gb)
     print(
-        f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired} GB soft={soft} GB, "
+        f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired_b / 1024**3:.2f} GB "
+        f"soft={soft_b / 1024**3:.2f} GB cache={cache_b / 1024**3:.2f} GB, "
         f"res={cfg.width}x{cfg.height} q{cfg.quantize}",
         flush=True,
     )
+
+    def _on_abort(payload: dict[str, int]) -> None:
+        abort = {"aborted": "active-memory watchdog", "slug": cfg.slug, "condition": args.condition}
+        print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
+
+    arm_mlx_watchdog(on_abort=_on_abort)
     save_to: Path = Path(args.save_to)
     if args.condition == "vanilla":
         result = _run_worker_vanilla(cfg, save_to)
@@ -447,13 +459,24 @@ def _run_one_worker(slug: str, condition: str, save_to: Path) -> dict[str, Any]:
         sys.stdout.write(proc.stdout)
     if proc.stderr:
         sys.stderr.write(proc.stderr)
+    payload = _parse_worker_line(proc.stdout)
+    if payload is not None and "aborted" in payload:
+        return payload  # the caller persists the abort artifact and stops
     if proc.returncode != 0:
         raise RuntimeError(f"worker failed for {slug}/{condition}: exit {proc.returncode}")
-    # Find the result line in stdout.
-    for line in proc.stdout.splitlines():
+    if payload is None:
+        raise RuntimeError(
+            f"worker for {slug}/{condition} did not emit a {WORKER_RESULT_SENTINEL} result line"
+        )
+    return payload
+
+
+def _parse_worker_line(stdout: str) -> dict[str, Any] | None:
+    """The worker's single sentinel-prefixed JSON line, or None if it never printed one."""
+    for line in stdout.splitlines():
         if line.startswith(WORKER_RESULT_SENTINEL):
             return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
-    raise RuntimeError(f"worker for {slug}/{condition} did not emit a {WORKER_RESULT_SENTINEL} result line")
+    return None
 
 
 def _condition_metrics(rep_seconds: list[float]) -> dict[str, float | None]:
@@ -572,6 +595,18 @@ def _orchestrate(
             print(f"  worker budget exhausted before {cfg.slug}/{condition}; re-invoke to continue")
             break
         result = _run_one_worker(cfg.slug, condition, image_for[condition])
+        if "aborted" in result:
+            aborted = _chunk_path(chunks_dir, cfg.slug, condition).with_suffix(".aborted.json")
+            aborted.parent.mkdir(parents=True, exist_ok=True)
+            aborted.write_text(json.dumps(result, indent=2))
+            print(
+                f"\n== ABORTED by the memory watchdog on {cfg.slug}/{condition}: "
+                f"{result['resident_bytes'] / 1024**3:.2f} GB resident > "
+                f"{result['ceiling_bytes'] / 1024**3:.2f} GB ceiling; artifact {aborted}. "
+                "Nothing persisted as a result. ==",
+                flush=True,
+            )
+            raise SystemExit(4)
         # Stamp the chunk with this run's reps + provenance so a later invocation can
         # refuse to pair it with a chunk from a different setup.
         written = _persist_chunk(chunks_dir, cfg.slug, {**result, "reps": REPS, "provenance": provenance})

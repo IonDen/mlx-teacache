@@ -428,3 +428,24 @@ def test_non_finite_rel_l1_from_finite_inputs_is_a_numerical_miss_not_a_skip():
     assert d.should_compute and not d.should_update_cache
     assert state.cached_residual is None
     assert state.accumulated_distance == 0.0
+
+
+def test_numerical_miss_from_overflow_reports_no_rel_l1():
+    """bug caught: passing the overflowed inf/nan through as `rel_l1`, where every
+    other no-valid-signal path reports None (and json.dumps would emit NaN)."""
+    state = _fresh_state(num_steps=25)
+    huge = mx.full((1024,), 3.0e38, dtype=mx.float32)
+    state.previous_mod_input = huge
+    state.cached_residual = mx.zeros((1,))
+    d = gate_step(
+        state,
+        rel_l1_thresh=0.2,
+        coefficients=COEFFS,
+        skip_first=1,
+        skip_last=1,
+        num_steps=25,
+        step_idx=5,
+        mod_in=-huge,
+    )
+    assert d.kind == "numerical-miss"
+    assert d.rel_l1 is None

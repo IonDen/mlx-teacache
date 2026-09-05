@@ -167,7 +167,7 @@ def gate_step(  # type: ignore[no-untyped-def]
             kind="numerical-miss",
             should_compute=True,
             should_update_cache=False,
-            rel_l1=rel_l1,
+            rel_l1=rel_l1 if math.isfinite(rel_l1) else None,
             predicted_distance=None,
             accumulated_distance=0.0,
         )

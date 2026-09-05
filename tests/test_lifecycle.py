@@ -255,3 +255,24 @@ def test_after_loop_releases_cached_arrays():
     assert c.previous_mod_input is None
     assert c.cached_residual is None
     assert c.cached_residual_neg is None
+
+
+def test_wrapper_releases_cached_arrays_when_generation_raises():
+    """bug caught: an interrupted or failed generation keeping its body-sized
+    arrays resident until the next generation's before_loop."""
+    import mlx.core as mx
+
+    handle = _FakeHandle()
+    cache = handle._state.cache
+
+    def _boom(**kw):
+        cache.cached_residual = mx.zeros((2,))
+        cache.previous_mod_input = mx.zeros((2,))
+        raise KeyboardInterrupt
+
+    flux = SimpleNamespace(callbacks=None, generate_image=_boom)
+    wrap_generate_image(flux, handle)
+    with pytest.raises(KeyboardInterrupt):
+        flux.generate_image(prompt="x")
+    assert cache.cached_residual is None
+    assert cache.previous_mod_input is None

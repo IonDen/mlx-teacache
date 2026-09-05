@@ -226,3 +226,9 @@ def test_load_chunks_refuses_an_unstamped_chunk(tmp_path: Path) -> None:
 def test_parse_worker_line_finds_the_sentinel_payload() -> None:
     assert bc._parse_worker_line(f"x\n{bc.WORKER_RESULT_SENTINEL}{json.dumps({'k': 2})}") == {"k": 2}
     assert bc._parse_worker_line("nothing") is None
+
+
+def test_parse_worker_line_prefers_an_abort_payload_over_an_earlier_result() -> None:
+    ok = f"{bc.WORKER_RESULT_SENTINEL}{json.dumps({'rep_seconds': [1.0]})}"
+    ab = f"{bc.WORKER_RESULT_SENTINEL}{json.dumps({'aborted': 'active-memory watchdog'})}"
+    assert bc._parse_worker_line(f"{ok}\n{ab}\n") == {"aborted": "active-memory watchdog"}

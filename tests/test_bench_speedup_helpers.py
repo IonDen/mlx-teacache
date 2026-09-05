@@ -334,3 +334,11 @@ def test_memory_arrays_fall_back_only_for_the_peak_keys() -> None:
     }
     assert bs._memory_arrays([old, new], "loop_peak_memory_gb") == [26.0, 26.2]
     assert bs._memory_arrays([old, new], "cache_memory_gb") == [None, 0.9]
+
+
+def test_parse_worker_line_prefers_an_abort_payload_over_an_earlier_result() -> None:
+    # bug caught: taking the first sentinel line, so an abort that fires after the
+    # result was printed (during image.save) reads as "worker failed: exit 3"
+    ok = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'elapsed_s': 1.0})}"
+    ab = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'aborted': 'active-memory watchdog'})}"
+    assert bs._parse_worker_line(f"{ok}\n{ab}\n") == {"aborted": "active-memory watchdog"}

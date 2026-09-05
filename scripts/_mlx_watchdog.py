@@ -10,12 +10,26 @@ runs while ``mx.eval`` holds no GIL, so 0.05 s costs nothing measurable.
 
 The abort is ``os._exit(3)`` after ``on_abort(payload)``: the caller prints an
 honest artifact (the orchestrator persists it as ``*.aborted.json``) and the
-process dies before the kernel does.
+process dies before the kernel does. The exit is unconditional: a handler that
+raises is reported to stderr and the process still exits.
+
+The headroom is budgeted for the OS, but the watchdog counts only MLX arrays;
+the Python interpreter, mflux, PIL and any decoded image live outside
+``active + cache``, so the real headroom at abort time is a little under the
+nominal figure. On the shipped Qwen-Image recipe (26.2 GiB active peak on a
+32 GiB machine) the default 4 GiB headroom leaves roughly 1.8 GiB of margin,
+so the watchdog is a live gate there, not a distant backstop; the heavy
+scripts expose ``--headroom-gib`` for that reason.
 """
 
+import json
 import os
+import sys
 import threading
+import traceback
 from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
 
 GIB = 1024**3
 DEFAULT_HEADROOM_GIB = 4.0
@@ -50,16 +64,25 @@ def start_watchdog(
 
     def _loop() -> None:
         while not halt.is_set():
-            active, cached = sample()
+            try:
+                active, cached = sample()
+            except Exception:  # noqa: BLE001 — a transient sampler failure must not disarm the guard
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
+                halt.wait(poll_s)
+                continue
             if over_ceiling(active, cached, ceiling):
-                on_abort(
-                    {
-                        "active_bytes": active,
-                        "cache_bytes": cached,
-                        "resident_bytes": active + cached,
-                        "ceiling_bytes": ceiling,
-                    }
-                )
+                payload = {
+                    "active_bytes": active,
+                    "cache_bytes": cached,
+                    "resident_bytes": active + cached,
+                    "ceiling_bytes": ceiling,
+                }
+                try:
+                    on_abort(payload)
+                except BaseException:  # noqa: BLE001 — the exit must happen even if the handler fails
+                    traceback.print_exc(file=sys.stderr)
+                    sys.stderr.flush()
                 exit_fn(ABORT_EXIT_CODE)
                 return
             halt.wait(poll_s)
@@ -81,3 +104,29 @@ def arm_mlx_watchdog(
         sample=lambda: (int(mx.get_active_memory()), int(mx.get_cache_memory())),
         on_abort=on_abort,
     )
+
+
+DEFAULT_ABORT_DIR = Path(__file__).resolve().parent.parent / "tests" / "_artifacts" / "watchdog_aborts"
+
+
+def abort_handler(label: str, artifact_dir: Path | None = None) -> Callable[[dict[str, int]], None]:
+    """An ``on_abort`` that prints one line and writes ``<label>.aborted.json``.
+
+    For workers whose orchestrator does not parse a sentinel line. The artifact
+    lands in ``artifact_dir`` (default: ``tests/_artifacts/watchdog_aborts/``,
+    git-ignored) so an abort is never silent."""
+
+    def _handler(payload: dict[str, int]) -> None:
+        line = (
+            f"[watchdog] ABORTED {label}: {payload['resident_bytes'] / GIB:.2f} GiB resident "
+            f"> {payload['ceiling_bytes'] / GIB:.2f} GiB ceiling"
+        )
+        print(line, flush=True)
+        print(line, file=sys.stderr, flush=True)
+        target = artifact_dir if artifact_dir is not None else DEFAULT_ABORT_DIR
+        target.mkdir(parents=True, exist_ok=True)
+        (target / f"{label}.aborted.json").write_text(
+            json.dumps({"label": label, "at": datetime.now(timezone.utc).isoformat(), **payload}, indent=2)
+        )
+
+    return _handler

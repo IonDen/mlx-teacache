@@ -78,7 +78,10 @@ class TeaCacheState:
 
         Called after the denoising loop (before VAE decode, where peak memory
         lands) and on ``handle.restore()``, so a handle kept for its stats does
-        not pin them for the process lifetime."""
+        not pin them for the process lifetime. Dropping the references hands the
+        buffers back to MLX's allocator pool, where the decode can reuse them;
+        whether the pool itself shrinks is governed by ``mx.set_cache_limit``,
+        which the library leaves to the application."""
         self.previous_mod_input = None
         self.cached_residual = None
         self.cached_residual_neg = None

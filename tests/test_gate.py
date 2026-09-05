@@ -388,10 +388,11 @@ def test_trailing_forced_window_leaves_the_anchor_alone():
 # ---------------------------------------------------------------------------
 
 
-def test_mean_abs_rel_l1_accumulates_in_float32_on_bf16_inputs():
-    """bug caught: mx.mean on a bf16 array returns a bf16 scalar, ~1e-3 relative
-    error that grows with element count and is not absorbed by the calibrated
-    polynomials (worst case 3 % on the predicted distance at z-image's threshold)."""
+def test_mean_abs_rel_l1_keeps_the_reduced_scalars_in_float32_on_bf16_inputs():
+    """bug caught: mx.mean on a bf16 array rounds its (float32-accumulated) result
+    to a bf16 scalar — up to half a bf16 ulp, ~1e-3 relative, on each of the two
+    reductions — and that rounding is not absorbed by the calibrated polynomials
+    (worst case 3 % on the predicted distance at z-image's threshold)."""
     import numpy as np
 
     mx.random.seed(7)

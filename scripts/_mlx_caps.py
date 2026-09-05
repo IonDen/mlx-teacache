@@ -15,8 +15,9 @@ Three limits, three different jobs:
   footprint climbs unopposed. Derive it through :func:`clamped_cache_bytes`.
 
 None of the three aborts a run that is already past the working set. That is
-the job of the active+cache watchdog in ``_mlx_watchdog.py``; every
-model-loading worker installs both.
+the job of the active+cache watchdog in ``_mlx_watchdog.py``; every script
+under ``scripts/`` that installs these caps also arms the watchdog (a test in
+``tests/test_scripts_memory_caps.py`` keeps it that way).
 """
 
 GIB = 1024**3

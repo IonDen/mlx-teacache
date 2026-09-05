@@ -489,6 +489,11 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) 
     install_caps(
         wired_gb=22, soft_gb=22
     )  # clamps to 0.85 x the recommended working set; bounds the cache pool
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    # This recipe peaks ~26.2 GiB active, above the recommended working set; the
+    # watchdog is the only thing that stops a paging storm.
+    arm_mlx_watchdog(on_abort=abort_handler(f"calibrate_qwen-prompt{prompt_idx}", chunk_dir))
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
@@ -632,6 +637,9 @@ def main() -> None:
         install_caps(
             wired_gb=22, soft_gb=22
         )  # clamps to 0.85 x the recommended working set; bounds the cache pool
+        from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+        arm_mlx_watchdog(on_abort=abort_handler("calibrate_qwen-memory-probe"))
         _run_memory_probe()
         return
     if args.worker:

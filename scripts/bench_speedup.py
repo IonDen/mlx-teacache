@@ -164,9 +164,10 @@ def _resolution_for(variant: str) -> tuple[int, int]:
 # (the wired cap is clamped to the device anyway), not a prediction of the peak.
 _DEFAULT_CAP_GB = 22
 
-# MLX cache-pool bound per variant. qwen's active peak at 768x768 q4 is ~26.2 GB
-# on a 32 GB machine, so its pool gets 1 GiB to stay under the 28 GiB watchdog
-# ceiling; everything else has room for the 2 GiB default.
+# MLX cache-pool bound per variant. qwen's active peak at 768x768 q4 is ~26.2 GiB
+# on a 32 GiB machine, so its pool gets 1 GiB and still clears the 28 GiB watchdog
+# ceiling by under 2 GiB — the watchdog is a live gate on that recipe, not a
+# distant backstop (see --headroom-gib). Everything else has room for 2 GiB.
 _VARIANT_CACHE_GB: dict[str, float] = {"qwen": 1.0}
 _DEFAULT_CACHE_GB = 2.0
 
@@ -277,7 +278,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         abort = {"aborted": "active-memory watchdog", "variant": variant, "condition": condition, "rep": rep}
         print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
 
-    arm_mlx_watchdog(on_abort=_on_abort)
+    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=args.headroom_gib)
     started_at = datetime.now(timezone.utc).isoformat()
     recipe = _VARIANT_RECIPE[variant]
     num_inference_steps: int = (
@@ -461,6 +462,7 @@ def _run_one_worker(
     num_inference_steps: int | None,
     guidance: float | None,
     save_to: Path | None,
+    headroom_gib: float = 4.0,
 ) -> dict[str, Any]:
     """Spawn one worker subprocess and return its parsed result dict."""
     cmd = [
@@ -476,6 +478,7 @@ def _run_one_worker(
     ]
     if cap_gb is not None:
         cmd += ["--cap-gb", str(cap_gb)]
+    cmd += ["--headroom-gib", str(headroom_gib)]
     if num_inference_steps is not None:
         cmd += ["--num-inference-steps", str(num_inference_steps)]
     if guidance is not None:
@@ -501,11 +504,17 @@ def _run_one_worker(
 
 
 def _parse_worker_line(stdout: str) -> dict[str, Any] | None:
-    """The worker's single sentinel-prefixed JSON line, or None if it never printed one."""
+    """The worker's sentinel-prefixed JSON payload, or None if it never printed one.
+    An abort payload wins over an earlier result line: the watchdog can fire after
+    the result was printed (during image.save), and that run must not count."""
+    found: dict[str, Any] | None = None
     for line in stdout.splitlines():
         if line.startswith(WORKER_RESULT_SENTINEL):
-            return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
-    return None
+            payload = cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
+            if "aborted" in payload:
+                return payload
+            found = payload
+    return found
 
 
 def _image_path_for(bench_dir: Path, condition: str, rep: int, *, three_way: bool) -> Path | None:
@@ -672,6 +681,18 @@ def main() -> None:
         ),
     )
 
+    parser.add_argument(
+        "--headroom-gib",
+        type=float,
+        default=4.0,
+        dest="headroom_gib",
+        help=(
+            "Memory the watchdog leaves to the OS: the worker aborts once active+cached MLX memory "
+            "exceeds memory_size minus this (default 4 GiB; on a 32 GB Mac the shipped qwen recipe "
+            "clears the resulting 28 GiB ceiling by under 2 GiB)."
+        ),
+    )
+
     # Worker-only args.
     parser.add_argument("--condition", help="vanilla / wrapper / wrapper_nogate (worker mode).")
     parser.add_argument("--rep", type=int, default=0, help="Rep index 0-based (worker mode).")
@@ -793,6 +814,7 @@ def main() -> None:
             condition=condition,
             rep=rep,
             cap_gb=cap_gb,
+            headroom_gib=args.headroom_gib,
             num_inference_steps=num_inference_steps if args.num_inference_steps is not None else None,
             guidance=guidance if args.guidance is not None else None,
             save_to=_image_path_for(bench_dir, condition, rep, three_way=three_way),

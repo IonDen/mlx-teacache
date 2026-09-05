@@ -71,3 +71,53 @@ def test_watchdog_stays_quiet_under_ceiling() -> None:
     stop.set()
     t.join(1.0)
     assert calls == []
+
+
+def test_watchdog_still_exits_when_on_abort_raises() -> None:
+    # bug caught: an exception in the abort handler (a write under memory distress)
+    # killing the thread before exit_fn, leaving the process unguarded and silent
+    exited = threading.Event()
+    codes: list[int] = []
+
+    def _exit(code: int) -> None:
+        codes.append(code)
+        exited.set()
+
+    def _bad_handler(payload: dict[str, int]) -> None:
+        raise OSError("disk full")
+
+    wd.start_watchdog(
+        ceiling=28 * GIB,
+        sample=lambda: (27 * GIB, 2 * GIB),
+        on_abort=_bad_handler,
+        exit_fn=_exit,
+        poll_s=0.001,
+        stop=exited,
+    )
+    assert exited.wait(2.0), "watchdog did not exit after a raising abort handler"
+    assert codes == [3]
+
+
+def test_watchdog_keeps_polling_when_sample_raises_once() -> None:
+    # bug caught: a transient sampler failure ending the poll loop for good
+    calls = {"n": 0}
+
+    def _sample() -> tuple[int, int]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient")
+        return (27 * GIB, 2 * GIB)
+
+    exited = threading.Event()
+    codes: list[int] = []
+
+    def _exit(code: int) -> None:
+        codes.append(code)
+        exited.set()
+
+    wd.start_watchdog(
+        ceiling=28 * GIB, sample=_sample, on_abort=lambda p: None, exit_fn=_exit, poll_s=0.001, stop=exited
+    )
+    assert exited.wait(2.0), "watchdog stopped polling after one sampler error"
+    assert codes == [3]
+    assert calls["n"] >= 2

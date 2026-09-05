@@ -68,6 +68,9 @@ def main() -> None:
     from _mlx_caps import install_caps
 
     install_caps(wired_gb=20, soft_gb=22)  # device-clamped wired cap + bounded cache pool
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    arm_mlx_watchdog(on_abort=abort_handler("sweep_threshold_z_image"))
 
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.z_image.variants.z_image import ZImage

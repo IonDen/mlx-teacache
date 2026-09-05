@@ -46,14 +46,18 @@ def mean_abs_rel_l1(current: mx.array, previous: mx.array) -> float:
     """Mean absolute relative L1 distance: mean(|current - previous|) / mean(|previous|).
 
     The element-wise difference stays in the inputs' dtype (bf16 in every shipped
-    variant); the two reductions run in float32. ``mx.mean`` on a bf16 array
-    returns a bf16 scalar, and that rounding is not systematic (it grows with the
-    element count), so a polynomial calibrated at one resolution does not absorb
-    it. The cast is a free pass over data the reduction already reads. Guards
-    against division by zero with a small epsilon."""
-    num = float(mx.mean(mx.abs(current - previous).astype(mx.float32)))
-    denom = float(mx.mean(mx.abs(previous).astype(mx.float32)))
-    return num / max(denom, 1e-12)
+    variant); the two reductions return float32 scalars. ``mx.mean`` on a bf16
+    array accumulates in float32 but rounds its result back to bf16, up to half
+    a bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 %
+    on their ratio; that rounding is not something a polynomial calibrated on
+    one trace can absorb. The casts cost one extra pass and a transient float32
+    buffer per reduction, immaterial next to a transformer step. Both scalars
+    are evaluated in one sync. Guards against division by zero with a small
+    epsilon."""
+    num_arr = mx.mean(mx.abs(current - previous).astype(mx.float32))
+    denom_arr = mx.mean(mx.abs(previous).astype(mx.float32))
+    mx.eval(num_arr, denom_arr)
+    return float(num_arr) / max(float(denom_arr), 1e-12)
 
 
 def _all_finite(t: mx.array) -> bool:

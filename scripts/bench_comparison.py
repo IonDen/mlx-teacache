@@ -57,6 +57,7 @@ SEED = 42
 HEIGHT = 1024
 WIDTH = 768
 REPS = 3  # rep 1 = cold (subprocess just started); reps 2-3 = warm
+HEADROOM_GIB = 4.0  # watchdog headroom; overridden by --headroom-gib in main()
 
 WEBP_QUALITY = 88
 WEBP_METHOD = 6  # Pillow's slowest+best encoder; ~1-2s on 768x1024.
@@ -327,7 +328,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         abort = {"aborted": "active-memory watchdog", "slug": cfg.slug, "condition": args.condition}
         print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
 
-    arm_mlx_watchdog(on_abort=_on_abort)
+    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=HEADROOM_GIB)
     save_to: Path = Path(args.save_to)
     if args.condition == "vanilla":
         result = _run_worker_vanilla(cfg, save_to)
@@ -451,6 +452,8 @@ def _run_one_worker(slug: str, condition: str, save_to: Path) -> dict[str, Any]:
         str(save_to),
         "--reps",
         str(REPS),  # orchestrator's REPS (possibly overridden by --reps) -> worker
+        "--headroom-gib",
+        str(HEADROOM_GIB),
     ]
     print(f"\n>> spawning worker: {slug} / {condition}", flush=True)
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -472,11 +475,17 @@ def _run_one_worker(slug: str, condition: str, save_to: Path) -> dict[str, Any]:
 
 
 def _parse_worker_line(stdout: str) -> dict[str, Any] | None:
-    """The worker's single sentinel-prefixed JSON line, or None if it never printed one."""
+    """The worker's sentinel-prefixed JSON payload, or None if it never printed one.
+    An abort payload wins over an earlier result line: the watchdog can fire after
+    the result was printed (during image.save), and that run must not count."""
+    found: dict[str, Any] | None = None
     for line in stdout.splitlines():
         if line.startswith(WORKER_RESULT_SENTINEL):
-            return cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
-    return None
+            payload = cast(dict[str, Any], json.loads(line[len(WORKER_RESULT_SENTINEL) :]))
+            if "aborted" in payload:
+                return payload
+            found = payload
+    return found
 
 
 def _condition_metrics(rep_seconds: list[float]) -> dict[str, float | None]:

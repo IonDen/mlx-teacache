@@ -164,7 +164,9 @@ def _load(path: Path) -> np.ndarray:
     return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)
 
 
-def _run_worker(unit: str, *, chunk_dir: Path, dry_run: bool, plain_q4: bool = False) -> None:
+def _run_worker(
+    unit: str, *, chunk_dir: Path, dry_run: bool, plain_q4: bool = False, headroom_gib: float = 4.0
+) -> None:
     """Run ONE sweep unit (vanilla or a single threshold) and write its chunk.
     A fresh subprocess per unit = isolated peak memory + a durable checkpoint."""
     chunk_dir.mkdir(parents=True, exist_ok=True)
@@ -188,9 +190,11 @@ def _run_worker(unit: str, *, chunk_dir: Path, dry_run: bool, plain_q4: bool = F
         print(f"[worker {unit}] dry-run chunk -> {out}", flush=True)
         return
 
-    # Memory guardrail — device-clamped wired cap, bounded cache pool (1 GiB: the
-    # plain-q4 recipe's ~26.2 GB active peak leaves little under the 28 GiB
-    # watchdog ceiling), and the active+cache watchdog, all before any model load.
+    # Memory guardrail — device-clamped wired cap, bounded cache pool (1 GiB), and
+    # the active+cache watchdog, all before any model load. The plain-q4 recipe's
+    # ~26.2 GiB active peak clears the default 28 GiB ceiling by under 2 GiB, so the
+    # watchdog is a live gate here (--headroom-gib tunes it); the soft cap stays at
+    # the bench recipe's 22 GB so the sweep and the bench share one memory setup.
     from _mlx_caps import install_caps
     from _mlx_watchdog import arm_mlx_watchdog
 
@@ -205,7 +209,7 @@ def _run_worker(unit: str, *, chunk_dir: Path, dry_run: bool, plain_q4: bool = F
         )
         (chunk_dir / f"{unit}.aborted.json").write_text(json.dumps({"unit": unit, **payload}, indent=2))
 
-    arm_mlx_watchdog(on_abort=_on_abort)
+    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=headroom_gib)
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
@@ -270,6 +274,7 @@ def _run_orchestrator(
     thresholds: list[float] | None = None,
     plain_q4: bool = False,
     max_units: int | None = None,
+    headroom_gib: float = 4.0,
 ) -> None:
     """Run the vanilla reference, then one worker SUBPROCESS per threshold
     (sequential — never two 20B loads at once); resume by skipping units whose
@@ -298,6 +303,7 @@ def _run_orchestrator(
             cmd.append("--dry-run")
         if plain_q4:
             cmd.append("--plain-q4")
+        cmd += ["--headroom-gib", str(headroom_gib)]
         print(f"[orchestrator] -> {unit}", flush=True)
         result = subprocess.run(cmd)
         if result.returncode != 0 or not (chunk_dir / _chunk_filename(unit)).exists():
@@ -380,6 +386,13 @@ def main() -> None:
         help="comma-separated override of the threshold list, e.g. 0.15,0.20,0.25",
     )
     parser.add_argument(
+        "--headroom-gib",
+        type=float,
+        default=4.0,
+        dest="headroom_gib",
+        help="memory the watchdog leaves to the OS (default 4 GiB → a 28 GiB ceiling on a 32 GB Mac)",
+    )
+    parser.add_argument(
         "--max-units",
         type=int,
         default=None,
@@ -392,7 +405,13 @@ def main() -> None:
     if args.worker:
         if args.unit is None:
             parser.error("--worker requires --unit")
-        _run_worker(args.unit, chunk_dir=chunk_dir, dry_run=args.dry_run, plain_q4=args.plain_q4)
+        _run_worker(
+            args.unit,
+            chunk_dir=chunk_dir,
+            dry_run=args.dry_run,
+            plain_q4=args.plain_q4,
+            headroom_gib=args.headroom_gib,
+        )
         return
     _run_orchestrator(
         chunk_dir=chunk_dir,
@@ -400,6 +419,7 @@ def main() -> None:
         thresholds=_parse_thresholds(args.thresholds),
         plain_q4=args.plain_q4,
         max_units=args.max_units,
+        headroom_gib=args.headroom_gib,
     )
 
 

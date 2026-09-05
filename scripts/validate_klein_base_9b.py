@@ -125,6 +125,9 @@ def _worker(condition: str, save_image_to: Path, mlx_memory_cap_gb: int) -> None
     from _mlx_caps import install_caps
 
     install_caps(wired_gb=wired_gb, soft_gb=mlx_memory_cap_gb)  # device-clamped; never above the system limit
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    arm_mlx_watchdog(on_abort=abort_handler("validate_klein_base_9b"))
 
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein

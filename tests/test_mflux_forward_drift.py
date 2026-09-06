@@ -111,6 +111,26 @@ KNOWN: dict[str, dict[str, str]] = {
         "z_image.ZImage._predict": "807bb08910d0b839",
         "qwen.QwenImage.generate_image": "2f04c1c09ce2512b",
     },
+    # Verified 2026-09-06 on real weights (FLUX.1-dev, FLUX.1 Krea [dev], the four
+    # FLUX.2 Klein variants, Z-Image and Qwen-Image parity files on 0.19.1, mlx
+    # 0.32.2). What moved since 0.18.x, all off by default on the copied path:
+    # ZImageTransformer.__call__ gained an optional controlnet_block_samples kwarg
+    # (a per-layer add when given, None here); every generate_image gained a
+    # bake_lora flag and a PiD-decoder branch after the loop; ZImage._predict
+    # dropped 0.18.0's eager-on-M1/M2 special case and compiles on every chip
+    # (0.17.5's form); Flux2Klein._predict is 0.17.5's form again.
+    "0.19.1": {
+        "flux1.Transformer.__call__": "5d91b45c47115222",
+        "flux2.Flux2Transformer.__call__": "77c738101d62cb9e",
+        "z_image.ZImageTransformer.__call__": "c56cd57e1b081b69",
+        "qwen.QwenTransformer.__call__": "6600c3d8f0a874dc",
+        "flux1.Flux1.generate_image": "78163ee6088400e2",
+        "flux2.Flux2Klein.generate_image": "75d5bc4a72298aa7",
+        "flux2.Flux2Klein._predict": "1eb65d3778f18f8e",
+        "z_image.ZImage.generate_image": "4cdf0c7f5955c590",
+        "z_image.ZImage._predict": "807bb08910d0b839",
+        "qwen.QwenImage.generate_image": "6c36ec23156c5eaa",
+    },
 }
 
 

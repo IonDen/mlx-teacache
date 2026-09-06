@@ -11,8 +11,8 @@ The whole library is one idea applied per model: run the expensive transformer b
 1. Validate the keyword arguments statically (threshold range, coefficient shape, skip-window ints).
 2. Check the already-patched sentinel (`flux._teacache_handle`). A second apply on a patched model raises rather than nesting.
 3. Walk the variant registry and take the first entry whose `detect.matches(flux)` returns True. No match raises `IncompatibleModelError`.
-4. Warn at apply time when it would help to: `TeaCacheNoBenefitWarning` if the matched variant has no built-in default threshold (the distilled Klein variants) and the caller passed no coefficients; `TeaCacheUncalibratedCheckpointWarning` if the model was loaded from a checkpoint the variant's coefficients were not calibrated on. Under `filterwarnings = error` both raise, so parity-lane apply sites wrap them.
-5. Lazily import the winning variant's `integration.py` and call its `apply()`.
+4. Warn at apply time if the matched variant has no built-in default threshold (the distilled Klein variants) and the caller passed no coefficients: the dispatcher raises `TeaCacheNoBenefitWarning`. Under `filterwarnings = error` it raises as an error, so parity-lane apply sites wrap it.
+5. Lazily import the winning variant's `integration.py` and call its `apply()`. A variant can emit its own warning here — `qwen-image` raises `TeaCacheUncalibratedCheckpointWarning` once when the model was loaded from a checkpoint its coefficients were not calibrated on (Qwen-Image-2512 on mflux 0.19).
 6. Attach `variant_id` and a rollback that clears the sentinel, and hand back a `TeaCacheHandle`.
 
 The 4-keyword signature (`rel_l1_thresh`, `coefficients`, `skip_first_n_steps`, `skip_last_n_steps`) is snapshot-tested, so it does not drift between releases.

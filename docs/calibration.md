@@ -34,7 +34,7 @@ monotonic instead of matching upstream's raw polynomial exactly.
 
 Measured at each variant's default threshold on the committed bench recipes
 (M1 Max 32 GB, mflux 0.18.0, three cold reps per condition; the first four on
-2026-08-15, qwen-image on 2026-09-01). Every row but qwen-image renders at
+2026-08-15, qwen-image on 2026-09-06, flux1-krea-dev on 2026-09-05). Every row but qwen-image renders at
 512×512; qwen-image uses its pinned 768×768. The bench reports carry a per-rep
 `skip_patterns` string (`S` = skipped, `C` = computed) and
 `max_consecutive_skips`; the streak below is the maximum across reps, and in
@@ -46,7 +46,7 @@ every case each rep produced the same pattern.
 | `flux2-klein-base-4b` | 0.17 | 9 / 48 | 2 | `_artifacts/v0.10.0_bench_klein_base_4b.json` (50 steps, g=4.0) |
 | `flux2-klein-base-9b` | 0.17 | 13 / 48 | 1 | `_artifacts/v0.10.0_bench_klein_base_9b.json` (50 steps, g=4.0) |
 | `z-image-base` | 0.12 | 15 / 48 | 1 | `_artifacts/v0.10.0_bench_z_image.json` (50 steps, g=4.0, q8) |
-| `qwen-image` | 0.30 | 33 / 48 | 4 | `_artifacts/v0.10.0_bench_qwen_image.json` (50 steps, g=4.0, 768×768) |
+| `qwen-image` | 0.30 | 33 / 48 | 4 | `_artifacts/v0.11.0_bench_qwen_image.json` (50 steps, g=4.0, 768×768) |
 | `flux1-krea-dev` | 0.30 | 10 / 26 | 1 | `_artifacts/v0.11.0_bench_krea_dev.json` (28 steps, g=4.5) |
 
 Four of the five stay at 1 or 2: the gate mostly alternates compute / skip and

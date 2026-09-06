@@ -171,10 +171,11 @@ def test_flux1_dev_bench_artifact_is_meaningful():
 
 
 # --- qwen-image ---------------------------------------------------------------
-# Qwen joined the bench harness in v0.10.0. Its README row carries the largest
+# Qwen joined the bench harness in v0.10.0 and was re-benched in v0.11.0 on the
+# guarded harness with the text encoders freed. Its README row carries the largest
 # speedup in the table, so it gets the same artifact pin as the flux1-dev row.
 
-_QWEN_BENCH = _REPO_ROOT / "_artifacts" / "v0.10.0_bench_qwen_image.json"
+_QWEN_BENCH = _REPO_ROOT / "_artifacts" / "v0.11.0_bench_qwen_image.json"
 
 
 def _load_qwen_bench() -> dict:
@@ -200,8 +201,10 @@ def test_qwen_bench_artifact_is_committed_and_valid():
     """RED if the qwen report is missing or was written with fewer than three
     reps — the headline would then be a single-run number."""
     report = _load_qwen_bench()
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["variant"] == "qwen"
+    assert report["chunk_order"] == "rep-outer"
+    assert report["memory_saver"] is True, "the README's 24.1 GB peak is the MemorySaver figure"
     assert report["num_inference_steps"] == 50
     assert report["height"] == 768 and report["width"] == 768, (
         "qwen benches at its pinned 768x768, not the shared 512x512 recipe"

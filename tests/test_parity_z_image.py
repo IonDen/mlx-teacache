@@ -1,10 +1,11 @@
 """Z-Image base parity tests — paired same-process methodology.
 
 Mirrors test_parity_flux2.py's CFG release-blocker pattern. Z-Image's vanilla
-`_predict` is `mx.compile`-wrapped on M3+ (eager on M1/M2 via
-AppleSiliconUtil.is_m1_or_m2); our TeaCache integration replaces `_predict`
-with an eager-Python wrapper that re-walks ZImageTransformer.__call__ so the
-per-step gate runs every step. We gate threshold=0 parity with cosine
+`_predict` is `mx.compile`-wrapped (mflux 0.18.0 ran it eager on M1/M2 via
+AppleSiliconUtil.is_m1_or_m2; 0.17.5, 0.18.1 and 0.19.x compile it on every
+chip); our TeaCache integration replaces `_predict` with an eager-Python
+wrapper that re-walks ZImageTransformer.__call__ so the per-step gate runs
+every step. We gate threshold=0 parity with cosine
 similarity (not bit-exact): the calibration self-check measured cos >= 0.999
 for the re-walk vs `transformer(...)`, so 0.99 here absorbs prompt-to-prompt
 dispatch noise with margin.
@@ -120,6 +121,19 @@ def zimage_base() -> Any:
 
     flux = ZImage(quantize=8, model_config=ModelConfig.z_image())
     flux.freeze()
+    # mflux builds RopeEmbedder.freqs_cis as lazy arrays it never evaluates. A
+    # compiled vanilla run traces that pending graph into the compiled function;
+    # the first eager pass through the transformer (ours, or any other) then
+    # materialises the tables with the eager kernels, and every later compiled
+    # run captures those values instead. Measured on M1 Max, 2026-09-06, with
+    # MLX 0.32.2 (mflux 0.19.1): a bare mx.eval of the tables with no TeaCache
+    # in the process moves the next compiled vanilla latent by max-abs 6.25e-2
+    # (cosine 0.999977), the exact shift the restore-trace assertions below
+    # saw. With MLX 0.31.2 (mflux 0.18.0 or 0.19.1) the same eval changes
+    # nothing, so it is MLX 0.32's compile that inlines the pending graph.
+    # Evaluating the tables once here keeps vanilla bit-repeatable so those
+    # assertions test restore() and nothing else.
+    mx.eval(*flux.transformer.rope_embedder.freqs_cis)
     return flux
 
 

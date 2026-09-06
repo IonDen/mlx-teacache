@@ -62,7 +62,10 @@ skips at this threshold and recipe, and the gate replayed over the committed
 calibration trace under consecutive-delta anchoring gives 33 skips with a
 streak of 4, which is exactly what the bench then measured. It is the variant
 the anchoring fix moves most, because its accumulator sits nearest the
-threshold.
+threshold. A threshold sweep on 2026-09-06 under the current gate (stock q4,
+same recipe) put the curve on record: 24 / 26 / 30 / 33 skips at 0.15 / 0.20 /
+0.25 / 0.30, SSIM 0.980 / 0.980 / 0.976 / 0.967, longest streaks 2 / 2 / 3 / 4,
+and 0.30 stays the default (see the variant page).
 
 ## Built-in coefficient sources
 

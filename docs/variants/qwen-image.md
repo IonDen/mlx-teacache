@@ -61,7 +61,16 @@ The gate signal (Signal A) is unaffected enough by this that the shipped coeffic
 
 ## Threshold sweep
 
-`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe and records skip count + SSIM vs vanilla per threshold. SSIM degrades **gracefully — no cliff**: 0.9951 at 0.20, 0.9883 at 0.25, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50. Under the 0.9.x gate the default 0.30 took ~50% of the active steps (24 of 48) at SSIM 0.987. That sweep predates the v0.10.0 anchoring change; the same 0.30 now takes 33 of 48 at SSIM 0.967 on the stock-q4 bench recipe, and a re-sweep under the current gate is pending. The sweep's single-rep wall-clock is thermal noise (subprocess-per-threshold, cold each); the headline speedup comes from the multi-rep bench.
+`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe (red-apple prompt, seed 42, guidance 4.0, stock q4) and records skip count, longest skip streak and SSIM against a vanilla reference per threshold, one subprocess per threshold with the text encoders freed once the prompt is encoded. Re-run on 2026-09-06 under the current gate (M1 Max 32 GB, mflux 0.18.0; single-rep timings are thermal noise, the multi-rep bench above is the headline):
+
+| `rel_l1_thresh` | Skipped (of 48 active) | Longest streak | SSIM vs vanilla | Single-rep speedup |
+|---|---|---|---|---|
+| 0.15 | 24 | 2 | 0.980 | 1.71× |
+| 0.20 | 26 | 2 | 0.980 | 1.93× |
+| 0.25 | 30 | 3 | 0.976 | 2.55× |
+| 0.30 | 33 | 4 | 0.967 | 3.01× |
+
+SSIM still degrades gracefully, with no cliff, and every point clears the 0.95 floor the parity gate enforces. 0.30 stays the default: it is the fastest point on the curve that holds visual equivalence, and the 0.9.x quality point (SSIM 0.978 at 24 skips) is one setting away at `rel_l1_thresh=0.20`, which now gives 26 skips at 0.980. The 2026-06 sweep that first set the default ran on the mixed-precision build under the 0.9.x gate (0.9951 at 0.20, 0.9883 at 0.25, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50; 24 of 48 skipped at 0.30) and is superseded by the table above.
 
 ## CFG (guidance > 1.0)
 

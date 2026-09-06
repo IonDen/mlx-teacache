@@ -31,7 +31,7 @@ classifiers = [
 dependencies = ["mlx>=0.31", "numpy"]
 
 [project.optional-dependencies]
-mflux = ["mflux>=0.17.5,<0.19"]
+mflux = ["mflux>=0.17.5,<0.20"]
 
 [project.urls]
 Homepage = "https://github.com/IonDen/mlx-teacache"
@@ -50,7 +50,7 @@ test-core = [
 ]
 test-mflux = [
     { include-group = "test-core" },
-    "mflux>=0.17.5,<0.19",
+    "mflux>=0.17.5,<0.20",
     "mlx-taef>=0.1.1",
     "scikit-image",
 ]

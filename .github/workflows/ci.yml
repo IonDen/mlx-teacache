@@ -108,7 +108,7 @@ jobs:
       - name: Install test-mflux, then upgrade mflux to the newest in-range
         run: |
           uv sync --group test-mflux
-          uv pip install --upgrade "mflux>=0.17.5,<0.19"
+          uv pip install --upgrade "mflux>=0.17.5,<0.20"
       - name: Show resolved mflux and run the fast lane without re-syncing
         run: |
           uv run --no-sync python -c "import importlib.metadata as m; print('mflux', m.version('mflux'))"

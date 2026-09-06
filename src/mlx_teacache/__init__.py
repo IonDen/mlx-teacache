@@ -40,6 +40,7 @@ from mlx_teacache.errors import (
     TeaCacheDisabledWarning,
     TeaCacheError,
     TeaCacheNoBenefitWarning,
+    TeaCacheUncalibratedCheckpointWarning,
     TeaCacheValueError,
     TransformerShapeError,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "TeaCacheValueError",
     "TeaCacheDisabledWarning",
     "TeaCacheNoBenefitWarning",
+    "TeaCacheUncalibratedCheckpointWarning",
     "IncompatibleModelError",
     "AlreadyPatchedError",
     "CalibrationError",

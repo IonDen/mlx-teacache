@@ -128,6 +128,22 @@ class TeaCacheNoBenefitWarning(UserWarning):
     """
 
 
+class TeaCacheUncalibratedCheckpointWarning(UserWarning):
+    """Emitted once at apply time when the model was loaded from a checkpoint
+    other than the one the variant's built-in coefficients were calibrated on,
+    and the caller supplied no coefficients of their own.
+
+    The polynomial gate predicts how much the transformer body changes per
+    step; that prediction was fitted on a specific checkpoint's trajectories.
+    A finetune or a newer release under the same alias can move those
+    dynamics (FLUX.1 Krea [dev] scores R^2 -496 with FLUX.1-dev's tuple), so
+    skip counts and image quality on the other checkpoint are unverified
+    until it is calibrated. Pass `coefficients=` from your own calibration
+    to silence this, or suppress via the standard `warnings` module:
+        warnings.filterwarnings("ignore", category=TeaCacheUncalibratedCheckpointWarning)
+    """
+
+
 class TeaCacheDisabledWarning(UserWarning):
     """Emitted once at apply time when rel_l1_thresh=0.0 — caching is disabled
     (every step computes; no speedup). Higher threshold = MORE skips; 0.0 disables.

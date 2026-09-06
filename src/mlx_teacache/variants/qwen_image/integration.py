@@ -6,6 +6,7 @@ pattern). generate_image calls the transformer TWICE per step (positive then
 negative, external CFG combine), so the forward threads a CfgBranchPairer.
 """
 
+import warnings
 from typing import Any, cast
 
 import mlx.core as mx
@@ -15,11 +16,16 @@ from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
 from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
-from mlx_teacache.errors import InternalStateError, InvalidStepWindowError, TransformerShapeError
+from mlx_teacache.errors import (
+    InternalStateError,
+    InvalidStepWindowError,
+    TeaCacheUncalibratedCheckpointWarning,
+    TransformerShapeError,
+)
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 
-from .config import COEFFICIENTS, DEFAULT_THRESH
+from .config import COEFFICIENTS, DEFAULT_THRESH, META
 from .pairing import CfgBranchPairer
 
 _PROVENANCE = Provenance(
@@ -371,6 +377,21 @@ def apply(
     else:
         resolved_coeffs = COEFFICIENTS
         resolved_provenance = _PROVENANCE
+        # The built-in polynomial was fitted on META["hf_model_id"]. mflux 0.19
+        # resolves the `qwen-image` alias to Qwen/Qwen-Image-2512, a newer
+        # checkpoint with the same aliases, so the detector still matches and
+        # the user would otherwise get an unverified operating point silently.
+        loaded = getattr(getattr(flux, "model_config", None), "model_name", None)
+        if isinstance(loaded, str) and loaded != META["hf_model_id"]:
+            warnings.warn(
+                TeaCacheUncalibratedCheckpointWarning(
+                    f"variant 'qwen-image' loaded {loaded!r}, but its coefficients were "
+                    f"calibrated on {META['hf_model_id']!r}; skip counts and image quality on "
+                    "this checkpoint are not verified. Pass coefficients= from your own "
+                    "calibration (scripts/calibrate_qwen.py) to silence this."
+                ),
+                stacklevel=3,
+            )
 
     import contextlib
 

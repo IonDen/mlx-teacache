@@ -11,7 +11,7 @@ from mflux.models.common.config.model_config import ModelConfig
 flux = QwenImage(quantize=4, model_config=ModelConfig.qwen_image())
 ```
 
-The detector matches `model_config.aliases` containing `"qwen-image"` or `"qwen"`. Qwen-Image-Edit (aliases `"qwen-image-edit"` / `"qwen-edit"` / `"qwen-edit-plus"` / `"qwen-edit-2509"`) is a separate pipeline, not a registered variant; it falls through to `IncompatibleModelError`.
+The detector matches `model_config.aliases` containing `"qwen-image"` or `"qwen"`. On mflux 0.18 that alias is `Qwen/Qwen-Image`, the checkpoint every number on this page was measured on. On mflux 0.19 the same alias resolves to `Qwen/Qwen-Image-2512` (aliases `qwen-image`, `qwen`, `qwen-image-2512`, `qwen-2512`), a newer checkpoint; the variant still matches and applies, but its coefficients were fitted on the original, so `apply_teacache` raises `TeaCacheUncalibratedCheckpointWarning` once. Skip counts and image quality on 2512 are unverified: calibrate it with `scripts/calibrate_qwen.py` and pass `coefficients=` (which also silences the warning), or filter the category if you accept the unmeasured operating point. Qwen-Image-Edit (aliases `"qwen-image-edit"` / `"qwen-edit"` / `"qwen-edit-plus"` / `"qwen-edit-2509"`) is a separate pipeline, not a registered variant; it falls through to `IncompatibleModelError`.
 
 ## Recipe + defaults
 

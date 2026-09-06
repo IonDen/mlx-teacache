@@ -1,6 +1,6 @@
 # mlx-teacache Roadmap
 
-A non-binding sketch of where the library is headed beyond the shipped v0.1.x line. Each item lists effort, value, and key risks so we can re-rank when priorities change.
+A non-binding sketch of where the library is headed beyond the current release. Each item lists effort, value, and key risks so we can re-rank when priorities change.
 
 ## Released
 

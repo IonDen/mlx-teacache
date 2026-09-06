@@ -52,15 +52,16 @@ If a future release recalibrates 9B-specific coefficients, that test will need t
 
 ## Quirks
 
-- **Memory cap hint = 24 GB.** The bench harness reads `META["memory_cap_hint_gb"]` and sets `mx.set_wired_limit((cap - 2) * 1024**3) = 22 GB` plus `mx.set_memory_limit(cap * 1024**3) = 24 GB` in each worker before model load. Lower these if you have less than 32 GB or are competing with other memory-heavy processes; see [Memory guardrails](#memory-guardrails) below.
+- **Memory cap hint = 24 GB.** `META["memory_cap_hint_gb"]` is the advisory soft cap the heavy workers pass to `scripts/_mlx_caps.py::install_caps` before model load. `install_caps` sets three limits: a device-clamped wired cap (the request, capped at 0.85× the machine's recommended working set, so it can never exceed the system wired limit and still works on a 16/24 GB Mac), the 24 GB advisory soft limit, and a bounded MLX cache pool. On a 32 GB M1 Max the clamp puts the wired cap near 21 GB regardless of the request. Lower the hint if you have less than 32 GB or are competing with other memory-heavy processes; see [Memory guardrails](#memory-guardrails) below.
 - Default threshold 0.17 (cross-imported from base-4b), not the package fallback 0.20.
 - The 1.37× headline number is reproducible via `scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3`.
 
 ## Memory guardrails
 
-On 32 GB Apple Silicon machines running the canonical 50-step + g=4.0 recipe, peak wired memory has crossed the system limit twice (2026-05-17 jetsam, 2026-05-19 kernel watchdog panic). The mitigations now in place:
+On 32 GB Apple Silicon running the canonical 50-step + g=4.0 recipe, peak memory has crossed the system limit twice (2026-05-17 jetsam, 2026-05-19 kernel watchdog panic). The current mitigations:
 
-1. `tests/conftest.py` installs a session-level `mx.set_wired_limit(20 GB)` + `mx.set_memory_limit(22 GB)` for the test suite.
-2. `scripts/bench_speedup.py` workers apply the same caps before model load, derived from this variant's `memory_cap_hint_gb`.
+1. Every heavy worker calls `scripts/_mlx_caps.py::install_caps` before model load — a device-clamped wired cap, an advisory soft cap (this variant's `memory_cap_hint_gb`, 24 GB), and a bounded MLX cache pool (dropped buffers pool there instead of returning to the OS, and MLX's default pool sits near physical RAM).
+2. The same worker arms `scripts/_mlx_watchdog.py::arm_mlx_watchdog`, a daemon thread that aborts the run — writing an artifact that says why — the moment `active + cache` memory exceeds physical memory minus a headroom (4 GiB by default).
+3. `tests/conftest.py` installs the same device-derived caps and bounds the cache pool for the test session.
 
-If you allocate over the wired cap, MLX raises an exception rather than the kernel panicking. See [ml-explore/mlx-lm#883](https://github.com/ml-explore/mlx-lm/issues/883) for upstream context on why the wired limit (not the soft memory limit) is what prevents the panic.
+The wired cap is the only hard ceiling, but it bounds only non-pageable (wired) allocations — it does not stop a run from over-allocating pageable memory, which pages instead of failing, and a sustained paging storm is what panicked the machine in 2026-05. So the watchdog, not the wired cap, is what makes a heavy run on this recipe safe. See [ml-explore/mlx-lm#883](https://github.com/ml-explore/mlx-lm/issues/883) for upstream context on the wired-limit mechanism.

@@ -395,10 +395,15 @@ def test_threshold_zero_with_negative_coefficients_no_skip(flux2_klein: tuple[An
     kw = _gen_kwargs_klein(PR_TIME_PROMPT, variant_id=variant_id)
     pathological = (0.0, 0.0, 0.0, -1000.0, 0.0)
     vanilla = _capture(flux, **kw)
+    # Explicit coefficients suppress the at-apply distilled warning (api.py
+    # warns only when the caller passed none), so no expect_distilled_warning
+    # here: under filterwarnings=error it fails loudly if the warning ever
+    # fires. Wrapping this call in the helper made pytest.warns raise after the
+    # patch was installed, leaking it into the next two tests as
+    # AlreadyPatchedError (seen on the 2026-09-06 lane).
     with _w.catch_warnings():
         _w.simplefilter("ignore", TeaCacheDisabledWarning)
-        with expect_distilled_warning(variant_id):
-            ctx = apply_teacache(flux, rel_l1_thresh=0.0, coefficients=pathological)
+        ctx = apply_teacache(flux, rel_l1_thresh=0.0, coefficients=pathological)
     with ctx as h:
         wrapper = _capture(flux, **kw)
         skipped = h.stats.skipped_count

@@ -131,10 +131,10 @@ chip, OS, and package versions alongside the per-condition median. Use it, or
 match its methodology, when submitting a number for a variant already in this
 repo.
 
-## v0.2+ plans
+## Future: compile-friendly gating
 
 Investigate splitting `_predict` so the body-only computation can stay compiled
-while gating runs in eager Python. Adds complexity; deferred until v0.1 is in
-users' hands. On M5 specifically this is the only realistic path to keep the
+while gating runs in eager Python. It adds complexity and is not yet
+implemented. On M5 specifically this is the only realistic path to keep the
 Neural Accelerator fast path engaged — see ROADMAP.md "Compile-friendly gating"
 for the design sketch.

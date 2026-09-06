@@ -1,0 +1,173 @@
+{
+  "schema_version": 3,
+  "isolation": "subprocess-per-rep",
+  "chunk_order": "rep-outer",
+  "memory_saver": true,
+  "variant": "qwen",
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 768,
+  "width": 768,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.6.0",
+    "mlx_teacache_version": "0.10.1.dev13+g05c05a1d9.d20260905",
+    "git_commit": "1536f28eadad942f50273cb610825b3269598e84",
+    "git_dirty": true,
+    "mflux_version": "0.18.0",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "vanilla_seconds": [
+    610.8698686670105,
+    642.5592605410202,
+    715.8762952919933
+  ],
+  "wrapper_seconds": [
+    229.27053212499595,
+    240.67602629199973,
+    239.44358879199717
+  ],
+  "vanilla_median": 642.5592605410202,
+  "wrapper_median": 239.44358879199717,
+  "speedup_median": 2.6835517450383963,
+  "skipped_counts": [
+    33,
+    33,
+    33
+  ],
+  "computed_counts": [
+    15,
+    15,
+    15
+  ],
+  "skip_patterns": [
+    "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC",
+    "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC",
+    "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC"
+  ],
+  "max_consecutive_skips": [
+    4,
+    4,
+    4
+  ],
+  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/qwen",
+  "vanilla_peak_memory_gb": [
+    24.0772902071476,
+    24.077315002679825,
+    24.077306419610977
+  ],
+  "wrapper_peak_memory_gb": [
+    24.130485147237778,
+    24.130095094442368,
+    24.130496591329575
+  ],
+  "vanilla_load_peak_memory_gb": [
+    3.2451003789901733e-05,
+    3.2451003789901733e-05,
+    3.2451003789901733e-05
+  ],
+  "vanilla_loop_peak_memory_gb": [
+    24.0772902071476,
+    24.077315002679825,
+    24.077306419610977
+  ],
+  "wrapper_load_peak_memory_gb": [
+    3.2451003789901733e-05,
+    3.2451003789901733e-05,
+    3.2451003789901733e-05
+  ],
+  "wrapper_loop_peak_memory_gb": [
+    24.130485147237778,
+    24.130095094442368,
+    24.130496591329575
+  ],
+  "vanilla_cache_memory_gb": [
+    1.058930166065693,
+    1.058930166065693,
+    1.058930166065693
+  ],
+  "wrapper_cache_memory_gb": [
+    1.058930166065693,
+    1.058930166065693,
+    1.058930166065693
+  ],
+  "chunk_timestamps": {
+    "vanilla": [
+      [
+        "2026-09-06T08:50:31.350732+00:00",
+        "2026-09-06T09:00:44.619377+00:00"
+      ],
+      [
+        "2026-09-06T09:15:00.210589+00:00",
+        "2026-09-06T09:25:44.796251+00:00"
+      ],
+      [
+        "2026-09-06T09:50:08.637798+00:00",
+        "2026-09-06T10:02:06.623397+00:00"
+      ]
+    ],
+    "wrapper_nogate": [
+      [
+        "2026-09-06T09:00:46.698544+00:00",
+        "2026-09-06T09:11:04.082972+00:00"
+      ],
+      [
+        "2026-09-06T09:30:47.081441+00:00",
+        "2026-09-06T09:41:00.745388+00:00"
+      ],
+      [
+        "2026-09-06T10:12:09.365276+00:00",
+        "2026-09-06T10:23:44.316703+00:00"
+      ]
+    ],
+    "wrapper": [
+      [
+        "2026-09-06T09:11:06.227566+00:00",
+        "2026-09-06T09:14:57.849339+00:00"
+      ],
+      [
+        "2026-09-06T09:46:03.219822+00:00",
+        "2026-09-06T09:50:06.231361+00:00"
+      ],
+      [
+        "2026-09-06T10:33:46.995729+00:00",
+        "2026-09-06T10:37:48.654647+00:00"
+      ]
+    ]
+  },
+  "nogate_seconds": [
+    615.5920869170222,
+    611.501288792002,
+    692.4773958750011
+  ],
+  "nogate_median": 615.5920869170222,
+  "compile_avoidance_ratio": 1.0438068880304385,
+  "gating_ratio": 2.5709274156084523,
+  "combined_ratio": 2.6835517450383963,
+  "nogate_peak_memory_gb": [
+    24.07769551873207,
+    24.07766881585121,
+    24.07733502984047
+  ],
+  "nogate_load_peak_memory_gb": [
+    3.2451003789901733e-05,
+    3.2451003789901733e-05,
+    3.2451003789901733e-05
+  ],
+  "nogate_loop_peak_memory_gb": [
+    24.07769551873207,
+    24.07766881585121,
+    24.07733502984047
+  ],
+  "nogate_cache_memory_gb": [
+    1.058930166065693,
+    1.058930166065693,
+    1.0589301623404026
+  ]
+}

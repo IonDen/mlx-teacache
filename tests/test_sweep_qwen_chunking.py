@@ -105,3 +105,24 @@ def test_units_honour_an_explicit_threshold_list() -> None:
 
 def test_build_summary_records_the_build() -> None:
     assert sw._build_summary([], vanilla_seconds=1.0, build="plain-q4")["build"] == "plain-q4"
+
+
+def test_build_summary_records_whether_the_text_encoders_were_freed() -> None:
+    # bug caught: a re-measure under MemorySaver silently compared against a run without it
+    assert sw._build_summary([], vanilla_seconds=1.0, memory_saver=True)["memory_saver"] is True
+    assert sw._build_summary([], vanilla_seconds=1.0)["memory_saver"] is False
+
+
+def test_memory_saver_is_built_with_the_load_bearing_kwargs() -> None:
+    """bug caught: dropping cache_limit_bytes=None (MemorySaver's default 1 GB branch
+    overrides our cache cap, resets the peak counter and switches the VAE to tiled
+    decode, changing the SSIM reference pixels) or keep_transformer=True."""
+    seen: dict = dict()
+
+    class _FakeSaver:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+    flux = object()
+    sw._make_memory_saver(flux, _FakeSaver)
+    assert seen == dict(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)

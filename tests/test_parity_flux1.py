@@ -130,7 +130,11 @@ def _gen_kwargs_schnell(prompt: str) -> dict[str, Any]:
 
 
 def _cosine(a: mx.array, b: mx.array) -> float:
-    return float(mx.sum(a * b) / (mx.linalg.norm(a) * mx.linalg.norm(b)))
+    # bf16 reductions round their result to bf16 (~0.8 % on a self-cosine), so
+    # cast first, as the FLUX.2 / Z-Image / Qwen parity files do.
+    af = a.astype(mx.float32)
+    bf = b.astype(mx.float32)
+    return float(mx.sum(af * bf) / (mx.linalg.norm(af) * mx.linalg.norm(bf)))
 
 
 def _paired_parity(

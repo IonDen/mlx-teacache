@@ -105,10 +105,14 @@ jobs:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
+      # This job is the upstream alarm: tests/test_mflux_forward_drift.py goes red on an
+      # mflux version whose forwards have not been verified against the copies, so a new
+      # in-range upstream release turns it red until the drift table is re-recorded
+      # after a real-weights parity run. That is the intended trade-off.
       - name: Install test-mflux, then upgrade mflux to the newest in-range
         run: |
           uv sync --group test-mflux
-          uv pip install --upgrade "mflux>=0.17.5,<0.19"
+          uv pip install --upgrade "mflux>=0.17.5,<0.20"
       - name: Show resolved mflux and run the fast lane without re-syncing
         run: |
           uv run --no-sync python -c "import importlib.metadata as m; print('mflux', m.version('mflux'))"

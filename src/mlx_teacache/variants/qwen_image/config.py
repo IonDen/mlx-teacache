@@ -15,14 +15,16 @@ R^2 is lower than the prior 512x512/20-step fit (0.9464) because the heavier
 768x768/50-step recipe samples a finer, noisier per-step rel-L1 distribution.
 
 DEFAULT_THRESH = 0.30 is set from scripts/sweep_threshold_qwen.py at the
-768x768/50-step recipe (red-apple, seed 42, Signal A), run on the recommended
-mixed-precision build (q8 edge blocks + bf16 embeddings — see docs/variants;
-mlx-teacache itself stays quant-agnostic). The stock-q4 coefficients transfer
-cleanly to it (a sensible 0->29 skip ramp at high SSIM). SSIM degrades gracefully
-with NO cliff: 0.9951 at 0.20, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50. At
-0.30 the gate skips 24 of 48 active steps (~50%) at SSIM 0.987 — visually identical
-to vanilla. The sweep's single-rep wall-clock is thermal noise; the headline speedup
-comes from the multi-rep bench.
+768x768/50-step recipe (red-apple, seed 42, Signal A). Re-swept 2026-09-06 on
+stock q4 under the v0.10.0 consecutive-delta gate: 0.15 -> 24 of 48 active steps
+skipped, SSIM 0.980, longest streak 2; 0.20 -> 26 / 0.980 / 2; 0.25 -> 30 / 0.976 / 3;
+0.30 -> 33 / 0.967 / 4. SSIM degrades gracefully with NO cliff and every point
+clears the 0.95 parity floor, so 0.30 stays: the fastest point that still holds
+visual equivalence (the 0.9.x quality point is back at 0.20). The first sweep
+(2026-06, mixed-precision build, 0.9.x gate: 0.9951 at 0.20, 0.9873 at 0.30,
+0.9809 at 0.40, 0.9783 at 0.50; 24 of 48 skipped at 0.30) is superseded. The
+sweep's single-rep wall-clock is thermal noise; the headline speedup comes from
+the multi-rep bench.
 """
 
 from typing import Any
@@ -38,9 +40,9 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
-# From scripts/sweep_threshold_qwen.py (768x768/50, Signal A, mixed-precision build):
-# SSIM degrades gracefully with no cliff (0.987 at 0.30); 24/48 active steps skipped
-# (~50%) at 0.30, visually identical to vanilla. Quality-first default.
+# From scripts/sweep_threshold_qwen.py (768x768/50, Signal A, stock q4, v0.10.0 gate,
+# 2026-09-06): SSIM degrades gracefully with no cliff (0.980 at 0.20, 0.976 at 0.25,
+# 0.967 at 0.30); 33/48 active steps skipped at 0.30, longest streak 4. Reaffirmed.
 DEFAULT_THRESH: float = 0.30
 
 RECIPES: dict[str, dict[str, Any]] = {

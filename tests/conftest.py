@@ -51,10 +51,12 @@ _MFLUX_FILES = {
     "test_parity_flux2.py",
     "test_parity_z_image.py",
     "test_parity_qwen.py",
+    "test_parity_krea.py",
     "test_image_quality_flux1.py",
     "test_image_quality_flux2.py",
     "test_detect.py",  # imports mflux types for variant detection
     "test_mflux_contract_smoke.py",
+    "test_mflux_forward_drift.py",  # fingerprints the real mflux forwards
 }
 
 
@@ -86,4 +88,21 @@ def expect_distilled_warning(variant_id: str) -> Iterator[None]:
         with pytest.warns(TeaCacheNoBenefitWarning, match="distilled"):
             yield
     else:
+        yield
+
+
+@contextlib.contextmanager
+def allow_uncalibrated_checkpoint() -> Iterator[None]:
+    """Wrap an `apply_teacache(...)` call site on a real-weights lane that may
+    load a checkpoint the variant's coefficients were not calibrated on (today:
+    Qwen-Image on mflux 0.19, whose `qwen-image` alias is Qwen/Qwen-Image-2512).
+    Under `filterwarnings = error` the apply-time
+    `TeaCacheUncalibratedCheckpointWarning` would otherwise raise before the
+    test measures anything; the lane exists to measure exactly that checkpoint."""
+    import warnings
+
+    from mlx_teacache import TeaCacheUncalibratedCheckpointWarning
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", TeaCacheUncalibratedCheckpointWarning)
         yield

@@ -171,10 +171,11 @@ def test_flux1_dev_bench_artifact_is_meaningful():
 
 
 # --- qwen-image ---------------------------------------------------------------
-# Qwen joined the bench harness in v0.10.0. Its README row carries the largest
+# Qwen joined the bench harness in v0.10.0 and was re-benched in v0.11.0 on the
+# guarded harness with the text encoders freed. Its README row carries the largest
 # speedup in the table, so it gets the same artifact pin as the flux1-dev row.
 
-_QWEN_BENCH = _REPO_ROOT / "_artifacts" / "v0.10.0_bench_qwen_image.json"
+_QWEN_BENCH = _REPO_ROOT / "_artifacts" / "v0.11.0_bench_qwen_image.json"
 
 
 def _load_qwen_bench() -> dict:
@@ -200,8 +201,10 @@ def test_qwen_bench_artifact_is_committed_and_valid():
     """RED if the qwen report is missing or was written with fewer than three
     reps — the headline would then be a single-run number."""
     report = _load_qwen_bench()
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["variant"] == "qwen"
+    assert report["chunk_order"] == "rep-outer"
+    assert report["memory_saver"] is True, "the README's 24.1 GB peak is the MemorySaver figure"
     assert report["num_inference_steps"] == 50
     assert report["height"] == 768 and report["width"] == 768, (
         "qwen benches at its pinned 768x768, not the shared 512x512 recipe"
@@ -251,3 +254,65 @@ def test_qwen_bench_artifact_is_meaningful():
     assert 0 < med < steps, f"median skips {med} must be strictly inside (0, {steps})"
     for s_, c_ in zip(skipped, computed, strict=True):
         assert s_ + c_ <= steps, f"skipped {s_} + computed {c_} exceeds {steps} steps"
+
+
+# ---------------------------------------------------------------------------
+# flux1-krea-dev — v0.11.0 three-way bench (schema 3: load/loop/cache peaks, rep-outer order)
+# ---------------------------------------------------------------------------
+
+_KREA_BENCH = _REPO_ROOT / "_artifacts" / "v0.11.0_bench_krea_dev.json"
+
+
+def _load_krea_bench() -> dict:
+    return json.loads(_KREA_BENCH.read_text())
+
+
+def _krea_benchmark_row() -> list[str]:
+    """Cells of the README Benchmarks-table row for ``flux1-krea-dev`` (7 columns,
+    numeric Steps cell; the Supported-models row shares the leading cell)."""
+    for line in _README.read_text().splitlines():
+        s = line.strip()
+        if s.startswith("| `flux1-krea-dev`"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) >= 7 and cells[1].isdigit():
+                return cells
+    raise AssertionError("No `flux1-krea-dev` row found in the README Benchmarks table")
+
+
+def test_krea_bench_artifact_is_committed_and_valid():
+    report = _load_krea_bench()
+    assert report["schema_version"] == 3
+    assert report["variant"] == "krea-dev"
+    assert report["num_inference_steps"] == 28 and report["guidance"] == 4.5
+    assert report["chunk_order"] == "rep-outer"
+    reps = report["reps"]
+    assert reps >= 3
+    assert (
+        len(report["vanilla_seconds"])
+        == len(report["wrapper_seconds"])
+        == len(report["nogate_seconds"])
+        == reps
+    )
+    assert len(report["wrapper_loop_peak_memory_gb"]) == reps
+
+
+def test_readme_krea_row_matches_committed_artifact():
+    h = bench_headline(_load_krea_bench())
+    cells = _krea_benchmark_row()
+    assert int(cells[1]) == h["steps"]
+    assert cells[2].endswith("s") and cells[2][:-1] == f"{h['vanilla_s']:.1f}"
+    assert cells[3].endswith("s") and cells[3][:-1] == f"{h['wrapper_s']:.1f}"
+    assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
+    assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"
+
+
+def test_krea_bench_artifact_is_meaningful():
+    """Real speedup, cache engaged, every rep skips the same count with no streak
+    above 1 (the sweep knee's operating point), and the no-gate condition skips nothing."""
+    report = _load_krea_bench()
+    assert report["speedup_median"] > 1.0
+    assert report["skipped_counts"] == [10, 10, 10]
+    assert max(report["max_consecutive_skips"]) == 1
+    assert report["gating_ratio"] > report["compile_avoidance_ratio"], (
+        "the win must come from gating on FLUX.1"
+    )

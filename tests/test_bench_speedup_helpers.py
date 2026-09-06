@@ -342,3 +342,33 @@ def test_parse_worker_line_prefers_an_abort_payload_over_an_earlier_result() -> 
     ok = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'elapsed_s': 1.0})}"
     ab = f"{bs.WORKER_RESULT_SENTINEL}{json.dumps({'aborted': 'active-memory watchdog'})}"
     assert bs._parse_worker_line(f"{ok}\n{ab}\n") == {"aborted": "active-memory watchdog"}
+
+
+def test_krea_dev_slug_maps_to_the_variant_and_its_model_card_recipe() -> None:
+    # bug caught: benching krea at flux1-dev's 25 / 3.5 instead of its own 28 / 4.5
+    assert bs._VARIANT_SLUG_TO_ID["krea-dev"] == "flux1-krea-dev"
+    assert bs._VARIANT_RECIPE["krea-dev"] == {"num_inference_steps": 28, "guidance": 4.5}
+    assert bs._VARIANT_QUANTIZE["krea-dev"] == 4
+
+
+def test_memory_saver_is_enabled_only_for_the_variant_that_needs_it() -> None:
+    # bug caught: freeing text encoders on every variant (changes nothing for FLUX.1-sized runs
+    # but makes their reports incomparable with the committed ones)
+    assert bs._memory_saver_for("qwen") is True
+    assert bs._memory_saver_for("flux1-dev") is False
+    assert bs._memory_saver_for("krea-dev") is False
+
+
+def test_memory_saver_is_built_with_the_load_bearing_kwargs() -> None:
+    """bug caught: dropping cache_limit_bytes=None (MemorySaver's default 1 GB branch
+    overrides our cache cap, resets the peak counter before the load peak is read and
+    switches the VAE to tiled decode, changing output pixels) or keep_transformer=True."""
+    seen: dict = dict()
+
+    class _FakeSaver:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+    flux = object()
+    bs._make_memory_saver(flux, _FakeSaver)
+    assert seen == dict(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)

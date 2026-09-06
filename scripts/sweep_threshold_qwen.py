@@ -97,7 +97,11 @@ def _pending_units(chunk_dir: Path, units: list[str]) -> list[str]:
 
 
 def _build_summary(
-    threshold_chunks: list[dict[str, Any]], vanilla_seconds: float, *, build: str = "mixed-precision"
+    threshold_chunks: list[dict[str, Any]],
+    vanilla_seconds: float,
+    *,
+    build: str = "mixed-precision",
+    memory_saver: bool = False,
 ) -> dict[str, Any]:
     """Assemble results_qwen.json from the per-threshold chunks + the vanilla
     timing. Speedup is derived here from a single vanilla_seconds source. Pure.
@@ -122,6 +126,7 @@ def _build_summary(
         "variant": "qwen-image",
         "signal": "A",
         "build": build,
+        "memory_saver": memory_saver,
         "num_inference_steps": STEPS,
         "guidance": GUIDANCE,
         "quantize": QUANTIZE,
@@ -141,6 +146,15 @@ def _build_summary(
 # ---------------------------------------------------------------------------
 # Generation (imperative shell).
 # ---------------------------------------------------------------------------
+
+
+def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
+    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned:
+    keep_transformer=True frees only the text encoders; cache_limit_bytes=None
+    keeps MemorySaver away from mx.set_cache_limit, mx.reset_peak_memory and the
+    tiled-VAE switch its default branch performs (tiling changes output pixels).
+    It also runs gc.collect and mx.clear_cache after every loop, uniformly."""
+    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
 
 
 def _gen(flux: Any, *, save_path: Path) -> float:
@@ -230,10 +244,22 @@ def _run_worker(
     print(f"[worker {unit}] loading qwen-image ({build}) ...", flush=True)
     flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
     flux.freeze()
+    # mflux's MemorySaver frees the Qwen2.5-VL text encoder (several GB at q4) once the
+    # prompt is encoded, before the denoising loop. Without it this recipe sits within
+    # a few GB of physical memory on a 32 GB Mac and the host falls into compressed-
+    # memory thrash (a step went from ~20 s to ~230 s on 2026-09-06). cache_limit_bytes
+    # is None so it changes nothing else: our caps stay in charge and VAE decode stays untiled.
+    from mflux.callbacks.instances.memory_saver import MemorySaver
+
+    flux.callbacks.register(_make_memory_saver(flux, MemorySaver))
 
     if unit == "vanilla":
         van_t = _gen(flux, save_path=img_dir / "vanilla.png")
-        out.write_text(json.dumps({"unit": "vanilla", "vanilla_seconds": van_t, "build": build}, indent=2))
+        out.write_text(
+            json.dumps(
+                {"unit": "vanilla", "vanilla_seconds": van_t, "build": build, "memory_saver": True}, indent=2
+            )
+        )
         print(
             f"[worker vanilla] {van_t:.1f}s (peak {mx.get_peak_memory() / 1024**3:.2f} GB) -> {out}",
             flush=True,
@@ -253,6 +279,7 @@ def _run_worker(
         "unit": unit,
         "threshold": t,
         "build": build,
+        "memory_saver": True,
         "wrapper_seconds": wrap_t,
         "skipped": skipped,
         "computed": computed,
@@ -327,7 +354,8 @@ def _run_orchestrator(
         json.loads((chunk_dir / _chunk_filename(_threshold_name(t))).read_text()) for t in sweep
     ]
     build = "plain-q4" if plain_q4 else "mixed-precision"
-    summary = _build_summary(threshold_chunks, vanilla_seconds, build=build)
+    memory_saver = any(bool(c.get("memory_saver")) for c in threshold_chunks)
+    summary = _build_summary(threshold_chunks, vanilla_seconds, build=build, memory_saver=memory_saver)
     # Real default-chunk-dir run -> the canonical results file for that build; a
     # dry-run or custom chunk dir writes beside its chunks so a smoke never touches
     # the real artifact.

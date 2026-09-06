@@ -115,6 +115,7 @@ _VARIANT_SLUG_TO_ID: dict[str, str] = {
     "klein-base-9b": "flux2-klein-base-9b",
     "flux1-dev": "flux1-dev",
     "flux1-schnell": "flux1-schnell",
+    "krea-dev": "flux1-krea-dev",
     "z-image": "z-image-base",
     "qwen": "qwen-image",
 }
@@ -127,6 +128,7 @@ _VARIANT_RECIPE: dict[str, dict[str, Any]] = {
     "klein-base-9b": {"num_inference_steps": 50, "guidance": 4.0},
     "flux1-dev": {"num_inference_steps": 25, "guidance": 3.5},
     "flux1-schnell": {"num_inference_steps": 4, "guidance": 1.0},
+    "krea-dev": {"num_inference_steps": 28, "guidance": 4.5},
     "z-image": {"num_inference_steps": 50, "guidance": 4.0},
     "qwen": {"num_inference_steps": 50, "guidance": 4.0},
 }
@@ -140,6 +142,7 @@ _VARIANT_QUANTIZE: dict[str, int] = {
     "klein-base-9b": 4,
     "flux1-dev": 4,
     "flux1-schnell": 4,
+    "krea-dev": 4,
     "z-image": 8,
     "qwen": 4,
 }
@@ -171,6 +174,30 @@ _DEFAULT_CAP_GB = 22
 _VARIANT_CACHE_GB: dict[str, float] = {"qwen": 1.0}
 _DEFAULT_CACHE_GB = 2.0
 
+# mflux's MemorySaver frees the text encoders once the prompt is encoded. Only qwen
+# needs it: its Qwen2.5-VL encoder is several GB at q4 and the 768x768 recipe otherwise
+# sits within a few GB of physical memory on a 32 GB Mac, where the host falls into
+# compressed-memory thrash (a step went from ~20 s to ~230 s on 2026-09-06). Applied to
+# every condition of the run alike; the report records it.
+_VARIANT_MEMORY_SAVER: dict[str, bool] = {"qwen": True}
+
+
+def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
+    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned.
+
+    keep_transformer=True frees only the text encoders. cache_limit_bytes=None
+    matters: MemorySaver's default (1 GB) branch calls mx.set_cache_limit,
+    overriding install_caps, calls mx.reset_peak_memory before the load peak is
+    read, and switches the VAE to tiled decode, which changes output pixels and
+    would make the SSIM numbers and committed images incomparable. MemorySaver
+    also runs gc.collect and mx.clear_cache after every loop; that applies to
+    every condition alike, so the ratios stand."""
+    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+
+
+def _memory_saver_for(variant: str) -> bool:
+    return _VARIANT_MEMORY_SAVER.get(variant, False)
+
 
 # ---------------------------------------------------------------------------
 # WORKER side — runs in a subprocess for one (variant, condition, rep).
@@ -195,6 +222,11 @@ def _load_flux(variant: str) -> Any:
 
         name = "dev" if variant == "flux1-dev" else "schnell"
         flux = Flux1.from_name(name, quantize=4)
+    elif variant == "krea-dev":
+        from mflux.models.common.config.model_config import ModelConfig
+        from mflux.models.flux.variants.txt2img.flux import Flux1
+
+        flux = Flux1(quantize=4, model_config=ModelConfig.krea_dev())
     elif variant == "z-image":
         from mflux.models.common.config.model_config import ModelConfig
         from mflux.models.z_image.variants.z_image import ZImage
@@ -289,6 +321,10 @@ def _worker_main(args: argparse.Namespace) -> None:
     save_path: Path | None = Path(args.save_to) if args.save_to else None
 
     flux = _load_flux(variant)
+    if _memory_saver_for(variant):
+        from mflux.callbacks.instances.memory_saver import MemorySaver
+
+        flux.callbacks.register(_make_memory_saver(flux, MemorySaver))
     load_peak = int(mx.get_peak_memory())
     mx.reset_peak_memory()
 
@@ -363,6 +399,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         "num_inference_steps": num_inference_steps,
         "guidance": guidance,
         "elapsed_s": elapsed,
+        "memory_saver": _memory_saver_for(variant),
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         **_memory_fields(
@@ -891,6 +928,7 @@ def main() -> None:
             "schema_version": 3,
             "isolation": "subprocess-per-rep",
             "chunk_order": "rep-outer",
+            "memory_saver": _memory_saver_for(variant),
             "variant": variant,
             "num_inference_steps": num_inference_steps,
             "guidance": guidance,

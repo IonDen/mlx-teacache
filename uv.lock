@@ -1565,7 +1565,7 @@ wheels = [
 
 [[package]]
 name = "mlx-taef"
-version = "0.7.1"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1576,9 +1576,9 @@ dependencies = [
     { name = "safetensors" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/f0/7f7d423328a34352383431d993d88af1f90a5f7e501d07b68f3ecb11a67e/mlx_taef-0.7.1.tar.gz", hash = "sha256:07f2905bfd57f5da1d61c60d502fae639c2b5a671cbba67fb80c7d35881d7d9b", size = 1098973, upload-time = "2026-07-25T07:31:11.068Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/e1/8e46976beec2d5474caacaaacef0770a73651364680fa5738a582769cf90/mlx_taef-0.8.1.tar.gz", hash = "sha256:2c23edb8a95ef97b16fd18feba0355a284c97a10bfdd716476f871f22c038c4f", size = 1105486, upload-time = "2026-09-05T18:59:47.23Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/62/7dce1f6ed444b5bf3c32fb2b62112cedaa04cef06ba67596cbf10b848f02/mlx_taef-0.7.1-py3-none-any.whl", hash = "sha256:85245f26504139875836d01155072ab4fe6e5feab7c55687908e81d69c77199a", size = 45010, upload-time = "2026-07-25T07:31:09.794Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/86/de32d103da11fa450d82e1ebadfd35f2e52a34a7c436d547b7f35b57b1bf/mlx_taef-0.8.1-py3-none-any.whl", hash = "sha256:d4035dee13bb64cf11294768cdb1cc57215808d8d32e1a791347ecbc8a89db94", size = 48438, upload-time = "2026-09-05T18:59:45.937Z" },
 ]
 
 [[package]]
@@ -1622,7 +1622,7 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17.5,<0.19" },
+    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17.5,<0.20" },
     { name = "mlx", specifier = ">=0.31" },
     { name = "numpy" },
 ]
@@ -1638,7 +1638,7 @@ test-core = [
 ]
 test-mflux = [
     { name = "hypothesis", specifier = ">=6" },
-    { name = "mflux", specifier = ">=0.17.5,<0.19" },
+    { name = "mflux", specifier = ">=0.17.5,<0.20" },
     { name = "mlx-taef", specifier = ">=0.1.1" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov" },

@@ -381,14 +381,22 @@ def apply(
         # resolves the `qwen-image` alias to Qwen/Qwen-Image-2512, a newer
         # checkpoint with the same aliases, so the detector still matches and
         # the user would otherwise get an unverified operating point silently.
-        loaded = getattr(getattr(flux, "model_config", None), "model_name", None)
-        if isinstance(loaded, str) and loaded != META["hf_model_id"]:
+        # mflux resolves a local path or a pre-quantized mirror by copying the base
+        # config and recording the base's model_name in base_model, so a mirror
+        # declared through --base-model counts as the calibrated checkpoint.
+        model_config = getattr(flux, "model_config", None)
+        loaded = getattr(model_config, "model_name", None)
+        base = getattr(model_config, "base_model", None)
+        calibrated = META["hf_model_id"]
+        if isinstance(loaded, str) and calibrated not in (loaded, base):
             warnings.warn(
                 TeaCacheUncalibratedCheckpointWarning(
                     f"variant 'qwen-image' loaded {loaded!r}, but its coefficients were "
-                    f"calibrated on {META['hf_model_id']!r}; skip counts and image quality on "
-                    "this checkpoint are not verified. Pass coefficients= from your own "
-                    "calibration (scripts/calibrate_qwen.py) to silence this."
+                    f"calibrated on {calibrated!r}; skip counts and image quality on this "
+                    "checkpoint are not verified. If this is a mirror of the calibrated "
+                    "checkpoint, load it with that base model declared or filter this "
+                    "category; otherwise pass coefficients= from your own calibration "
+                    "(scripts/calibrate_qwen.py)."
                 ),
                 stacklevel=3,
             )

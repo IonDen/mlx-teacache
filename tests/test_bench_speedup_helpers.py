@@ -357,3 +357,18 @@ def test_memory_saver_is_enabled_only_for_the_variant_that_needs_it() -> None:
     assert bs._memory_saver_for("qwen") is True
     assert bs._memory_saver_for("flux1-dev") is False
     assert bs._memory_saver_for("krea-dev") is False
+
+
+def test_memory_saver_is_built_with_the_load_bearing_kwargs() -> None:
+    """bug caught: dropping cache_limit_bytes=None (MemorySaver's default 1 GB branch
+    overrides our cache cap, resets the peak counter before the load peak is read and
+    switches the VAE to tiled decode, changing output pixels) or keep_transformer=True."""
+    seen: dict = dict()
+
+    class _FakeSaver:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+    flux = object()
+    bs._make_memory_saver(flux, _FakeSaver)
+    assert seen == dict(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)

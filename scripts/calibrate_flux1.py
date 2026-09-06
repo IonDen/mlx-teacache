@@ -301,6 +301,7 @@ def _sweep_worker(model: str, unit: str, *, chunk_dir: Path, dry_run: bool) -> N
             out.write_text(json.dumps({"unit": unit, "vanilla_seconds": 10.0, "dry_run": True}))
         else:
             t = float(unit[1:])
+            steps = int(RECIPES[model]["num_inference_steps"])
             out.write_text(
                 json.dumps(
                     {
@@ -309,9 +310,9 @@ def _sweep_worker(model: str, unit: str, *, chunk_dir: Path, dry_run: bool) -> N
                         "dry_run": True,
                         "wrapper_seconds": round(10.0 - 5.0 * t, 4),
                         "skipped": int(30 * t),
-                        "computed": 28 - int(30 * t),
+                        "computed": steps - int(30 * t),
                         "ssim_vs_vanilla": round(0.999 - 0.25 * t, 4),
-                        "skip_pattern": "C" * 28,
+                        "skip_pattern": "C" * steps,
                         "max_consecutive_skips": 0,
                     }
                 )

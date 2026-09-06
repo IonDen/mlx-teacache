@@ -148,6 +148,15 @@ def _build_summary(
 # ---------------------------------------------------------------------------
 
 
+def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
+    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned:
+    keep_transformer=True frees only the text encoders; cache_limit_bytes=None
+    keeps MemorySaver away from mx.set_cache_limit, mx.reset_peak_memory and the
+    tiled-VAE switch its default branch performs (tiling changes output pixels).
+    It also runs gc.collect and mx.clear_cache after every loop, uniformly."""
+    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+
+
 def _gen(flux: Any, *, save_path: Path) -> float:
     start = time.perf_counter()
     image = flux.generate_image(
@@ -242,9 +251,7 @@ def _run_worker(
     # is None so it changes nothing else: our caps stay in charge and VAE decode stays untiled.
     from mflux.callbacks.instances.memory_saver import MemorySaver
 
-    flux.callbacks.register(
-        MemorySaver(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
-    )
+    flux.callbacks.register(_make_memory_saver(flux, MemorySaver))
 
     if unit == "vanilla":
         van_t = _gen(flux, save_path=img_dir / "vanilla.png")

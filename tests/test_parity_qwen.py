@@ -31,6 +31,7 @@ import pytest
 
 from mlx_teacache import apply_teacache
 from mlx_teacache.errors import TeaCacheDisabledWarning
+from tests.conftest import allow_uncalibrated_checkpoint
 
 # PIL + skimage live in the [mflux]/test extra and are absent in the pure-core CI
 # env. importorskip skips this module cleanly at collection there (it is parity-only
@@ -131,7 +132,7 @@ def test_cfg_parity_at_threshold_zero(qwen_image: Any) -> None:
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)
 
     vanilla_before = _capture_latent(flux, **kw)
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(), allow_uncalibrated_checkpoint():
         warnings.simplefilter("ignore", TeaCacheDisabledWarning)
         ctx = apply_teacache(flux, rel_l1_thresh=0.0)
     with ctx as h:
@@ -157,7 +158,9 @@ def test_image_quality_ssim_at_default_threshold(qwen_image: Any) -> None:
     manual inspection."""
     flux = qwen_image
     van = _gen_image_array(flux, save_path=_ARTIFACTS / "vanilla.png", steps=50)
-    with apply_teacache(flux) as h:  # builtin DEFAULT_THRESH
+    with allow_uncalibrated_checkpoint():
+        ctx = apply_teacache(flux)  # builtin DEFAULT_THRESH
+    with ctx as h:
         wrap = _gen_image_array(flux, save_path=_ARTIFACTS / "wrapper_default_thresh.png", steps=50)
         skipped, computed = h.stats.skipped_count, h.stats.computed_count
     score = float(ssim(van, wrap, channel_axis=-1, data_range=255))
@@ -176,7 +179,9 @@ def test_skip_path_engages_and_produces_finite_latent(qwen_image: Any) -> None:
     by the SSIM test above at the pinned recipe."""
     flux = qwen_image
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)
-    with apply_teacache(flux, rel_l1_thresh=0.5) as h:
+    with allow_uncalibrated_checkpoint():
+        ctx = apply_teacache(flux, rel_l1_thresh=0.5)
+    with ctx as h:
         latent = _capture_latent(flux, **kw)
         skipped = h.stats.skipped_count
     assert skipped >= 1, f"rel_l1_thresh=0.5 on 8 steps should skip >=1 step; got {skipped}"

@@ -138,8 +138,10 @@ class TeaCacheUncalibratedCheckpointWarning(UserWarning):
     A finetune or a newer release under the same alias can move those
     dynamics (FLUX.1 Krea [dev] scores R^2 -496 with FLUX.1-dev's tuple), so
     skip counts and image quality on the other checkpoint are unverified
-    until it is calibrated. Pass `coefficients=` from your own calibration
-    to silence this, or suppress via the standard `warnings` module:
+    until it is calibrated. A local path or pre-quantized mirror of the
+    calibrated checkpoint does not warn when it is loaded with that base model
+    declared (mflux records it as `base_model`). Pass `coefficients=` from your
+    own calibration to silence this, or suppress via the standard `warnings` module:
         warnings.filterwarnings("ignore", category=TeaCacheUncalibratedCheckpointWarning)
     """
 

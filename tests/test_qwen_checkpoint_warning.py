@@ -14,14 +14,16 @@ from mlx_teacache.variants.qwen_image.integration import apply
 from tests._fakes import FaithfulCallbackRegistry
 
 
-def _fake_flux(model_name: str | None):
+def _fake_flux(model_name: str | None, base_model: str | None = None):
     flux = SimpleNamespace(
         transformer=SimpleNamespace(name="real-qwen-transformer"),
         callbacks=FaithfulCallbackRegistry(),
         generate_image=lambda **kw: "image",
     )
     if model_name is not None:
-        flux.model_config = SimpleNamespace(model_name=model_name, aliases=["qwen-image", "qwen"])
+        flux.model_config = SimpleNamespace(
+            model_name=model_name, base_model=base_model, aliases=["qwen-image", "qwen"]
+        )
     return flux
 
 
@@ -56,3 +58,18 @@ def test_user_coefficients_silence_the_warning():
 def test_no_model_name_means_no_warning():
     """bug caught: AttributeError on duck-typed models without model_config."""
     apply(_fake_flux(None), rel_l1_thresh=0.25).restore()
+
+
+def test_a_local_mirror_declared_through_base_model_is_silent():
+    """bug caught: warning on every custom model_name. mflux resolves a local path
+    or a pre-quantized mirror by copying the base config and setting base_model to
+    the base's model_name, so `--base-model qwen-image` on a mirror of the
+    calibrated checkpoint must not warn."""
+    apply(_fake_flux("/models/qwen-image-q4", base_model="Qwen/Qwen-Image"), rel_l1_thresh=0.25).restore()
+
+
+def test_the_message_tells_a_mirror_owner_what_to_do():
+    """bug caught: a message that reads as "wrong model" to someone who loaded a
+    mirror of the right one without declaring the base."""
+    with pytest.warns(TeaCacheUncalibratedCheckpointWarning, match="mirror"):
+        apply(_fake_flux("/models/some-checkpoint"), rel_l1_thresh=0.25).restore()

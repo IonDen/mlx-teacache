@@ -89,3 +89,20 @@ def expect_distilled_warning(variant_id: str) -> Iterator[None]:
             yield
     else:
         yield
+
+
+@contextlib.contextmanager
+def allow_uncalibrated_checkpoint() -> Iterator[None]:
+    """Wrap an `apply_teacache(...)` call site on a real-weights lane that may
+    load a checkpoint the variant's coefficients were not calibrated on (today:
+    Qwen-Image on mflux 0.19, whose `qwen-image` alias is Qwen/Qwen-Image-2512).
+    Under `filterwarnings = error` the apply-time
+    `TeaCacheUncalibratedCheckpointWarning` would otherwise raise before the
+    test measures anything; the lane exists to measure exactly that checkpoint."""
+    import warnings
+
+    from mlx_teacache import TeaCacheUncalibratedCheckpointWarning
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", TeaCacheUncalibratedCheckpointWarning)
+        yield

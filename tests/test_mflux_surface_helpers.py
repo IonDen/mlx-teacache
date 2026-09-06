@@ -39,6 +39,25 @@ def test_fingerprint_ignores_docstrings_and_comments_but_not_statements() -> Non
     assert ast_fingerprint(_f1) != ast_fingerprint(_f3)
 
 
+def _pinned(a, b=1, *args, key=None, **kw):
+    """The docstring is stripped before hashing."""
+    if a:
+        return [x + b for x in args]
+    return {"k": key, **kw}
+
+
+# Recorded on CPython 3.10 and checked on 3.12 and 3.13: the digest must not move
+# with the interpreter, or the drift table in tests/test_mflux_forward_drift.py
+# would be recorded on one Python and fail on the CI matrix's others.
+_PINNED_DIGEST = "67eb2b095c5eb155"
+
+
+def test_fingerprint_digest_is_pinned_across_interpreters() -> None:
+    # bug caught: hashing ast.dump text (3.12 adds type_params, 3.13 drops empty
+    # fields) or any other interpreter-dependent field
+    assert ast_fingerprint(_pinned) == _PINNED_DIGEST
+
+
 def _returns_pair(x):
     if x:
         return x, x

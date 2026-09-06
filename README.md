@@ -61,7 +61,7 @@ pip install "mlx-teacache[mflux]"
 uv add "mlx-teacache[mflux]"
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.20`. mflux 0.19 needs MLX 0.32 and adds torch and opencv to the install; if you pair it with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat on 0.19: its `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section).
+Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.20`. mflux 0.19 needs MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair it with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat on 0.19: its `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section).
 
 ```bash
 pip install "mlx-teacache[mflux]==0.11.0"  # pin for reproducibility

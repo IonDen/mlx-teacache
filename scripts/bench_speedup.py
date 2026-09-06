@@ -182,6 +182,19 @@ _DEFAULT_CACHE_GB = 2.0
 _VARIANT_MEMORY_SAVER: dict[str, bool] = {"qwen": True}
 
 
+def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
+    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned.
+
+    keep_transformer=True frees only the text encoders. cache_limit_bytes=None
+    matters: MemorySaver's default (1 GB) branch calls mx.set_cache_limit,
+    overriding install_caps, calls mx.reset_peak_memory before the load peak is
+    read, and switches the VAE to tiled decode, which changes output pixels and
+    would make the SSIM numbers and committed images incomparable. MemorySaver
+    also runs gc.collect and mx.clear_cache after every loop; that applies to
+    every condition alike, so the ratios stand."""
+    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+
+
 def _memory_saver_for(variant: str) -> bool:
     return _VARIANT_MEMORY_SAVER.get(variant, False)
 
@@ -311,11 +324,7 @@ def _worker_main(args: argparse.Namespace) -> None:
     if _memory_saver_for(variant):
         from mflux.callbacks.instances.memory_saver import MemorySaver
 
-        # cache_limit_bytes=None: only the encoder eviction; our caps stay in charge and
-        # VAE decode stays untiled, so outputs remain comparable with earlier reports.
-        flux.callbacks.register(
-            MemorySaver(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
-        )
+        flux.callbacks.register(_make_memory_saver(flux, MemorySaver))
     load_peak = int(mx.get_peak_memory())
     mx.reset_peak_memory()
 

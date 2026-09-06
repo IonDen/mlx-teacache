@@ -71,3 +71,14 @@ def test_build_sweep_summary_sorts_and_carries_streak_telemetry() -> None:
 def test_recipes_follow_each_model_card() -> None:
     assert cf.RECIPES["dev"] == {"num_inference_steps": 25, "guidance": 3.5}
     assert cf.RECIPES["krea-dev"] == {"num_inference_steps": 28, "guidance": 4.5}
+
+
+def test_dry_run_sweep_chunk_uses_the_models_step_count(tmp_path: Path) -> None:
+    """bug caught: the dry-run sweep chunk hard-coding Krea's 28 steps for every
+    model, so a `--model dev --dry-run --sweep` chunk (25-step recipe) carries a
+    skip pattern and computed count that do not add up to dev's schedule."""
+    cf._sweep_worker("dev", "t0.200", chunk_dir=tmp_path, dry_run=True)
+    chunk = json.loads((tmp_path / cf._sweep_chunk_filename("dev", "t0.200")).read_text())
+    steps = cf.RECIPES["dev"]["num_inference_steps"]
+    assert len(chunk["skip_pattern"]) == steps
+    assert chunk["skipped"] + chunk["computed"] == steps

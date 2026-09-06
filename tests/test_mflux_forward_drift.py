@@ -70,66 +70,68 @@ _TARGETS: list[tuple[str, str, str, str]] = [
 # Filled per version after the copies were verified against it. Keys are exact
 # `importlib.metadata.version("mflux")` strings.
 KNOWN: dict[str, dict[str, str]] = {
-    # Verified 2026-09-05 against the copies in v0.10.1 (the real-weights parity lane
-    # passed on 0.18.0 for FLUX.1, FLUX.2 Klein, Z-Image and Qwen-Image; 0.18.1 differs
-    # from 0.18.0 only in the two `_predict` factories, which the eager closures replace;
-    # 0.17.5, the floor, differs in the FLUX.2 transformer forward, which gained its
-    # KV-cache path in 0.18.0 — a path the copy does not take because kv_cache is None).
+    # Digests come from fingerprint_function_node over the wheel sources and are the
+    # same on CPython 3.10 through 3.14 (interpreter-dependent AST fields are dropped).
+    # 0.17.5, the floor: the FLUX.2 transformer forward differs from 0.18.0, which
+    # gained its KV-cache path there; the copy does not take it (kv_cache is None).
     "0.17.5": {
-        "flux1.Transformer.__call__": "5d91b45c47115222",
-        "flux2.Flux2Transformer.__call__": "2de85c3795cb9a5c",
-        "z_image.ZImageTransformer.__call__": "2d492d0912e9e066",
-        "qwen.QwenTransformer.__call__": "6600c3d8f0a874dc",
-        "flux1.Flux1.generate_image": "0307a4e6de9d9a5e",
-        "flux2.Flux2Klein.generate_image": "e52a3fd4d37a783f",
-        "flux2.Flux2Klein._predict": "1eb65d3778f18f8e",
-        "z_image.ZImage.generate_image": "945ff36f66596563",
-        "z_image.ZImage._predict": "807bb08910d0b839",
-        "qwen.QwenImage.generate_image": "2f04c1c09ce2512b",
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "3c93bbfb5aaaf31f",
+        "z_image.ZImageTransformer.__call__": "779a9ad06bfc2a65",
+        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux1.Flux1.generate_image": "09830d48dfa71077",
+        "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "97e2e2a3d9808ac5",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "59ba0f1448730c80",
     },
+    # Verified 2026-09-05 on real weights (FLUX.1, FLUX.2 Klein, Z-Image, Qwen-Image).
     "0.18.0": {
-        "flux1.Transformer.__call__": "5d91b45c47115222",
-        "flux2.Flux2Transformer.__call__": "77c738101d62cb9e",
-        "z_image.ZImageTransformer.__call__": "2d492d0912e9e066",
-        "qwen.QwenTransformer.__call__": "6600c3d8f0a874dc",
-        "flux1.Flux1.generate_image": "0307a4e6de9d9a5e",
-        "flux2.Flux2Klein.generate_image": "e52a3fd4d37a783f",
-        "flux2.Flux2Klein._predict": "f4344a22c1c41345",
-        "z_image.ZImage.generate_image": "945ff36f66596563",
-        "z_image.ZImage._predict": "f25b760f51447925",
-        "qwen.QwenImage.generate_image": "2f04c1c09ce2512b",
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
+        "z_image.ZImageTransformer.__call__": "779a9ad06bfc2a65",
+        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux1.Flux1.generate_image": "09830d48dfa71077",
+        "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "97e2e2a3d9808ac5",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "59ba0f1448730c80",
     },
+    # 0.18.1 is identical to 0.18.0 on all ten targets.
     "0.18.1": {
-        "flux1.Transformer.__call__": "5d91b45c47115222",
-        "flux2.Flux2Transformer.__call__": "77c738101d62cb9e",
-        "z_image.ZImageTransformer.__call__": "2d492d0912e9e066",
-        "qwen.QwenTransformer.__call__": "6600c3d8f0a874dc",
-        "flux1.Flux1.generate_image": "0307a4e6de9d9a5e",
-        "flux2.Flux2Klein.generate_image": "e52a3fd4d37a783f",
-        "flux2.Flux2Klein._predict": "1eb65d3778f18f8e",
-        "z_image.ZImage.generate_image": "945ff36f66596563",
-        "z_image.ZImage._predict": "807bb08910d0b839",
-        "qwen.QwenImage.generate_image": "2f04c1c09ce2512b",
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
+        "z_image.ZImageTransformer.__call__": "779a9ad06bfc2a65",
+        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux1.Flux1.generate_image": "09830d48dfa71077",
+        "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "97e2e2a3d9808ac5",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "59ba0f1448730c80",
     },
-    # Verified 2026-09-06 on real weights (FLUX.1-dev, FLUX.1 Krea [dev], the four
-    # FLUX.2 Klein variants, Z-Image and Qwen-Image parity files on 0.19.1, mlx
-    # 0.32.2). What moved since 0.18.x, all off by default on the copied path:
-    # ZImageTransformer.__call__ gained an optional controlnet_block_samples kwarg
-    # (a per-layer add when given, None here); every generate_image gained a
-    # bake_lora flag and a PiD-decoder branch after the loop; ZImage._predict
-    # dropped 0.18.0's eager-on-M1/M2 special case and compiles on every chip
-    # (0.17.5's form); Flux2Klein._predict is 0.17.5's form again.
+    # Verified 2026-09-06 on real weights (FLUX.1-dev, FLUX.1-schnell, FLUX.1 Krea
+    # [dev], the four FLUX.2 Klein variants, Z-Image; mlx 0.32.2). What moved since
+    # 0.18.x, all off by default on the copied path: ZImageTransformer.__call__
+    # gained an optional controlnet_block_samples kwarg (a per-layer add when
+    # given, None here); every generate_image gained a bake_lora flag and a
+    # PiD-decoder branch after the loop. Both _predict factories are unchanged
+    # since 0.17.5, M1/M2 eager special case included. Qwen-Image's loop is
+    # unchanged in shape, but 0.19's qwen-image alias loads Qwen/Qwen-Image-2512,
+    # which the coefficients were not calibrated on (see the variant page).
     "0.19.1": {
-        "flux1.Transformer.__call__": "5d91b45c47115222",
-        "flux2.Flux2Transformer.__call__": "77c738101d62cb9e",
-        "z_image.ZImageTransformer.__call__": "c56cd57e1b081b69",
-        "qwen.QwenTransformer.__call__": "6600c3d8f0a874dc",
-        "flux1.Flux1.generate_image": "78163ee6088400e2",
-        "flux2.Flux2Klein.generate_image": "75d5bc4a72298aa7",
-        "flux2.Flux2Klein._predict": "1eb65d3778f18f8e",
-        "z_image.ZImage.generate_image": "4cdf0c7f5955c590",
-        "z_image.ZImage._predict": "807bb08910d0b839",
-        "qwen.QwenImage.generate_image": "6c36ec23156c5eaa",
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
+        "z_image.ZImageTransformer.__call__": "da0a464f9e29b64b",
+        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux1.Flux1.generate_image": "879f66c3de7a0b52",
+        "flux2.Flux2Klein.generate_image": "8cee664523fcb6ed",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "bd70fe34ad24c416",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
 }
 
@@ -156,7 +158,9 @@ def test_installed_mflux_version_has_verified_forward_fingerprints() -> None:
 def test_forward_fingerprint_matches_the_verified_one(label: str) -> None:
     installed = version("mflux")
     if installed not in KNOWN:
-        pytest.fail(
+        # The summary test above already fails once for an unknown version; ten
+        # more failures would only repeat it.
+        pytest.skip(
             f"mflux {installed} unknown; see test_installed_mflux_version_has_verified_forward_fingerprints"
         )
     fresh = _installed_fingerprints()[label]

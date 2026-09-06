@@ -82,7 +82,7 @@ SSIM still degrades gracefully, with no cliff, and every point clears the 0.95 f
 | wrapper, no gate (`rel_l1_thresh=0.0`) | 615.6 / 611.5 / 692.5 | 615.6 s | 0 |
 | wrapper, default 0.30 | 229.3 / 240.7 / 239.4 | 239.4 s | 33 in every rep, longest streak 4 |
 
-**2.68× combined** against vanilla, of which **2.57×** is gating. The no-gate wrapper's 1.04× over vanilla is smaller than the spread between vanilla reps, so it is noise, not a mechanism. Every rep produced the same skip pattern, the one the threshold sweep and the committed calibration replay also produce. Peak memory 24.1 GB in every condition with the cache pool at 1.1 GB; the 0.10.0 bench of the same recipe peaked at 26.2 GB, above this machine's recommended working set, and its vanilla time (850.3 s, giving 3.02×) fell more than the gated one once the run stayed under it.
+**2.68× combined** against vanilla, of which **2.57×** is gating. The no-gate wrapper's 1.04× over vanilla is smaller than the spread between vanilla reps, so it is noise, not a mechanism. Every rep produced the same skip pattern, the one the threshold sweep and the committed calibration replay also produce. Peak memory 24.1 GB in every condition with the cache pool at 1.1 GB (the report's load-time peak reads 0 because mflux materialises weights on first use, so the loop peak is the whole story); the 0.10.0 bench of the same recipe peaked at 26.2 GB, above this machine's recommended working set, and its vanilla time (850.3 s, giving 3.02×) fell more than the gated one once the run stayed under it.
 
 ## CFG (guidance > 1.0)
 

@@ -349,3 +349,11 @@ def test_krea_dev_slug_maps_to_the_variant_and_its_model_card_recipe() -> None:
     assert bs._VARIANT_SLUG_TO_ID["krea-dev"] == "flux1-krea-dev"
     assert bs._VARIANT_RECIPE["krea-dev"] == {"num_inference_steps": 28, "guidance": 4.5}
     assert bs._VARIANT_QUANTIZE["krea-dev"] == 4
+
+
+def test_memory_saver_is_enabled_only_for_the_variant_that_needs_it() -> None:
+    # bug caught: freeing text encoders on every variant (changes nothing for FLUX.1-sized runs
+    # but makes their reports incomparable with the committed ones)
+    assert bs._memory_saver_for("qwen") is True
+    assert bs._memory_saver_for("flux1-dev") is False
+    assert bs._memory_saver_for("krea-dev") is False

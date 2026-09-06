@@ -174,6 +174,17 @@ _DEFAULT_CAP_GB = 22
 _VARIANT_CACHE_GB: dict[str, float] = {"qwen": 1.0}
 _DEFAULT_CACHE_GB = 2.0
 
+# mflux's MemorySaver frees the text encoders once the prompt is encoded. Only qwen
+# needs it: its Qwen2.5-VL encoder is several GB at q4 and the 768x768 recipe otherwise
+# sits within a few GB of physical memory on a 32 GB Mac, where the host falls into
+# compressed-memory thrash (a step went from ~20 s to ~230 s on 2026-09-06). Applied to
+# every condition of the run alike; the report records it.
+_VARIANT_MEMORY_SAVER: dict[str, bool] = {"qwen": True}
+
+
+def _memory_saver_for(variant: str) -> bool:
+    return _VARIANT_MEMORY_SAVER.get(variant, False)
+
 
 # ---------------------------------------------------------------------------
 # WORKER side — runs in a subprocess for one (variant, condition, rep).
@@ -297,6 +308,14 @@ def _worker_main(args: argparse.Namespace) -> None:
     save_path: Path | None = Path(args.save_to) if args.save_to else None
 
     flux = _load_flux(variant)
+    if _memory_saver_for(variant):
+        from mflux.callbacks.instances.memory_saver import MemorySaver
+
+        # cache_limit_bytes=None: only the encoder eviction; our caps stay in charge and
+        # VAE decode stays untiled, so outputs remain comparable with earlier reports.
+        flux.callbacks.register(
+            MemorySaver(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+        )
     load_peak = int(mx.get_peak_memory())
     mx.reset_peak_memory()
 
@@ -371,6 +390,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         "num_inference_steps": num_inference_steps,
         "guidance": guidance,
         "elapsed_s": elapsed,
+        "memory_saver": _memory_saver_for(variant),
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         **_memory_fields(
@@ -899,6 +919,7 @@ def main() -> None:
             "schema_version": 3,
             "isolation": "subprocess-per-rep",
             "chunk_order": "rep-outer",
+            "memory_saver": _memory_saver_for(variant),
             "variant": variant,
             "num_inference_steps": num_inference_steps,
             "guidance": guidance,

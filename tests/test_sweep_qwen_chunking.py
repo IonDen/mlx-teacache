@@ -105,3 +105,9 @@ def test_units_honour_an_explicit_threshold_list() -> None:
 
 def test_build_summary_records_the_build() -> None:
     assert sw._build_summary([], vanilla_seconds=1.0, build="plain-q4")["build"] == "plain-q4"
+
+
+def test_build_summary_records_whether_the_text_encoders_were_freed() -> None:
+    # bug caught: a re-measure under MemorySaver silently compared against a run without it
+    assert sw._build_summary([], vanilla_seconds=1.0, memory_saver=True)["memory_saver"] is True
+    assert sw._build_summary([], vanilla_seconds=1.0)["memory_saver"] is False

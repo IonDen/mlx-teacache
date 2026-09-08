@@ -76,7 +76,7 @@ FLUX.2 Klein ships two ways. The distilled model draws an image in four steps an
 
 On speed, no. Base with TeaCache is still far slower than distilled, because the distilled schedule does a small fraction of the work. Base earns its place when you need guidance, negative prompts, or a fine-tune the distilled model cannot run, and there TeaCache takes 15 to 30 percent off the wall clock.
 
-Three conditions, one prompt and seed: distilled at its four-step default, base at 50 steps with guidance 4.0, and base with the wrapper at its default threshold.
+All three conditions use the page's shared portrait prompt and seed (the same ones the rows above use): distilled at its four-step default, base at 50 steps with guidance 4.0, and base with the wrapper at its default threshold.
 
 ### 4B, 768×1024, q4
 
@@ -104,7 +104,7 @@ Images (distilled, base, base + TeaCache):
 
 The 9B row renders at 512×512 rather than the page's 768×1024. At q4 the 9B model already peaks near 22 GB on this 32 GB machine, and the larger image pushes it past what the machine runs cleanly. The three 9B conditions share the lower resolution, so they stay comparable to each other, while the 4B row keeps the page's portrait size.
 
-Two things stand out. The distilled and base images are not the same picture (SSIM 0.38 at 4B, 0.54 at 9B): a different model on a different schedule, so moving between them changes the look, not only the speed. Base with TeaCache stays close to plain Base (0.93 and 0.98), which is the point, since it is the same base image for less compute. The peak-memory drop on the wrapped row, 13 GB to 8 GB at 4B and 22 GB to 10 GB at 9B, is the eager wrapper bypassing mflux's compiled predict path, the same effect the klein-base-9b row above shows.
+The distilled and base images are not the same picture (SSIM 0.38 at 4B, 0.54 at 9B): a different model on a different schedule, so moving between them changes the look, not only the speed. Base with TeaCache stays close to plain Base (0.93 and 0.98), which is the point, since it is the same base image for less compute. The peak-memory drop on the wrapped row, 13 GB to 8 GB at 4B and 22 GB to 10 GB at 9B, is the eager wrapper bypassing mflux's compiled predict path, the same effect the klein-base-9b row above shows.
 
 The recommendation is the plain one. Run the distilled model for everyday work, and reach for Base when you need what guidance and fine-tunes give you, with TeaCache to soften the cost.
 

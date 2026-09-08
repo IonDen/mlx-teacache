@@ -514,6 +514,15 @@ def _mflux_version() -> str:
         return "unknown"
 
 
+def _mlx_version() -> str:
+    try:
+        import mlx.core as mx
+
+        return str(mx.__version__)
+    except Exception:
+        return "unknown"
+
+
 def _mlx_teacache_version() -> str:
     from mlx_teacache import __version__
 
@@ -556,6 +565,7 @@ def _detect_hardware(
         "ram_gb": resolved_ram,
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
+        "mlx_version": _mlx_version(),
         "mlx_teacache_version": _mlx_teacache_version(),
         "mflux_version": _mflux_version(),
         "quantize": quantize_label(quantize),
@@ -661,6 +671,16 @@ def _compute_ssim(images_dir: Path) -> dict[str, float]:
     return ssim
 
 
+def _resolve_ssim(images_dir: Path, prior_ssim: dict[str, float]) -> dict[str, float]:
+    """SSIM for the report. Compute from the lossless PNGs while they are still on
+    disk; on a re-run after they were converted to webp, reuse the SSIM already
+    computed instead of recomputing from the lossy webp (the images are deterministic
+    under the fixed seed, so the reused value is the honest one)."""
+    if all((images_dir / f"{cond}.png").exists() for cond in CONDITIONS):
+        return _compute_ssim(images_dir)
+    return dict(prior_ssim)
+
+
 def _convert_pngs_to_webp(images_dir: Path) -> None:
     """Re-encode each condition's PNG as webp (the committed format) and drop the
     PNG. SSIM is already computed from the PNGs before this runs."""
@@ -760,6 +780,8 @@ def main() -> None:
     size: str = args.size
     quantize = parse_quantize(args.quantize)
     reps: int = args.reps
+    if reps < 1:
+        raise SystemExit(f"--reps must be >= 1, got {reps}")
     height: int = args.height
     width: int = args.width
     tag = chunk_tag(size=size, quantize=quantize, height=height, width=width)
@@ -813,10 +835,18 @@ def main() -> None:
         )
         raise SystemExit(3)
 
-    full_run = set(conditions) == set(CONDITIONS)
-    ssim = _compute_ssim(images_dir) if full_run else {}
-    if full_run:
-        _convert_pngs_to_webp(images_dir)
+    # A single-condition run cannot produce a complete report, so it must NOT write
+    # over an existing full one. Its chunks are on disk; a later full run rebuilds the
+    # report from them.
+    if set(conditions) != set(CONDITIONS):
+        print("\n== Klein: distilled vs base vs base + TeaCache ==")
+        print(f"  ran --only {args.only} for {tag}; its chunks are on disk under {results_dir}.")
+        print("  The report and table need all three conditions — re-run without --only to (re)build them.")
+        return
+
+    prior_ssim = json.loads(report_path.read_text()).get("ssim", {}) if report_path.exists() else {}
+    ssim = _resolve_ssim(images_dir, prior_ssim)
+    _convert_pngs_to_webp(images_dir)
     report = _build_report(
         size=size,
         quantize=quantize,
@@ -835,9 +865,6 @@ def main() -> None:
     print("\n== Klein: distilled vs base vs base + TeaCache ==")
     print(f"  size={size} {tag}, {width}x{height}, seed {SEED}, reps={reps}")
     print(f"  report: {report_path}")
-    if not full_run:
-        print(f"  (single-condition run --only {args.only}; SSIM/table need all three conditions)")
-        return
     print()
     print(render_markdown_table(table_rows_from_report(report)))
 

@@ -197,6 +197,15 @@ def test_verify_chunk_recipes_refuses_a_resolution_mismatch(tmp_path: Path) -> N
         bk.verify_chunk_recipes(list(bk.CONDITIONS), 1, tmp_path, quantize=4, height=512, width=512)
 
 
+def test_verify_chunk_recipes_accepts_a_chunk_whose_resolution_matches(tmp_path: Path) -> None:
+    # The equality half of the resolution guard: a chunk that records height/width
+    # matching this invocation must NOT raise (mutating the guard to always-refuse is
+    # caught here; the mismatch test alone leaves that path uncovered).
+    chunk = {**_fake_chunk("distilled", 0, 3.0, quantize=4), "height": 512, "width": 512}
+    bk.persist_chunk(tmp_path, chunk)
+    bk.verify_chunk_recipes(list(bk.CONDITIONS), 1, tmp_path, quantize=4, height=512, width=512)  # no raise
+
+
 # --- resolution in the tag (keeps 512x512 9B artifacts from colliding with 768x1024) ---
 
 
@@ -220,19 +229,47 @@ def test_chunk_tag_bf16_with_nondefault_resolution() -> None:
 
 
 def test_ssim_of_identical_images_is_one() -> None:
+    pytest.importorskip("skimage")  # not in the pure-core CI env; runs in the mflux lanes
     rng = np.random.default_rng(0)
     img = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
     assert bk.ssim_from_arrays(img, img) == pytest.approx(1.0)
 
 
 def test_ssim_of_structurally_different_images_is_near_zero() -> None:
-    # Bug caught: an SSIM that always returns 1.0, or one with the wrong
-    # data_range / channel axis, would not read ~0 for two unrelated images
-    # (measured -0.002 for this pair; the honest bar is well below 1.0).
+    # Bug caught: an SSIM stuck at 1.0 (two unrelated images must read near 0), and a
+    # dropped channel_axis (skimage then raises on the (32,32,3) array). A wrong
+    # data_range is NOT caught here: for high-magnitude images its C1/C2 constants are
+    # negligible next to the pixel variance, so no simple fixture distinguishes it.
+    pytest.importorskip("skimage")
     rng = np.random.default_rng(1)
     a = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
     b = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)  # independent
     assert bk.ssim_from_arrays(a, b) < 0.1
+
+
+def test_ssim_from_files_reads_images_and_converts_rgba(tmp_path: Path) -> None:
+    # Covers load_rgb_array (its .convert("RGB") must drop an alpha channel) and
+    # ssim_from_files: the same pixels via an RGB file and an RGBA file score 1.0.
+    pytest.importorskip("skimage")
+    from PIL import Image
+
+    rng = np.random.default_rng(3)
+    arr = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
+    rgb_path = tmp_path / "a.png"
+    rgba_path = tmp_path / "b.png"
+    Image.fromarray(arr, "RGB").save(rgb_path)
+    rgba = np.concatenate([arr, np.full((32, 32, 1), 255, np.uint8)], axis=-1)
+    Image.fromarray(rgba, "RGBA").save(rgba_path)
+    assert bk.ssim_from_files(rgb_path, rgba_path) == pytest.approx(1.0)
+
+
+def test_resolve_ssim_reuses_prior_when_pngs_are_gone(tmp_path: Path) -> None:
+    # After the first full run converts the PNGs to webp, a re-run must reuse the SSIM
+    # it already computed rather than recomputing from the lossy webp. With no PNGs on
+    # disk, _resolve_ssim returns the prior value untouched (no skimage needed).
+    (tmp_path / "base.webp").write_bytes(b"")  # a webp is present, the PNGs are not
+    prior = {"base_vs_distilled": 0.5, "base_teacache_vs_base": 0.98}
+    assert bk._resolve_ssim(tmp_path, prior) == prior
 
 
 # --- markdown table (the paste-ready deliverable) ----------------------------
@@ -282,14 +319,14 @@ def test_table_has_a_header_and_one_row_per_condition() -> None:
     assert len([ln for ln in lines[2:]]) == 3  # three data rows
 
 
-def test_table_renders_the_numbers_for_each_condition() -> None:
-    # Bug caught: swapping the ssim_vs_distilled / ssim_vs_base columns, or
-    # dropping the speedup, would show here.
+def test_table_renders_each_column_in_the_right_position() -> None:
+    # Bug caught: a column swap INSIDE render_markdown_table (e.g. ssim_vs_base vs
+    # ssim_vs_distilled), or a dropped speedup/skip-annotation. Substring presence
+    # alone misses a value that moved to the wrong column, so assert whole rows.
     table = bk.render_markdown_table(_rows())
-    assert "distilled" in table and "base+TeaCache" in table
-    assert "1.21×" in table  # base-teacache speedup vs base
-    assert "0.986" in table  # base-teacache SSIM vs base
-    assert "510" in table  # base wall-clock seconds
+    assert "| distilled | 4 | 15 | 34.00× | 8.1 | 1.000 | 0.620 |" in table
+    assert "| base | 50 | 510 | 1.00× | 9.0 | 0.620 | 1.000 |" in table
+    assert "| base+TeaCache | 50 (−8 skipped) | 420 | 1.21× | 9.0 | 0.610 | 0.986 |" in table
 
 
 def test_table_rows_from_report_fills_speedup_and_ssim(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-07T20:44Z",
+  "generated_at": "2026-09-08T09:59Z",
   "size": "4b",
   "quantize": "q4",
   "prompt": "Portrait of a young woman with auburn hair and green eyes, soft golden-hour window light, photorealistic, shallow depth of field, 50mm prime lens, subtle freckles, neutral background, cinematic color grading.",
@@ -14,6 +14,7 @@
     "ram_gb": 32,
     "machine": "arm64",
     "os": "Darwin 25.6.0",
+    "mlx_version": "0.31.2",
     "mlx_teacache_version": "0.11.0",
     "mflux_version": "0.18.0",
     "quantize": "q4",

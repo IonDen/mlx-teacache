@@ -516,9 +516,9 @@ def _mflux_version() -> str:
 
 def _mlx_version() -> str:
     try:
-        import mlx.core as mx
+        from importlib.metadata import version
 
-        return str(mx.__version__)
+        return version("mlx")
     except Exception:
         return "unknown"
 

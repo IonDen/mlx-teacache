@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-08T09:59Z",
+  "size": "4b",
+  "quantize": "q4",
+  "prompt": "Portrait of a young woman with auburn hair and green eyes, soft golden-hour window light, photorealistic, shallow depth of field, 50mm prime lens, subtle freckles, neutral background, cinematic color grading.",
+  "seed": 42,
+  "height": 1024,
+  "width": 768,
+  "reps": 3,
+  "isolation": "subprocess-per-(condition,rep)",
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 25.6.0",
+    "mlx_version": "0.31.2",
+    "mlx_teacache_version": "0.11.0",
+    "mflux_version": "0.18.0",
+    "quantize": "q4",
+    "dtype": "bf16"
+  },
+  "conditions": {
+    "distilled": {
+      "rep_seconds": [
+        27.864687916997354,
+        25.637764250015607,
+        26.23381220898591
+      ],
+      "cold_seconds": 27.864687916997354,
+      "warm_seconds": 25.93578822950076,
+      "median_seconds": 26.23381220898591,
+      "headline_seconds": 25.93578822950076,
+      "peak_memory_gb": 12.731816925108433,
+      "num_inference_steps": 4
+    },
+    "base": {
+      "rep_seconds": [
+        593.8276183750131,
+        588.7031507499923,
+        579.4969724999974
+      ],
+      "cold_seconds": 593.8276183750131,
+      "warm_seconds": 584.1000616249949,
+      "median_seconds": 588.7031507499923,
+      "headline_seconds": 584.1000616249949,
+      "peak_memory_gb": 13.304078876972198,
+      "num_inference_steps": 50
+    },
+    "base-teacache": {
+      "rep_seconds": [
+        493.6357355839864,
+        487.65936520899413,
+        487.0977846250171
+      ],
+      "cold_seconds": 493.6357355839864,
+      "warm_seconds": 487.3785749170056,
+      "median_seconds": 487.65936520899413,
+      "headline_seconds": 487.3785749170056,
+      "peak_memory_gb": 8.115626124665141,
+      "num_inference_steps": 50,
+      "skipped_per_rep": [
+        8,
+        8,
+        8
+      ],
+      "skipped_median": 8,
+      "rel_l1_thresh_used": 0.17
+    }
+  },
+  "ssim": {
+    "base_vs_distilled": 0.3758990712592487,
+    "base_teacache_vs_distilled": 0.3844848319323087,
+    "base_teacache_vs_base": 0.9330728366858212
+  },
+  "images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/_artifacts/klein_base_vs_distilled/4b_q4"
+}

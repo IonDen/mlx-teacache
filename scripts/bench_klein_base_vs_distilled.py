@@ -672,13 +672,24 @@ def _compute_ssim(images_dir: Path) -> dict[str, float]:
 
 
 def _resolve_ssim(images_dir: Path, prior_ssim: dict[str, float]) -> dict[str, float]:
-    """SSIM for the report. Compute from the lossless PNGs while they are still on
-    disk; on a re-run after they were converted to webp, reuse the SSIM already
-    computed instead of recomputing from the lossy webp (the images are deterministic
-    under the fixed seed, so the reused value is the honest one)."""
-    if all((images_dir / f"{cond}.png").exists() for cond in CONDITIONS):
+    """SSIM for the report. If any condition's image was (re)generated this run — its
+    lossless PNG is on disk — recompute every pair from the current images, so a
+    freshly regenerated condition never keeps a stale number. Only when no PNG is
+    present at all (a pure re-run where nothing regenerated) reuse the prior SSIM,
+    which was itself computed from the lossless PNGs, rather than recomputing from the
+    lossy webp."""
+    if any((images_dir / f"{cond}.png").exists() for cond in CONDITIONS):
         return _compute_ssim(images_dir)
     return dict(prior_ssim)
+
+
+def _prior_ssim(report_path: Path) -> dict[str, float]:
+    """The ssim block of an existing report, or empty when it is absent or unreadable
+    — a report left half-written by a killed run must not crash the next rebuild."""
+    try:
+        return dict(json.loads(report_path.read_text()).get("ssim", {}))
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _convert_pngs_to_webp(images_dir: Path) -> None:
@@ -844,8 +855,7 @@ def main() -> None:
         print("  The report and table need all three conditions — re-run without --only to (re)build them.")
         return
 
-    prior_ssim = json.loads(report_path.read_text()).get("ssim", {}) if report_path.exists() else {}
-    ssim = _resolve_ssim(images_dir, prior_ssim)
+    ssim = _resolve_ssim(images_dir, _prior_ssim(report_path))
     _convert_pngs_to_webp(images_dir)
     report = _build_report(
         size=size,
@@ -860,7 +870,9 @@ def main() -> None:
         width=width,
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, indent=2))
+    tmp = report_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(report, indent=2))
+    tmp.replace(report_path)  # atomic, so a killed run can't leave a half-written report
 
     print("\n== Klein: distilled vs base vs base + TeaCache ==")
     print(f"  size={size} {tag}, {width}x{height}, seed {SEED}, reps={reps}")

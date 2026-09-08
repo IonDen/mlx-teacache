@@ -272,6 +272,34 @@ def test_resolve_ssim_reuses_prior_when_pngs_are_gone(tmp_path: Path) -> None:
     assert bk._resolve_ssim(tmp_path, prior) == prior
 
 
+def test_resolve_ssim_recomputes_when_a_png_is_fresh(tmp_path: Path) -> None:
+    # Bug caught (an all-or-nothing gate): after --only regenerates one condition's
+    # PNG, a rebuild must recompute from the current images, not keep the stale prior.
+    # With any PNG present, _resolve_ssim recomputes every pair.
+    pytest.importorskip("skimage")
+    from PIL import Image
+
+    rng = np.random.default_rng(5)
+    for cond in bk.CONDITIONS:
+        arr = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
+        Image.fromarray(arr, "RGB").save(tmp_path / f"{cond}.png")
+    stale = {"base_vs_distilled": 0.99, "base_teacache_vs_distilled": 0.99, "base_teacache_vs_base": 0.99}
+    out = bk._resolve_ssim(tmp_path, stale)
+    assert out != stale  # recomputed, not reused
+    assert out["base_teacache_vs_base"] < 0.5  # three unrelated images score low, not 0.99
+
+
+def test_prior_ssim_reads_a_valid_report_and_tolerates_a_corrupt_one(tmp_path: Path) -> None:
+    # A killed run can leave a half-written report; the next rebuild must not crash.
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"ssim": {"base_teacache_vs_base": 0.97}}))
+    assert bk._prior_ssim(good) == {"base_teacache_vs_base": 0.97}
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"ssim": {"base_teacache_vs_base": 0.97')  # truncated JSON
+    assert bk._prior_ssim(bad) == {}
+    assert bk._prior_ssim(tmp_path / "missing.json") == {}
+
+
 # --- markdown table (the paste-ready deliverable) ----------------------------
 
 

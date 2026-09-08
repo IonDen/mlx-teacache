@@ -172,6 +172,8 @@ In practice, that means:
 
 There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.
 
+Distilled Klein or Base plus the wrapper? `scripts/bench_klein_base_vs_distilled.py` runs distilled, Base, and Base + TeaCache on one prompt and seed and prints a table. On an M1 Max the distilled model is roughly 20× faster than Base, and the wrapper trims 15 to 30 percent off Base rather than closing that gap. So the distilled model stays the everyday choice, and Base is for when you need guidance, negative prompts, or a fine-tune. Run it with `uv run python scripts/bench_klein_base_vs_distilled.py --size 4b --quantize 4 --reps 3` (or `--size 9b`); on a 64 GB or larger Mac, run it at `--quantize 8` and post your table.
+
 See [COMPARISON.md](COMPARISON.md) for side-by-side images and warm-median wall-clock numbers on an M1 Max.
 
 ## Combining with mlx-taef

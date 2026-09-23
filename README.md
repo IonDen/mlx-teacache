@@ -63,7 +63,7 @@ pip install "mlx-teacache[mflux]"
 uv add "mlx-teacache[mflux]"
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.20`. mflux 0.19 needs MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair it with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat on 0.19: its `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section).
+Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.21`. mflux 0.19 and 0.20 need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair either with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat from 0.19 on: the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section). mflux 0.20's separate Qwen-Image-2.1 model is not a supported variant.
 
 ```bash
 pip install "mlx-teacache[mflux]==0.11.0"  # pin for reproducibility
@@ -317,7 +317,7 @@ The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exc
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
-The mflux pin is strict at `>=0.17.5,<0.20`. Bumping it is a deliberate release: each new mflux minor is verified on real weights before the range widens.
+The mflux pin is strict at `>=0.17.5,<0.21`. Bumping it is a deliberate release: each new mflux minor is verified on real weights before the range widens.
 
 Calling `flux.parameters()` at the parent level can miss transformer parameters while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first.
 

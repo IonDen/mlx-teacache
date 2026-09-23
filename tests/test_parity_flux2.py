@@ -3,24 +3,24 @@
 Mirrors `test_parity_flux1.py` (Task 25, v2.6) for the FLUX.2 path, but
 with two important differences:
 
-1. **Numerical tolerance instead of bit-exact on the gated path.**
-   mflux wraps Flux2Klein's `_predict` in `mx.compile`. Our TeaCache
-   integration replaces `_predict` with an eager-Python wrapper (so
-   per-step gating actually runs every step — `mx.compile` would trace
-   our gating code once and elide it). Compiled-vs-eager MLX dispatches
-   slightly different bf16 op orderings, producing ~1% per-element
-   divergence on the gated path even with threshold=0 and identical
-   math. This is fundamental to the integration design (see
-   `src/mlx_teacache/integrations/mflux/flux2.py` docstring + the
-   user-mlx-developer skill's mflux-and-local-projects.md "mx.compile
-   interaction with Python-side gating"). We gate the threshold=0
-   parity with `mx.allclose(atol=0.1, rtol=0.05)` — per the
-   python-ml-testing skill's "full forward of small model, bf16" row.
+1. **A cosine gate instead of bit-exactness on the wrapped path.**
+   mflux wraps Flux2Klein's `_predict` in `mx.compile`. The TeaCache
+   integration (`src/mlx_teacache/variants/flux2_klein_base_4b/integration.py`,
+   shared by every FLUX.2 variant) replaces `_predict` with an eager-Python
+   closure, so per-step gating actually runs every step — `mx.compile` would
+   trace the gating code once and elide it. Compiled and eager MLX dispatch
+   slightly different bf16 op orderings, about 1 ULP per element that
+   compounds across steps, even at threshold 0 with identical math. The
+   threshold-0 parity therefore asserts cosine similarity of the flattened
+   latents >= `_FLUX2_COSINE_GATE` (0.97); per-element `mx.allclose` is the
+   wrong oracle here (see the comment above that constant).
 
-2. **CFG fallback IS bit-exact.** When guidance > 1.0 our wrapper
-   delegates to vanilla mflux entirely (no gating). Both call the same
-   compiled `_predict`. Same-process paired parity at `mx.array_equal`
-   holds there.
+2. **CFG runs through the same gated path.** Since v0.4.1, `guidance > 1.0`
+   is not a fallback to vanilla mflux: the wrapper keeps one cached residual
+   per CFG branch and shares one gate decision per step. The CFG
+   threshold-0 test applies the same cosine gate. What stays bit-exact is
+   restore: `vanilla_before` and `vanilla_after` must match under
+   `mx.array_equal`.
 
 Latent-level numerical tolerance is the first gate. Image-level SSIM on
 decoded images (`test_image_quality_flux2.py`) is the second gate — it's

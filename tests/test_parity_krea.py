@@ -83,6 +83,12 @@ def krea_dev() -> Any:
     return flux
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache_between_tests():  # noqa: ANN202
+    yield
+    mx.clear_cache()  # keep the pool ~one generation across the module, as the Qwen parity file does
+
+
 def test_paired_parity_krea_pr_gate(krea_dev: Any) -> None:
     """Threshold-zero wrapper == same-process vanilla, and restore() leaves no trace."""
     kw = _gen_kwargs(PR_TIME_PROMPT)

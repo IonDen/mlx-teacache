@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 
@@ -83,14 +84,42 @@ def test_base_import_without_mflux() -> None:
     assert result.returncode == 0
 
 
-def test_apply_teacache_docstring_documents_per_variant_defaults():
+def test_apply_teacache_docstring_points_at_the_resolved_threshold():
     from mlx_teacache import apply_teacache
 
     doc = apply_teacache.__doc__
     assert doc is not None
-    # per-variant default resolution is spelled out
-    assert "0.17" in doc  # base-4b / base-9b default
-    assert "0.12" in doc  # z-image-base default
-    assert "0.20" in doc  # package fallback
-    # the resolved effective value is pointed at
     assert "handle.rel_l1_thresh" in doc
+
+
+def _docstring_default_rows(doc: str) -> list[tuple[list[str], str]]:
+    """The `- <names> ..... <value>` rows of apply_teacache's per-variant default table."""
+    rows = []
+    for m in re.finditer(r"^\s*- (?P<names>[a-z0-9][a-z0-9, -]*?) \.{3,} (?P<rest>.+)$", doc, re.MULTILINE):
+        rows.append(([n.strip() for n in m.group("names").split(",")], m.group("rest")))
+    return rows
+
+
+def _names_variant(token: str, variant_id: str) -> bool:
+    # "flux2-klein-base-4b, -base-9b" abbreviates the second id to its suffix.
+    return token == variant_id or (token.startswith("-") and variant_id.endswith(token))
+
+
+def test_apply_teacache_docstring_default_table_matches_the_registry():
+    """Every registered variant has exactly one row in the docstring's default table, and the
+    row shows the variant's actual DEFAULT_THRESH (or says it has none). Goes red when a
+    recalibration changes a config default without touching the docstring, or when a new
+    variant ships without a row."""
+    from mlx_teacache import apply_teacache
+    from mlx_teacache.variants import _REGISTRY
+
+    rows = _docstring_default_rows(apply_teacache.__doc__ or "")
+    assert rows, "no per-variant default table found in the apply_teacache docstring"
+    for variant_id, entry in _REGISTRY.items():
+        matching = [rest for names, rest in rows if any(_names_variant(n, variant_id) for n in names)]
+        assert len(matching) == 1, f"{variant_id}: {len(matching)} docstring rows"
+        default = entry["default_thresh"]
+        if default is None:
+            assert matching[0].startswith("no per-variant default"), (variant_id, matching[0])
+        else:
+            assert matching[0].startswith(f"{default:.2f}"), (variant_id, default, matching[0])

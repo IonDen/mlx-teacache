@@ -1622,7 +1622,7 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17.5,<0.20" },
+    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17.5,<0.21" },
     { name = "mlx", specifier = ">=0.31" },
     { name = "numpy" },
 ]
@@ -1638,7 +1638,7 @@ test-core = [
 ]
 test-mflux = [
     { name = "hypothesis", specifier = ">=6" },
-    { name = "mflux", specifier = ">=0.17.5,<0.20" },
+    { name = "mflux", specifier = ">=0.17.5,<0.21" },
     { name = "mlx-taef", specifier = ">=0.1.1" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov" },

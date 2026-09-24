@@ -8,8 +8,9 @@ correctness gate for wrapper math — the saved bytes encode "MLX dispatch
 in the script that
 generated them", not "the correct denoising result."
 
-Within a single Python process, however, MLX is deterministic. We exploit
-that with paired same-process parity:
+Within a single Python process, repeated generations have come out
+byte-identical in every run of this suite; that is an observed regularity,
+not a documented MLX guarantee. We rely on it with paired same-process parity:
 
     vanilla_before = capture(flux, prompt=p)
     with apply_teacache(flux, rel_l1_thresh=0.0) as h:

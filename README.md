@@ -27,17 +27,17 @@ FLUX.2 Klein carries a second, smaller wall-clock effect alongside step-skipping
 
 ## Research notes
 
-**[Qwen-Image mixed precision on a 32 GB Mac](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/qwen-image-mixed-precision-on-a-32-gb-mac.md)**
+**[Qwen-Image mixed precision on a 32 GB Mac](https://ineshin.space/papers/qwen-image-mixed-precision-on-a-32-gb-mac/)**
 documents a uniform-q4 portrait artifact and the mixed q8/q4/bf16 recipe that removed it in one
 controlled pair for about 1.9 GiB of additional peak MLX allocation. The recipe changes model
 construction, not TeaCache.
 
-**[Why the TeaCache gate did not engage on short distilled FLUX schedules](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md)**
+**[Why the TeaCache gate did not engage on short distilled FLUX schedules](https://ineshin.space/papers/why-teacache-does-not-engage-on-short-distilled-schedules/)**
 documents the zero-skip negative result on the 8-step distilled Klein schedules and the
 measurement practice it forced: skip counts published next to every wall-clock number, so a
 speedup cannot be mis-attributed to caching.
 
-**[Why byte-exact parity is a poor MLX integration oracle](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-byte-exact-parity-is-a-poor-mlx-integration-oracle.md)**
+**[Why byte-exact parity is a poor MLX integration oracle](https://ineshin.space/papers/why-byte-exact-parity-is-a-poor-mlx-integration-oracle/)**
 uses a pre-release FLUX.1 fixture failure to separate artifact drift, no-op parity, numerical
 equivalence, and intentionally approximate output. It explains why paired same-process tests and
 measured per-variant gates are more informative than committed real-model bytes.
@@ -63,10 +63,10 @@ pip install "mlx-teacache[mflux]"
 uv add "mlx-teacache[mflux]"
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.20`. mflux 0.19 needs MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair it with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat on 0.19: its `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section).
+Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.21`. mflux 0.19 and 0.20 need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair either with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat from 0.19 on: the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section). mflux 0.20's separate Qwen-Image-2.1 model is not a supported variant.
 
 ```bash
-pip install "mlx-teacache[mflux]==0.11.0"  # pin for reproducibility
+pip install "mlx-teacache[mflux]==0.11.1"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -157,7 +157,7 @@ See `_artifacts/v0.10.0_bench_klein_base_9b.json` for the full report (`_artifac
 
 See `scripts/_bench_z_image_v0_7_0.json` for the full report.
 
-**[`qwen-image`](docs/variants/qwen-image.md)** — Qwen-Image base (Alibaba, Apache-2.0), a ~20B dual-stream MMDiT and the first variant that proxies `flux.transformer` (the FLUX.1 pattern) *and* runs true two-pass CFG. It's FLUX-shaped, so the gate taps the FLUX-canonical modulated block-0 input, calibrated in-repo at R² 0.849 (well above Z-Image's 0.400 and the FLUX.2 family's 0.11–0.47). Per-variant default `rel_l1_thresh=0.30`, set from the threshold sweep. At the red-apple 768×768 recipe it skips 33 of 48 active steps for **2.68× combined** (642.6 s → 239.4 s), SSIM 0.967 vs vanilla — the largest gain of any variant, all of it step-skipping (Qwen has no `mx.compile` path). Lowering the threshold to 0.20 gives back the earlier SSIM-0.978 operating point; the variant page has the whole sweep and footnote ⁷ has the measurement history. **On mflux 0.19 the `qwen-image` alias loads `Qwen/Qwen-Image-2512`**, a checkpoint the coefficients were not calibrated on: the variant still applies, `apply_teacache` raises `TeaCacheUncalibratedCheckpointWarning` once, and that checkpoint's numbers stay unverified until it is calibrated with `scripts/calibrate_qwen.py`. On a 32 GB Mac stock 4-bit Qwen is grainy — the showcase portraits use a mixed-precision build (see the [variant page](docs/variants/qwen-image.md)); mlx-teacache stays quantization-agnostic.
+**[`qwen-image`](docs/variants/qwen-image.md)** — Qwen-Image base (Alibaba, Apache-2.0), a ~20B dual-stream MMDiT and the first variant that proxies `flux.transformer` (the FLUX.1 pattern) *and* runs true two-pass CFG. It's FLUX-shaped, so the gate taps the FLUX-canonical modulated block-0 input, calibrated in-repo at R² 0.849 (well above Z-Image's 0.400 and the FLUX.2 family's 0.11–0.47). Per-variant default `rel_l1_thresh=0.30`, set from the threshold sweep. At the red-apple 768×768 recipe it skips 33 of 48 active steps for **2.68× combined** (642.6 s → 239.4 s), SSIM 0.967 vs vanilla — the largest gain of any variant, all of it step-skipping (Qwen has no `mx.compile` path). Lowering the threshold to 0.20 gives back the earlier SSIM-0.978 operating point; the variant page has the whole sweep and footnote ⁷ has the measurement history. **From mflux 0.19 on, the `qwen-image` alias loads `Qwen/Qwen-Image-2512`**, a checkpoint the coefficients were not calibrated on: the variant still applies, `apply_teacache` raises `TeaCacheUncalibratedCheckpointWarning` once, and that checkpoint's numbers stay unverified until it is calibrated with `scripts/calibrate_qwen.py`. mflux 0.20's separate Qwen-Image-2.1 is a different architecture and not a supported variant; `apply_teacache` raises `IncompatibleModelError` for it. On a 32 GB Mac stock 4-bit Qwen is grainy — the showcase portraits use a mixed-precision build (see the [variant page](docs/variants/qwen-image.md)); mlx-teacache stays quantization-agnostic.
 
 **[`flux1-krea-dev`](docs/variants/flux1-krea-dev.md)** — FLUX.1 Krea [dev] (Black Forest Labs with Krea; FLUX.1-dev Non-Commercial, gated), a FLUX.1-dev-architecture finetune that reuses the FLUX.1 proxy strategy unchanged. It does not reuse FLUX.1-dev's coefficients: scored on Krea's own calibration pairs, dev's tuple gives R² −496, because Krea changes roughly three times more per step, so Krea ships its own fit (R² 0.68, calibrated in-repo at the model card's 28-step, guidance 4.5 recipe) and a per-variant default `rel_l1_thresh=0.30`, the sharp knee of its threshold sweep (SSIM 0.990 at 0.30, 0.890 at 0.35). The package fallback 0.20 would skip nothing on this model. The v0.11.0 three-way bench at the red-apple 512×512 recipe (subprocess-per-rep, three cold reps, q4, 28 steps, g=4.5): **1.62× combined** (125.3 s → 77.2 s), 10 of 26 active steps skipped in every rep and never two in a row; 1.57× of it is gating, and the 1.03× the no-gate wrapper shows is noise, since FLUX.1 has no `mx.compile` path to avoid. Reproduce with `uv run python scripts/bench_speedup.py --variant krea-dev --three-way --reps 3`.
 
@@ -168,7 +168,7 @@ The wrapper helps when the underlying schedule actually has cacheable redundancy
 In practice, that means:
 
 - Use mlx-teacache for **`flux1-dev`** at 20-50 steps, the **non-distilled FLUX.2 Klein** family (`flux2-klein-base-4b`, `flux2-klein-base-9b`) at 20-50 steps with or without CFG, **`z-image-base`** at 50 steps with CFG, and **`qwen-image`** at 50 steps with CFG. These are the variants featured in [COMPARISON.md](COMPARISON.md), and the wrapper measurably skips steps and produces visually equivalent output.
-- Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux. The full story of that zero-skip result is in [the distilled-schedules research note](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md).
+- Do not reach for it on the **distilled** variants — `flux1-schnell` (4 steps), `flux2-klein-4b` and `flux2-klein-9b` at their distilled defaults (4-8 steps). The residual between adjacent steps is too large for the gate to engage at any reasonable threshold, so it skips zero steps and adds about 1-2% gating overhead. Run those through vanilla mflux. The full story of that zero-skip result is in [the distilled-schedules research note](https://ineshin.space/papers/why-teacache-does-not-engage-on-short-distilled-schedules/).
 
 There is a separate, incidental benefit on FLUX.2 variants regardless of whether the gate engages: the wrapper sidesteps mflux's compiled `_predict` path, which on Max and Ultra chips happens to be slower than the uncompiled path on the current MLX release. That is a wall-clock effect from compile avoidance, not from step-skipping, and we keep the two attributions separate in the docs.
 
@@ -224,8 +224,8 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 |---|---|---|---|---|---|---|
 | `flux1-dev` | 25 | 113.1s | 71.9s | **1.57×** | **6 / 25** | TeaCache step-skipping¹ |
 | `flux1-schnell` | — | — | — | — | — | shares dev's coefficients; gate behaves like dev at long schedules, like Klein at the 4-step distilled default (no benefit) |
-| `flux2-klein-4b`† | 8 | 28.1s | 22.3s | 1.26× | **0 / 8** | `mx.compile` avoidance only |
-| `flux2-klein-9b`† | 8 | 119.0s | 61.8s | 1.93× | **0 / 8** | `mx.compile` avoidance only |
+| `flux2-klein-4b`² | 8 | 28.1s | 22.3s | 1.26× | **0 / 8** | `mx.compile` avoidance only |
+| `flux2-klein-9b`² | 8 | 119.0s | 61.8s | 1.93× | **0 / 8** | `mx.compile` avoidance only |
 | `flux2-klein-base-4b`³ | 25 | 77.5s | 55.1s | **1.41×** | **3 / 25** | step-skipping + `mx.compile` avoidance |
 | `flux2-klein-base-4b` (CFG)⁴ | 50 | 233.9s | 192.4s | **1.22×** | **9 / 50** | step-skipping (compile-avoidance ≈ noise) |
 | `flux2-klein-base-9b` (CFG)⁵ | 50 | 520.6s | 379.1s | **1.37×** | **13 / 50** | step-skipping + small compile-avoidance |
@@ -235,7 +235,7 @@ All numbers are reproducible via `scripts/bench_speedup.py`. M1 Max 32GB, macOS 
 
 ¹ `flux1-dev` at 25 steps, `guidance=3.5`, 512×512, default `rel_l1_thresh=0.20`. Measured 2026-08-15 under the subprocess-per-rep harness (mflux 0.18.0, v0.10.0 gate): **1.57× combined** as the median of three cold reps (vanilla 113.1 s → gated 71.9 s), decomposed as 1.41× from step-skipping and 1.11× from `mx.compile`-path avoidance. One caveat on the split: the vanilla reps were spread wide this session (104.7 / 113.1 / 119.8 s) while the gated wrapper held steady (69.8 / 71.9 / 73.1 s), the same 71 s v0.6.3 measured. Comparing fastest to fastest gives 1.50×, so 1.5× is the conservative headline. The earlier 1.46× (v0.6.3, vanilla 103.8 s) came from a session with a quicker vanilla baseline, not from a slower wrapper. 6/25 skips in every rep, never two consecutive. Full report: `_artifacts/v0.10.0_bench_flux1_dev.json` (v0.6.3's is kept alongside as `_artifacts/v0.6.3_bench_flux1_dev.json`). Reproduce with `uv run python scripts/bench_speedup.py --variant flux1-dev --three-way --reps 3 --report out.json`.
 
-† Distilled klein rows are v0.4-era same-process measurements with high thermal variance. The klein-9b 1.93× median combined a thermally-throttled vanilla rep (227s) with a recovered wrapper rep (46s); the steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps. These rows are pending a re-bench under the v0.6.0 subprocess-per-rep harness; v0.6.0's measurement on klein-base CFG showed the compile-avoidance contribution at 1.01-1.02× on 50-step schedules, so the distilled 1.5-2.0× figure is specific to the 8-step distilled path and may be smaller under cold-isolation conditions.
+² Distilled klein rows are v0.4-era same-process measurements with high thermal variance. The klein-9b 1.93× median combined a thermally-throttled vanilla rep (227s) with a recovered wrapper rep (46s); the steady-state range across reps is roughly 1.5-2.0× depending on system load. The 0/8 skip count is stable across all reps. These rows are pending a re-bench under the v0.6.0 subprocess-per-rep harness; v0.6.0's measurement on klein-base CFG showed the compile-avoidance contribution at 1.01-1.02× on 50-step schedules, so the distilled 1.5-2.0× figure is specific to the 8-step distilled path and may be smaller under cold-isolation conditions.
 
 ³ `flux2-klein-base-4b` at `guidance=1.0`, per-variant default `rel_l1_thresh=0.17`. The 1.41× was measured under the v0.4.0 same-process harness; not yet re-bench'd under subprocess-per-rep. The combined number historically credited step-skipping (3/25 skips save ~12% directly) and `mx.compile`-path avoidance. Under v0.6.0's subprocess-per-rep harness on the related 50-step CFG recipe, compile-avoidance came out at 1.01× — so the 1.41× decomposition may shift toward "almost entirely step-skipping" when re-measured. CFG (`guidance > 1.0`) is gated end-to-end as of v0.4.1; see footnote ⁴.
 
@@ -290,7 +290,7 @@ The PR-gate prompt is the red-apple one; SSIM ≥ 0.90 on FLUX.1-dev and ≥ 0.8
 
 ## Performance by chip
 
-mflux wraps `_predict` in `mx.compile` on every Apple Silicon chip *except* base + Pro M1/M2 (the behaviour is unchanged from mflux 0.17.5 through 0.19). The `is_m1_or_m2()` predicate returns true (eager path) when the chip brand contains "Apple M1" or "Apple M2" *and* does not contain "Max" or "Ultra" — so M1 Pro and M2 Pro are eager too, while M1/M2 Max + Ultra and every M3/M4/M5 chip get the compiled path. mlx-teacache replaces `_predict` with an eager closure so per-step gating stays live, trading the compile gain for the skip gain on compiled chips. That compile-avoidance effect is **FLUX.2 Klein only** — FLUX.1, FLUX.1 Krea, and Qwen-Image have no `mx.compile` path, so their step-skipping speedup is the same on every chip. See `docs/m3-plus-tradeoff.md` for a benchmark recipe.
+mflux wraps `_predict` in `mx.compile` on every Apple Silicon chip *except* base + Pro M1/M2 (the behaviour is unchanged from mflux 0.17.5 through 0.20). The `is_m1_or_m2()` predicate returns true (eager path) when the chip brand contains "Apple M1" or "Apple M2" *and* does not contain "Max" or "Ultra" — so M1 Pro and M2 Pro are eager too, while M1/M2 Max + Ultra and every M3/M4/M5 chip get the compiled path. mlx-teacache replaces `_predict` with an eager closure so per-step gating stays live, trading the compile gain for the skip gain on compiled chips. That compile-avoidance effect is **FLUX.2 Klein only** — FLUX.1, FLUX.1 Krea, and Qwen-Image have no `mx.compile` path, so their step-skipping speedup is the same on every chip. See `docs/m3-plus-tradeoff.md` for a benchmark recipe.
 
 | Chip | Vanilla `_predict` in mflux | Expected speedup |
 |---|---|---|
@@ -317,7 +317,7 @@ The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exc
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
-The mflux pin is strict at `>=0.17.5,<0.20`. Bumping it is a deliberate release: each new mflux minor is verified on real weights before the range widens.
+The mflux pin is strict at `>=0.17.5,<0.21`. Bumping it is a deliberate release: each new mflux minor is verified on real weights before the range widens.
 
 Calling `flux.parameters()` at the parent level can miss transformer parameters while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first.
 

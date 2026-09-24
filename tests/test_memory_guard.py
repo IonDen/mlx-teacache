@@ -8,7 +8,12 @@ from types import ModuleType
 import pytest
 
 from tests import _memory_guard
-from tests._memory_guard import apply_mlx_memory_caps, cache_limit_target, wired_limit_target
+from tests._memory_guard import (
+    apply_mlx_memory_caps,
+    cache_limit_target,
+    fallback_cache_limit_target,
+    wired_limit_target,
+)
 
 GIB = 1024**3
 _REPO = Path(__file__).resolve().parent.parent
@@ -156,11 +161,26 @@ def test_apply_caps_bounds_the_cache_pool_from_the_wired_target():
     assert mx.cache_calls == [cache_limit_target(mx.wired_calls[0])]
 
 
-def test_no_wired_cap_means_no_cache_cap():
-    """bug caught: sizing the pool off a missing wired target (TypeError or a 0 cap)."""
+def test_fallback_cache_target_is_five_percent_of_memory_at_most_two_gib():
+    """bug caught: a fallback that ignores the 2 GiB ceiling, or one sized as a fraction
+    of something other than physical memory."""
+    assert fallback_cache_limit_target(16 * GIB) == int(16 * GIB * 0.05)
+    assert fallback_cache_limit_target(128 * GIB) == 2 * GIB
+
+
+def test_no_wired_cap_still_bounds_the_cache_pool_from_memory_size():
+    """bug caught: leaving MLX's pool at its near-device-memory default whenever the
+    device report lacks max_recommended_working_set_size (the pre-0.11.1 behavior)."""
     mx = _FakeMx({"memory_size": 32 * GIB})
-    messages: list[str] = []
-    apply_mlx_memory_caps(mx, messages.append)
+    apply_mlx_memory_caps(mx, lambda _m: None)
+    assert mx.wired_calls == []
+    assert mx.cache_calls == [fallback_cache_limit_target(32 * GIB)]
+
+
+def test_no_device_sizes_means_no_cache_cap():
+    """bug caught: sizing the pool off a zero or missing memory size (a 0-byte cap)."""
+    mx = _FakeMx({})
+    apply_mlx_memory_caps(mx, lambda _m: None)
     assert mx.cache_calls == []
 
 

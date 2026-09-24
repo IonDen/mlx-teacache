@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -91,3 +92,37 @@ def test_readme_requires_line_states_the_floor() -> None:
     readme = (_REPO_ROOT / "README.md").read_text()
 
     assert f"Requires Python ≥ {SUPPORTED_PYTHONS[0]}" in readme
+
+
+# The mflux range lives in five places. pyproject's [mflux] extra is the source of truth;
+# the test-mflux group, the CI job that installs the newest in-range mflux, and the README
+# must quote the same range. A partial bump is the failure this catches: a CI line left at
+# the old upper bound keeps the "newest in range" job testing the previous minor, so a new
+# mflux never reaches the drift guard. CHANGELOG / ROADMAP ranges are history and exempt.
+_MFLUX_RANGE = re.compile(r">=\d+(?:\.\d+)*,<\d+(?:\.\d+)*")
+
+
+def _mflux_extra_range() -> str:
+    (spec,) = _pyproject()["project"]["optional-dependencies"]["mflux"]
+    assert spec.startswith("mflux"), spec
+    return spec.removeprefix("mflux")
+
+
+def test_test_mflux_group_pins_the_same_mflux_range_as_the_extra() -> None:
+    group = _pyproject()["dependency-groups"]["test-mflux"]
+    mflux_specs = [s for s in group if isinstance(s, str) and s.startswith("mflux")]
+    assert mflux_specs == [f"mflux{_mflux_extra_range()}"]
+
+
+def test_ci_newest_in_range_job_installs_the_extra_range() -> None:
+    live = "\n".join(line.split("#", 1)[0] for line in _CI_WORKFLOW.read_text().splitlines())
+    ci_ranges = {
+        m.group(0) for m in _MFLUX_RANGE.finditer(live) if "mflux" in live[max(0, m.start() - 6) : m.start()]
+    }
+    assert ci_ranges == {_mflux_extra_range()}
+
+
+def test_readme_quotes_only_the_extra_mflux_range() -> None:
+    readme = (_REPO_ROOT / "README.md").read_text()
+    quoted = set(re.findall(r"`(?:mflux)?(>=\d+(?:\.\d+)*,<\d+(?:\.\d+)*)`", readme))
+    assert quoted == {_mflux_extra_range()}

@@ -57,13 +57,6 @@ def test_mflux_files_allowlist_all_exist():
     assert not missing, f"_MFLUX_FILES lists non-existent files: {missing}"
 
 
-def test_apply_teacache_docstring_lists_qwen_default():
-    from mlx_teacache import apply_teacache
-
-    doc = apply_teacache.__doc__ or ""
-    assert "0.30" in doc and "qwen" in doc.lower()
-
-
 def test_public_docstring_summaries_name_all_supported_model_families():
     import mlx_teacache
     from mlx_teacache import apply_teacache

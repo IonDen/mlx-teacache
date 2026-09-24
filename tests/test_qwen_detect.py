@@ -36,5 +36,13 @@ def test_rejects_edit_and_others(aliases: list[str]) -> None:
     assert matches(_flux(aliases)) is False
 
 
+def test_rejects_qwen_image_21() -> None:
+    """mflux 0.20 adds Qwen-Image-2.1 as its own architecture (`mflux.models.qwen21`), with
+    aliases that all start with the Qwen-Image base's own names. Applying the Qwen-Image proxy
+    to it would re-walk a transformer this variant was never written for. Goes red if the
+    detector ever switches from element membership to substring or prefix matching."""
+    assert matches(_flux(["qwen-image-2.1", "qwen-2.1", "qwen-image-21"])) is False
+
+
 def test_missing_model_config_is_false() -> None:
     assert matches(SimpleNamespace()) is False

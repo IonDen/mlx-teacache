@@ -3,6 +3,7 @@
 GIB = 1024**3
 CACHE_CAP_BYTES = 2 * GIB
 CACHE_FRACTION_OF_WIRED = 0.25
+CACHE_FRACTION_OF_MEMORY = 0.05
 
 
 def cache_limit_target(wired_bytes: int) -> int:
@@ -11,6 +12,13 @@ def cache_limit_target(wired_bytes: int) -> int:
     default limit is near device memory, so an unbounded pool lets a module of
     many generations grow far past one generation's peak."""
     return min(CACHE_CAP_BYTES, int(wired_bytes * CACHE_FRACTION_OF_WIRED))
+
+
+def fallback_cache_limit_target(total_bytes: int) -> int:
+    """Cache-pool cap when no wired cap can be derived (a device report without
+    max_recommended_working_set_size): 5 % of physical memory, at most 2 GiB. Without it
+    the pool would stay at MLX's near-device-memory default for the whole session."""
+    return min(CACHE_CAP_BYTES, int(total_bytes * CACHE_FRACTION_OF_MEMORY))
 
 
 def wired_limit_target(total_bytes: int, max_working_set: int) -> int | None:
@@ -36,14 +44,18 @@ def apply_mlx_memory_caps(mx, emit) -> None:
         return
 
     target = wired_limit_target(total_bytes, max_working_set)
+    cache: int | None = None
     if target is None:
         emit(f"no safe wired cap (memory_size={total_bytes}, max_working_set={max_working_set})")
+        if total_bytes > 0:
+            cache = fallback_cache_limit_target(total_bytes)
     else:
         try:
             mx.set_wired_limit(target)
         except Exception as exc:  # noqa: BLE001
             emit(f"set_wired_limit({target}) failed ({exc!r})")
         cache = cache_limit_target(target)
+    if cache is not None:
         try:
             mx.set_cache_limit(cache)
         except Exception as exc:  # noqa: BLE001

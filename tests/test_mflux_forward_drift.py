@@ -149,7 +149,11 @@ KNOWN: dict[str, dict[str, str]] = {
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
-    # 0.20.0: only Flux2Klein.generate_image moved: the VAE decode after the loop now passes
+    # 0.20.0, verified 2026-09-24 on real weights (FLUX.1-dev, FLUX.1-schnell's step-window test,
+    # FLUX.1 Krea [dev], the four FLUX.2 Klein variants incl. CFG and image quality, Z-Image,
+    # the mlx-taef live-preview composition; mlx 0.32.2). Qwen-Image not re-run: 0.19+/0.20
+    # `qwen-image` is Qwen-Image-2512, still uncalibrated and warned about.
+    # Only Flux2Klein.generate_image moved: the VAE decode after the loop now passes
     # tiling_config, which the wrapper passes through untouched. Also new in 0.20, outside
     # these ten targets: RopeEmbedder.__init__ evaluates Z-Image's rotary tables (the lazy
     # tables the Z-Image parity fixture materialises by hand), and call_in_loop can receive a

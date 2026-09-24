@@ -7,6 +7,27 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-09-24
+
+mflux 0.20 support. The pin widens to `mflux>=0.17.5,<0.21`. No change to the public API, the gate, the coefficients or any generated image.
+
+### Changed
+- **mflux 0.20 is supported; the pin widens to `>=0.17.5,<0.21`.** Three of the upstream functions this library copies or wraps moved between 0.19.1 and 0.20.0, and none of the changes is on the path the copies take. The FLUX.2 and Z-Image transformer forwards gained optional gradient checkpointing in 0.19.2, which only mflux's training adapters switch on. FLUX.2 Klein's generate loop now hands its VAE tiling setting to the decode after the loop, and the wrapper passes that call through untouched. The real-weights parity lane passed on 0.20.0 for FLUX.1-dev, FLUX.1 Krea [dev], FLUX.1-schnell's step-window test, all four FLUX.2 Klein variants (threshold-zero parity, the CFG path and the image-quality gates) and Z-Image, and TeaCache still composes with mlx-taef's live preview.
+- Two smaller upstream changes are worth knowing about. In-loop callbacks can now receive each step's `denoised` prediction, but only if they declare that argument, and this library's callbacks don't. And mflux 0.20 evaluates Z-Image's rotary tables when it builds the model, so the one-liner on the Z-Image page for bit-identical vanilla runs is only needed on mflux 0.19 with MLX 0.32.
+- Qwen-Image is where 0.11.0 left it. On mflux 0.19 and 0.20 the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, which the coefficients were not calibrated on, and `apply_teacache` still warns there. mflux 0.20's new Qwen-Image-2.1 is a different architecture and not a supported variant: `apply_teacache` raises `IncompatibleModelError` for it.
+- mflux 0.20 keeps 0.19's floors (MLX 0.32, torch 2.13). Pair it with mlx-taef 0.8.1 or later for live previews, as with 0.19.
+- The README's research-notes links now open the rendered papers on ineshin.space, and the distilled-Klein benchmark footnote is numbered 2, so the footnotes run 1 to 8 without a gap.
+
+### Fixed
+- The test session now bounds MLX's buffer cache even when the device report has no recommended working-set size to derive a wired cap from: 5 % of memory, at most 2 GiB. Before, the pool stayed at MLX's default, which sits near physical memory. The Krea parity module also clears the MLX cache between tests, as the Qwen module already did.
+
+### Internal
+- The drift guard carries verified fingerprints for mflux 0.19.2 and 0.20.0.
+- A config test now requires the `test-mflux` group, the CI job that installs the newest in-range mflux, and the README to quote the same mflux range as the `[mflux]` extra. A partial pin bump can no longer leave that CI job testing the previous minor.
+- A detector test pins that Qwen-Image-2.1 is not taken for Qwen-Image.
+- The `apply_teacache` docstring test reads each variant's default threshold from the registry instead of hardcoded numbers, so a recalibrated default with a stale docstring now fails.
+- Two stale parity-test docstrings are corrected (the FLUX.2 threshold-zero gate and CFG path, and FLUX.1 within-process determinism, which is observed rather than guaranteed).
+
 ## [0.11.0] — 2026-09-06
 
 mflux 0.19 support and one new model. The pin widens to `mflux>=0.17.5,<0.20` after the real-weights parity lane passed on 0.19.1; FLUX.1 Krea [dev] joins with its own calibration; Qwen-Image's default threshold was re-swept and re-benched on the guarded harness. No change to the public API.
@@ -238,7 +259,7 @@ Behavior is byte-equivalent to v0.5.0 for end users. The 4-kwarg `apply_teacache
 - `scripts/calibrate_flux2.py` and several tests retargeted to import from the variant subpackages instead of the deleted `integrations/mflux/forward.py`.
 
 ### Removed
-- `src/mlx_teacache/integrations/mflux/{forward,flux1,flux2,detect}.py` — 1000+ lines of legacy code. The verbatim ports live in `variants/<id>/integration.py`. Files moved to `~/.Trash` per `CLAUDE.md`'s "never `rm`" rule rather than deleted, in case any reviewer wants to inspect the verbatim-port mapping.
+- `src/mlx_teacache/integrations/mflux/{forward,flux1,flux2,detect}.py` — 1000+ lines of legacy code. The verbatim ports live in `variants/<id>/integration.py`.
 - `mlx_teacache.coefficients._REGISTRY` + the four per-variant coefficient tuples + `load_builtin`. The legacy registry served its purpose during the migration (transcription-error catcher); each variant owns its tuple now.
 
 ### Measured

@@ -105,6 +105,12 @@ def _names_variant(token: str, variant_id: str) -> bool:
     return token == variant_id or (token.startswith("-") and variant_id.endswith(token))
 
 
+def _stale_row_names(rows: list[tuple[list[str], str]], variant_ids) -> list[str]:  # noqa: ANN001
+    """Every name in a docstring row that no live variant answers to, in row order."""
+    ids = list(variant_ids)
+    return [n for names, _ in rows for n in names if not any(_names_variant(n, v) for v in ids)]
+
+
 def test_apply_teacache_docstring_default_table_matches_the_registry():
     """Every registered variant has exactly one row in the docstring's default table, and the
     row shows the variant's actual DEFAULT_THRESH (or says it has none). Goes red when a
@@ -123,8 +129,18 @@ def test_apply_teacache_docstring_default_table_matches_the_registry():
             assert matching[0].startswith("no per-variant default"), (variant_id, matching[0])
         else:
             assert matching[0].startswith(f"{default:.2f}"), (variant_id, default, matching[0])
-    # The converse: a row left behind after a variant is removed or renamed.
-    for names, rest in rows:
-        assert any(_names_variant(n, v) for n in names for v in _REGISTRY), (
-            f"orphan docstring row {names}: {rest}"
-        )
+    # The converse, per name: a row (or one name in a grouped row) that outlives its variant.
+    assert _stale_row_names(rows, _REGISTRY) == []
+
+
+def test_stale_row_names_catches_one_dropped_name_in_a_grouped_row():
+    """bug caught: checking a grouped row with any() instead of per name. Dropping only
+    flux2-klein-base-9b while flux2-klein-base-4b stays registered must still flag the
+    row's `-base-9b` token as stale."""
+    from mlx_teacache import apply_teacache
+    from mlx_teacache.variants import _REGISTRY
+
+    rows = _docstring_default_rows(apply_teacache.__doc__ or "")
+    assert _stale_row_names(rows, _REGISTRY) == []
+    without_base_9b = [v for v in _REGISTRY if v != "flux2-klein-base-9b"]
+    assert _stale_row_names(rows, without_base_9b) == ["-base-9b"]

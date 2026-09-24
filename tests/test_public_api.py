@@ -108,8 +108,8 @@ def _names_variant(token: str, variant_id: str) -> bool:
 def test_apply_teacache_docstring_default_table_matches_the_registry():
     """Every registered variant has exactly one row in the docstring's default table, and the
     row shows the variant's actual DEFAULT_THRESH (or says it has none). Goes red when a
-    recalibration changes a config default without touching the docstring, or when a new
-    variant ships without a row."""
+    recalibration changes a config default without touching the docstring, when a new
+    variant ships without a row, or when a row outlives the variant it names."""
     from mlx_teacache import apply_teacache
     from mlx_teacache.variants import _REGISTRY
 
@@ -123,3 +123,8 @@ def test_apply_teacache_docstring_default_table_matches_the_registry():
             assert matching[0].startswith("no per-variant default"), (variant_id, matching[0])
         else:
             assert matching[0].startswith(f"{default:.2f}"), (variant_id, default, matching[0])
+    # The converse: a row left behind after a variant is removed or renamed.
+    for names, rest in rows:
+        assert any(_names_variant(n, v) for n in names for v in _REGISTRY), (
+            f"orphan docstring row {names}: {rest}"
+        )

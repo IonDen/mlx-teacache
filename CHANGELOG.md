@@ -18,11 +18,9 @@ mflux 0.20 support. The pin widens to `mflux>=0.17.5,<0.21`. No change to the pu
 - mflux 0.20 keeps 0.19's floors (MLX 0.32, torch 2.13). Pair it with mlx-taef 0.8.1 or later for live previews, as with 0.19.
 - The README's research-notes links now open the rendered papers on ineshin.space, and the distilled-Klein benchmark footnote is numbered 2, so the footnotes run 1 to 8 without a gap.
 
-### Fixed
-- The test session now bounds MLX's buffer cache even when the device report has no recommended working-set size to derive a wired cap from: 5 % of memory, at most 2 GiB. Before, the pool stayed at MLX's default, which sits near physical memory. The Krea parity module also clears the MLX cache between tests, as the Qwen module already did.
-
 ### Internal
 - The drift guard carries verified fingerprints for mflux 0.19.2 and 0.20.0.
+- The test session bounds MLX's buffer cache in one more case, as a precaution: when a device report has no recommended working-set size to derive a wired cap from, the pool is capped at 5 % of memory (at most 2 GiB) instead of being left at MLX's default, which sits near physical memory. The Krea parity module also clears the MLX cache between tests, as the Qwen module already did.
 - A config test now requires the `test-mflux` group, the CI job that installs the newest in-range mflux, and the README to quote the same mflux range as the `[mflux]` extra. A partial pin bump can no longer leave that CI job testing the previous minor.
 - A detector test pins that Qwen-Image-2.1 is not taken for Qwen-Image.
 - The `apply_teacache` docstring test reads each variant's default threshold from the registry instead of hardcoded numbers, so a recalibrated default with a stale docstring now fails.

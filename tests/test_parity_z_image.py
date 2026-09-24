@@ -3,7 +3,7 @@
 Mirrors test_parity_flux2.py's CFG release-blocker pattern. Z-Image's vanilla
 `_predict` is `mx.compile`-wrapped except on base and Pro M1/M2, where mflux
 returns the eager function (AppleSiliconUtil.is_m1_or_m2, which excludes Max
-and Ultra; unchanged from 0.17.5 through 0.19.x); our TeaCache integration
+and Ultra; unchanged from 0.17.5 through 0.20.0); our TeaCache integration
 replaces `_predict` with an eager-Python wrapper that re-walks
 ZImageTransformer.__call__ so the per-step gate runs every step. We gate threshold=0 parity with cosine
 similarity (not bit-exact): the calibration self-check measured cos >= 0.999
@@ -121,7 +121,9 @@ def zimage_base() -> Any:
 
     flux = ZImage(quantize=8, model_config=ModelConfig.z_image())
     flux.freeze()
-    # mflux builds RopeEmbedder.freqs_cis as lazy arrays it never evaluates. A
+    # mflux < 0.20 builds RopeEmbedder.freqs_cis as lazy arrays it never evaluates
+    # (0.20 evaluates them in RopeEmbedder.__init__, mflux #714, so the eval below
+    # is a no-op there; keep it while 0.19.x is in the supported range). A
     # compiled vanilla run traces that pending graph into the compiled function;
     # the first eager pass through the transformer (ours, or any other) then
     # materialises the tables with the eager kernels, and every later compiled

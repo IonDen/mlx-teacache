@@ -26,6 +26,7 @@ from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 
 from .config import COEFFICIENTS, DEFAULT_THRESH, META
+from .detect import is_calibrated_checkpoint
 from .pairing import CfgBranchPairer
 
 _PROVENANCE = Provenance(
@@ -386,9 +387,8 @@ def apply(
         # declared through --base-model counts as the calibrated checkpoint.
         model_config = getattr(flux, "model_config", None)
         loaded = getattr(model_config, "model_name", None)
-        base = getattr(model_config, "base_model", None)
         calibrated = META["hf_model_id"]
-        if isinstance(loaded, str) and calibrated not in (loaded, base):
+        if not is_calibrated_checkpoint(model_config, calibrated):
             warnings.warn(
                 TeaCacheUncalibratedCheckpointWarning(
                     f"variant 'qwen-image' loaded {loaded!r}, but its coefficients were "

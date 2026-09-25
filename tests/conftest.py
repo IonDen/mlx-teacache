@@ -57,6 +57,7 @@ _MFLUX_FILES = {
     "test_detect.py",  # imports mflux types for variant detection
     "test_mflux_contract_smoke.py",
     "test_mflux_forward_drift.py",  # fingerprints the real mflux forwards
+    "test_comparison_qwen_config.py",
 }
 
 

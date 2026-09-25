@@ -15,6 +15,13 @@ _PUBLIC_DOCS = [
     "docs/variants/flux2-klein-base-9b.md",
     "docs/variants/z-image-base.md",
     "docs/variants/qwen-image.md",
+    "docs/comparison/flux1-dev.md",
+    "docs/comparison/flux1-krea-dev.md",
+    "docs/comparison/klein-base-4b.md",
+    "docs/comparison/z-image-base.md",
+    "docs/comparison/klein-base-9b.md",
+    "docs/comparison/klein-distilled-vs-base.md",
+    "docs/comparison/qwen-image.md",
 ]
 
 
@@ -35,6 +42,12 @@ def test_readme_install_commands_parse():
     assert targets, "expected at least one pip install command in README"
     for token in targets:
         Requirement(token)
+
+
+def test_all_public_docs_exist():
+    """Bug: a listed page is renamed or missing, so the hygiene checks silently skip it."""
+    missing = [path for path in _PUBLIC_DOCS if not (_REPO / path).exists()]
+    assert not missing, f"_PUBLIC_DOCS lists non-existent files: {missing}"
 
 
 def test_no_public_doc_cites_gitignored_artifacts():

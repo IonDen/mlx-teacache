@@ -15,3 +15,12 @@ def matches(flux: object) -> bool:
         return False
     aliases = getattr(model_config, "aliases", None) or []
     return "qwen-image" in aliases or "qwen" in aliases
+
+
+def is_calibrated_checkpoint(model_config: object, calibrated: str) -> bool:
+    """True unless the model reports a model_name that is neither the calibrated checkpoint nor declares it as its
+    base. mflux resolves a local path or a pre-quantized mirror by copying the base config and recording the base's
+    model_name in base_model, so such a mirror counts as calibrated."""
+    loaded = getattr(model_config, "model_name", None)
+    base = getattr(model_config, "base_model", None)
+    return not isinstance(loaded, str) or calibrated in (loaded, base)

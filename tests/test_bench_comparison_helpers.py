@@ -1,19 +1,4 @@
-"""Pure-helper unit tests for ``scripts/bench_comparison.py``.
-
-Covers two harness defects:
-
-  - ``_condition_metrics`` — cold = rep 1, warm = median of reps 2+, with the
-    one-rep images-only preview (``--reps 1``) returning ``warm=None`` instead of
-    crashing on ``statistics.median([])``.
-  - ``_speedup`` — vanilla/wrapper ratio with None/zero-denominator guards.
-  - ``_merge_variant_into_report`` — a ``--only <slug>`` resume refreshes the
-    report's top-level provenance to the current run and stamps per-variant
-    provenance, so a resumed report can no longer keep a prior run's stale
-    ``generated_at`` / version.
-
-``bench_comparison`` imports mflux / PIL / mlx only lazily (inside the worker
-functions), so this module imports cleanly in the pure-core lane.
-"""
+"""Pure helpers of the schema-2 comparison harness (pure-core lane: bench_comparison imports mflux lazily)."""
 
 import json
 import sys
@@ -22,213 +7,512 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import _comparison_recipes as cr  # noqa: E402
 import bench_comparison as bc  # noqa: E402
 
-# --- Finding 2: cold/warm split, one-rep preview is crash-free ---------------
+GIB = 1024**3
+V = {"mflux": "0.20.0"}
 
 
-def test_condition_metrics_three_reps_cold_first_warm_median_of_rest() -> None:
-    assert bc._condition_metrics([12.0, 9.0, 7.0]) == {"cold": 12.0, "warm": 8.0}
+def _write_chunk(
+    chunks: Path,
+    raw: Path,
+    slug: str,
+    cond: str,
+    *,
+    frames: int,
+    final: bool = True,
+    stamp: dict | None = None,
+    size: tuple[int, int] = (768, 1024),
+) -> None:
+    p = bc.chunk_path(chunks, slug, cond)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"condition": cond, "stamp": stamp or {}, "width": size[0], "height": size[1]}))
+    fdir = bc.frames_dir_for(raw, slug, cond)
+    fdir.mkdir(parents=True, exist_ok=True)
+    for i in range(frames):
+        (fdir / f"step_step{i:02d}.png").write_bytes(b"x")
+    if final:
+        (bc.raw_dir_for(raw, slug) / f"{cond}.png").write_bytes(b"x")
 
 
-def test_condition_metrics_one_rep_has_no_warm() -> None:
-    # --reps 1 (images-only preview): no warm measurement, must NOT raise on median([]).
-    assert bc._condition_metrics([5.0]) == {"cold": 5.0, "warm": None}
+def test_chunk_complete_only_with_json_final_png_and_every_frame(tmp_path: Path) -> None:
+    """Bug: a chunk with a missing frame or final image counts as done."""
+    c, r = tmp_path / "c", tmp_path / "r"
+    _write_chunk(c, r, "flux1-dev", "a", frames=25)
+    assert bc.chunk_is_complete(c, r, "flux1-dev", "a", 25)
+    assert not bc.chunk_is_complete(c, r, "flux1-dev", "a", 26)
+    _write_chunk(c, r, "flux1-dev", "b", frames=25, final=False)
+    assert not bc.chunk_is_complete(c, r, "flux1-dev", "b", 25)
 
 
-def test_condition_metrics_two_reps_warm_is_single_rest() -> None:
-    assert bc._condition_metrics([10.0, 8.0]) == {"cold": 10.0, "warm": 8.0}
+def test_stamp_mismatch_refuses_and_names_the_field(tmp_path: Path) -> None:
+    """Bug: a chunk measured at another resolution is reused."""
+    r = cr.recipe_for("klein-base-9b")
+    stored = {"stamp": cr.recipe_stamp(r, versions=V)}
+    with pytest.raises(SystemExit, match="width"):
+        bc.check_chunk_stamp(
+            stored, cr.recipe_stamp(cr.with_resolution(r, 576, 768), versions=V), tmp_path / "a.json"
+        )
+    bc.check_chunk_stamp(stored, cr.recipe_stamp(r, versions=V), tmp_path / "a.json")
+    with pytest.raises(SystemExit, match="no recipe stamp"):
+        bc.check_chunk_stamp({}, {"slug": "x"}, tmp_path / "a.json")
 
 
-def test_speedup_is_vanilla_over_wrapper() -> None:
-    assert bc._speedup(10.0, 8.0) == 1.25
+def test_plan_conditions_checks_stamps_on_reuse_and_applies_the_budget(tmp_path: Path) -> None:
+    """Bug: the reuse path skips the stamp check (old portrait chunk reused), or the budget is ignored."""
+    rec = cr.recipe_for("flux1-dev")
+    good = cr.recipe_stamp(rec, versions=V)
+    c, r = tmp_path / "c", tmp_path / "r"
+    assert bc.plan_conditions(c, r, "flux1-dev", 25, good, budget=1) == ["a"]
+    assert bc.plan_conditions(c, r, "flux1-dev", 25, good, budget=-1) == ["a", "b"]
+    _write_chunk(c, r, "flux1-dev", "a", frames=25, stamp=good)
+    assert bc.plan_conditions(c, r, "flux1-dev", 25, good, budget=-1) == ["b"]
+    _write_chunk(c, r, "flux1-dev", "b", frames=25, stamp={**good, "prompt_sha256": "portrait"})
+    with pytest.raises(SystemExit, match="prompt_sha256"):
+        bc.plan_conditions(c, r, "flux1-dev", 25, good, budget=-1)
 
 
-def test_speedup_is_none_when_either_side_missing() -> None:
-    assert bc._speedup(10.0, None) is None
-    assert bc._speedup(None, 8.0) is None
+def test_load_pair_requires_both_complete_matching_and_same_size(tmp_path: Path) -> None:
+    """Bug: SSIM computed while one side is pending, or on A/B images of different sizes."""
+    rec = cr.recipe_for("flux1-dev")
+    good = cr.recipe_stamp(rec, versions=V)
+    c, r = tmp_path / "c", tmp_path / "r"
+    _write_chunk(c, r, "flux1-dev", "a", frames=25, stamp=good)
+    with pytest.raises(SystemExit, match="pending"):
+        bc.load_pair(c, r, "flux1-dev", 25, good)
+    _write_chunk(c, r, "flux1-dev", "b", frames=25, stamp=good, size=(576, 768))
+    with pytest.raises(SystemExit, match="size"):
+        bc.load_pair(c, r, "flux1-dev", 25, good)
 
 
-def test_speedup_is_none_on_zero_denominator() -> None:
-    assert bc._speedup(10.0, 0.0) is None
+def test_load_pair_refuses_a_chunk_measured_under_a_different_stamp(tmp_path: Path) -> None:
+    """Bug: load_pair skips the stamp check, so a chunk measured under a stale recipe/version silently
+    feeds the SSIM comparison."""
+    rec = cr.recipe_for("flux1-dev")
+    good = cr.recipe_stamp(rec, versions=V)
+    c, r = tmp_path / "c", tmp_path / "r"
+    _write_chunk(c, r, "flux1-dev", "a", frames=25, stamp=good)
+    _write_chunk(c, r, "flux1-dev", "b", frames=25, stamp={**good, "width": 576})
+    with pytest.raises(SystemExit, match="width"):
+        bc.load_pair(c, r, "flux1-dev", 25, good)
 
 
-# --- Finding 3: resume refreshes top-level provenance, stamps per-variant ----
+def test_parse_worker_line_prefers_an_abort_after_a_result() -> None:
+    """Bug: a watchdog abort after the result line is ignored and the run counts."""
+    s = bc.WORKER_RESULT_SENTINEL
+    out = f"{s}{json.dumps({'condition': 'a'})}\n{s}{json.dumps({'aborted': 'x'})}\n"
+    assert bc.parse_worker_line(out) == {"aborted": "x"}
+    assert bc.parse_worker_line("no sentinel") is None
 
 
-def _prov() -> dict[str, str]:
-    return {
-        "generated_at": "2026-06-18T08:09Z",
-        "mlx_teacache_version": "0.9.0",
-        "mflux_version": "0.17.5",
+def _result(cond: str, compute: list[float], preview: list[float], gen: float, **extra: object) -> dict:
+    base = {
+        "condition": cond,
+        "width": 768,
+        "height": 1024,
+        "load_seconds": 12.0 if cond == "a" else 13.0,
+        "encode_seconds": 1.5 if cond == "a" else 1.6,
+        "generation_seconds": gen,
+        "compute_seconds": compute,
+        "preview_seconds": preview,
+        "mlx_peak_load_bytes": 9 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": (11 if cond == "a" else 8) * GIB,
+        "memory": {
+            "peak_resident_bytes": 12 * GIB,
+            "peak_footprint_bytes": 14 * GIB,
+            "min_host_free_pct": 41.0,
+            "phases": {},
+        },
+        "frames": len(compute),
+        "released_encoders": [],
+        "stamp": {"prompt_sha256": "p"},
+        "git_sha": "abc1234",
+        "mlx_teacache_version": "0.11.2.dev1",
     }
+    base.update(extra)
+    return base
 
 
-def test_merge_stamps_per_variant_provenance() -> None:
-    out = bc._merge_variant_into_report(
-        {"schema_version": 1, "variants": {}}, "qwen-image", {"speedup_warm": 1.74}, _prov()
+def test_assemble_entry_derives_the_three_speedups_and_kind_medians() -> None:
+    """Bug: a speedup uses the wrong side, step 0 included, or preview not subtracted."""
+    r = cr.recipe_for("flux1-dev")
+    a = _result("a", [30.0, 10.0, 10.0, 10.0], [0.5] * 4, gen=62.5)
+    b = _result(
+        "b",
+        [30.0, 10.0, 1.0, 10.0],
+        [0.5] * 4,
+        gen=53.5,
+        rel_l1_thresh=0.2,
+        decision_kinds=["computed", "computed", "skipped", "computed"],
+        skipped=1,
+        computed=3,
+        max_consecutive_skips=1,
+        skip_pattern="CCSC",
     )
-    assert out["variants"]["qwen-image"]["provenance"] == _prov()
-    assert out["variants"]["qwen-image"]["speedup_warm"] == 1.74
+    e = bc.assemble_entry(
+        r, a, b, ssim=0.97, provenance={"version_mflux": "0.20.0"}, mflux_compiles_on_this_chip=True
+    )
+    assert e["speedup_wall"] == pytest.approx(62.5 / 53.5)
+    assert e["speedup_steady"] == pytest.approx(30.0 / 21.0)
+    assert e["speedup_preview_subtracted"] == pytest.approx(60.5 / 51.5)
+    assert e["b"]["step_medians"] == {"computed": 10.0, "skipped": 1.0}
+    assert e["a"]["load_seconds"] == 12.0 and e["b"]["load_seconds"] == 13.0
+    assert e["images"]["steps_b"] == "_artifacts/comparison/flux1-dev/steps-b.jpg"
+    assert e["bench_report"] == r.bench_report and e["prompt_sha256"] == "p"
 
 
-def test_merge_refreshes_stale_top_level_on_resume() -> None:
-    # The resume scenario: a --only run reloads a report whose top-level was last
-    # written by an earlier run (here 2026-05-18 / 0.1.0).
-    stale = {
-        "schema_version": 1,
-        "generated_at": "2026-05-18T07:02Z",
-        "hardware": {
-            "chip": "Apple M1 Max",
-            "ram_gb": 32,
-            "mlx_teacache_version": "0.1.0",
-            "mflux_version": "0.17.5",
-        },
-        "prompt": "portrait",
-        "variants": {"flux1-dev": {"speedup_warm": 1.18}},
-    }
-    out = bc._merge_variant_into_report(stale, "qwen-image", {"speedup_warm": 1.74}, _prov())
+def test_assemble_entry_marks_a_compiled_predict_only_for_klein_and_z_image_on_a_compiling_chip() -> None:
+    """Bug: FLUX.1 (no mx.compile'd predict step at all) is credited with a compiled predict step, or a
+    Klein/Z-Image loader is marked compiled even on a chip where mflux doesn't compile it (M1/M2)."""
+    a = _result("a", [1.0, 1.0], [0.1, 0.1], gen=2.2)
+    b = _result(
+        "b",
+        [1.0, 1.0],
+        [0.1, 0.1],
+        gen=2.2,
+        rel_l1_thresh=0.2,
+        decision_kinds=["computed", "computed"],
+        skipped=0,
+        computed=2,
+        max_consecutive_skips=0,
+        skip_pattern="CC",
+    )
 
-    assert out["generated_at"] == "2026-06-18T08:09Z"
-    assert out["hardware"]["mlx_teacache_version"] == "0.9.0"
-    assert out["hardware"]["mflux_version"] == "0.17.5"
-    # stable machine fields, unrelated keys, and pre-existing rows are preserved;
-    # the older row gets NO fabricated provenance (its true version is unknown).
-    assert out["hardware"]["chip"] == "Apple M1 Max"
-    assert out["hardware"]["ram_gb"] == 32
-    assert out["prompt"] == "portrait"
-    assert out["variants"]["flux1-dev"] == {"speedup_warm": 1.18}
-    assert out["variants"]["qwen-image"]["provenance"] == _prov()
+    flux1 = bc.assemble_entry(
+        cr.recipe_for("flux1-dev"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert flux1["a_compiled_predict"] is False
 
+    klein = bc.assemble_entry(
+        cr.recipe_for("klein-base-4b"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert klein["a_compiled_predict"] is True
 
-def test_merge_is_pure_and_does_not_mutate_input() -> None:
-    report = {"variants": {}, "generated_at": "old", "hardware": {"mlx_teacache_version": "0.1.0"}}
-    bc._merge_variant_into_report(report, "x", {"a": 1}, _prov())
-    assert report["generated_at"] == "old"
-    assert report["variants"] == {}
-    assert report["hardware"]["mlx_teacache_version"] == "0.1.0"
+    z_image = bc.assemble_entry(
+        cr.recipe_for("z-image-base"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert z_image["a_compiled_predict"] is True
 
-
-# --- skip-streak telemetry (shared with bench_speedup via scripts/_bench_telemetry) ---
+    klein_on_a_noncompiling_chip = bc.assemble_entry(
+        cr.recipe_for("klein-base-4b"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=False
+    )
+    assert klein_on_a_noncompiling_chip["a_compiled_predict"] is False
 
 
-def test_streak_telemetry_reads_the_last_committed_generation() -> None:
-    from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
-
-    stats = TeaCacheStats()
-    kinds = ["forced", "skipped", "skipped", "computed", "skipped", "skipped", "skipped", "computed"]
-    for i, kind in enumerate(kinds):
-        stats.record(
-            StepDecision(
-                step_idx=i, timestep=1.0 - i / 10, rel_l1=0.1, accumulated_distance=0.2, decision=kind
-            )  # type: ignore[arg-type]
+def test_assemble_entry_refuses_mismatched_step_counts() -> None:
+    """Bug: A and B step counts silently differ, misaligning the per-step tables."""
+    r = cr.recipe_for("flux1-dev")
+    a = _result("a", [1.0, 1.0], [0.1, 0.1], gen=2.2)
+    with pytest.raises(ValueError, match="step counts"):
+        bc.assemble_entry(
+            r,
+            a,
+            _result("b", [1.0], [0.1], gen=1.1, decision_kinds=["computed"]),
+            ssim=1.0,
+            provenance={},
+            mflux_compiles_on_this_chip=True,
         )
-    stats.finalize_last_generation(num_inference_steps=len(kinds), cfg_was_active=False)
-    assert bc._streak_telemetry(stats) == {"skip_pattern": "CSSCSSSC", "max_consecutive_skips": 3}
 
 
-# --- per-condition chunk persistence + resume ---------------------------------
+def test_assemble_entry_refuses_b_missing_decision_kinds() -> None:
+    """Bug: B is treated as all-computed when its decision_kinds is missing (the KeyError must name
+    decision_kinds itself, not an unrelated _B_KEYS entry that happens to be missing too)."""
+    r = cr.recipe_for("flux1-dev")
+    a = _result("a", [1.0, 1.0], [0.1, 0.1], gen=2.2)
+    present = {k: 0 for k in bc._B_KEYS if k != "decision_kinds"}
+    b = _result("b", [1.0, 1.0], [0.1, 0.1], gen=2.2, **present)
+    with pytest.raises(KeyError, match="decision_kinds"):
+        bc.assemble_entry(r, a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True)
 
 
-def _fake_worker(condition: str, secs: list[float]) -> dict[str, object]:
-    out: dict[str, object] = {"condition": condition, "rep_seconds": secs, "peak_memory_gb": 9.0}
-    if condition == "wrapper":
-        out.update(
-            {
-                "skipped_per_rep": [4, 4, 4],
-                "computed_per_rep": [19, 19, 19],
-                "rel_l1_thresh_used": 0.2,
-                "skip_pattern_per_rep": ["CSC"] * 3,
-                "max_consecutive_skips_per_rep": [1, 1, 1],
-            }
-        )
-    return out
+def test_merge_entry_replaces_one_slug_and_keeps_the_rest() -> None:
+    """Bug: finishing one model drops the others from the report."""
+    report = {"schema_version": 2, "variants": {"flux1-dev": {"x": 1}, "z-image-base": {"y": 2}}}
+    out = bc.merge_entry(report, "flux1-dev", {"x": 3}, generated_at="2026-09-25T10:00Z")
+    assert out["variants"] == {"flux1-dev": {"x": 3}, "z-image-base": {"y": 2}}
+    assert out["generated_at"] == "2026-09-25T10:00Z" and report["variants"]["flux1-dev"] == {"x": 1}
 
 
-def _stamped(
-    condition: str, secs: list[float], *, teacache: str = "0.10.0", mflux: str = "0.18.0"
-) -> dict[str, object]:
-    return {
-        **_fake_worker(condition, secs),
-        "reps": len(secs),
-        "provenance": {
-            "mlx_teacache_version": teacache,
-            "mflux_version": mflux,
-            "generated_at": "2026-08-16T09:00:00Z",
-        },
+def test_reset_condition_outputs_moves_stale_frames_and_final_to_the_trash(tmp_path: Path) -> None:
+    """Bug: stale frames/final survive a retry (counted complete; mflux would write a_1.png beside a.png),
+    or they are deleted instead of trashed (rule F)."""
+    raw, trash = tmp_path / "raw", tmp_path / "trash"
+    trash.mkdir()
+    _write_chunk(tmp_path / "c", raw, "flux1-dev", "a", frames=3)
+    moved = bc.reset_condition_outputs(raw, "flux1-dev", "a", trash=trash, tag="t")
+    assert not (bc.raw_dir_for(raw, "flux1-dev") / "a.png").exists()
+    assert not bc.frames_dir_for(raw, "flux1-dev", "a").exists()
+    assert len(moved) == 2 and all(p.exists() and p.parent == trash for p in moved)
+    assert bc.reset_condition_outputs(raw, "flux1-dev", "a", trash=trash, tag="t2") == []
+
+
+def test_retire_chunk_moves_an_existing_chunk_and_returns_none_when_absent(tmp_path: Path) -> None:
+    """Bug: a stale <cond>.json chunk from a failed re-run stays in place and pairs with a freshly-written
+    image (mismatched provenance), instead of being retired to the Trash before the worker respawns."""
+    chunks, trash = tmp_path / "c", tmp_path / "trash"
+    path = bc.chunk_path(chunks, "flux1-dev", "a")
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    dest = bc.retire_chunk(path, trash=trash, tag="t")
+    assert dest is not None and dest.exists() and dest.parent == trash
+    assert not path.exists()
+    assert bc.retire_chunk(path, trash=trash, tag="t2") is None
+
+
+def test_now_tag_carries_microseconds_so_two_retires_in_one_second_never_collide() -> None:
+    """Bug: two chunks retired within the same wall-clock second (a fast retry loop, or the aborted-marker
+    retire landing in the same second as the chunk retire) get identical tags and one Trash destination
+    silently overwrites the other."""
+    import datetime
+
+    class _FrozenNow(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return cls(2026, 9, 25, 10, 0, 0, 123456)
+
+    real_datetime = bc.datetime
+    bc.datetime = _FrozenNow
+    try:
+        tag = bc._now_tag()
+    finally:
+        bc.datetime = real_datetime
+    assert tag == "2026-09-25-100000-123456"
+
+
+def test_max_workers_must_be_positive() -> None:
+    """Bug: --max-workers 0 makes every invocation exit 3 and run-units re-invokes forever."""
+    import argparse
+
+    assert bc.positive_int("1") == 1
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.positive_int("0")
+
+
+def test_smoke_recipe_leaves_a_step_outside_teacaches_always_computed_window() -> None:
+    """Bug: smoke steps leave no step outside TeaCache's always-computed first/last window, so condition
+    B raises."""
+    smoke = bc._smoke_recipe(cr.recipe_for("flux1-dev"))
+    assert smoke.steps >= 3
+    assert smoke.width == 256 and smoke.height == 256
+    assert smoke.free_encoders is True
+
+
+def test_soft_cap_gb_is_capped_by_the_working_set_when_wired_plus_one_would_exceed_it() -> None:
+    """Bug: soft_gb = wired_cap_gb + 1 alone puts Z-Image's soft cap (25 GiB) above the 24.96 GiB working set
+    on this machine, defeating the point of a soft memory guideline."""
+    working_set_bytes = int(24.96 * GIB)
+    got = bc.soft_cap_gb(wired_cap_gb=24, cache_gb=2.0, working_set_bytes=working_set_bytes)
+    assert got == pytest.approx(24.96 - 2)
+    assert got < 24 + 1  # strictly under the naive wired_cap_gb + 1
+
+
+def test_soft_cap_gb_uses_wired_plus_one_when_the_working_set_has_headroom() -> None:
+    """Bug: the working-set term always wins, so soft_gb never actually reflects wired_cap_gb + 1 on a
+    machine with a generous working set."""
+    got = bc.soft_cap_gb(wired_cap_gb=22, cache_gb=2.0, working_set_bytes=40 * GIB)
+    assert got == pytest.approx(23)
+
+
+def test_probe_record_from_worker_maps_phase_peaks_and_footprint(tmp_path: Path) -> None:
+    """Bug: the mapping from a worker's raw result to a probe record drops the process footprint, or
+    misreads one of the three phase peaks -- a load-only overflow must still fail the probe."""
+    r = cr.recipe_for("klein-base-9b")
+    result = {
+        "mlx_peak_load_bytes": 23 * GIB,
+        "mlx_peak_encode_bytes": 2 * GIB,
+        "mlx_peak_generation_bytes": 3 * GIB,
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB, "phases": {}},
     }
+    rec = bc.probe_record_from_worker(r, result, working_set_bytes=24 * GIB, versions=V)
+    assert rec["pass"] is False  # load-only overflow: 23 + 2 (cache_gb) >= 24 GiB working set
+    assert rec["active_peak_bytes"] == 23 * GIB
+    assert rec["peak_footprint_bytes"] == 20 * GIB
+    assert rec["memory"] == result["memory"]
 
 
-def test_chunk_path_is_slug_and_condition_keyed(tmp_path: Path) -> None:
-    assert bc._chunk_path(tmp_path, "z-image", "wrapper") == tmp_path / "z-image" / "wrapper.json"
+def test_probe_record_from_worker_passes_a_measurement_within_every_budget(tmp_path: Path) -> None:
+    """Bug: a genuinely-fitting measurement is still failed -- e.g. the footprint or phase-peak gate is
+    inverted, so nothing can ever pass."""
+    r = cr.recipe_for("klein-base-9b")  # cache_gb=2.0, working_set 24 GiB below
+    result = {
+        "mlx_peak_load_bytes": 15 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": 12 * GIB,
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB, "phases": {}},
+    }
+    rec = bc.probe_record_from_worker(r, result, working_set_bytes=24 * GIB, versions=V)
+    assert rec["pass"] is True
 
 
-def test_pending_conditions_lists_both_when_nothing_persisted(tmp_path: Path) -> None:
-    assert bc._pending_conditions(tmp_path, "flux1-dev") == ["vanilla", "wrapper"]
+def test_probe_record_from_worker_treats_an_aborted_payload_as_a_failing_measurement() -> None:
+    """Bug: an aborted worker payload (killed by the watchdog) is mistaken for a real measurement and can
+    pass the probe."""
+    r = cr.recipe_for("klein-base-9b")
+    rec = bc.probe_record_from_worker(
+        r, {"aborted": "active-memory watchdog"}, working_set_bytes=24 * GIB, versions=V
+    )
+    assert rec["pass"] is False
+    assert rec["aborted"] == "active-memory watchdog"
 
 
-def test_pending_conditions_skips_a_persisted_condition(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "flux1-dev", _fake_worker("vanilla", [3.0, 2.0, 2.0]))
-    assert bc._pending_conditions(tmp_path, "flux1-dev") == ["wrapper"]
+def test_merge_probe_results_takes_the_worse_reading_per_phase_and_footprint() -> None:
+    """Bug: B holds cached TeaCache residuals on top of everything A holds, so a probe judged on A alone
+    misses the +0.5-0.8 GiB B actually measures; merging must keep the worse side per field."""
+    a = {
+        "mlx_peak_load_bytes": 23 * GIB,
+        "mlx_peak_encode_bytes": 5 * GIB,
+        "mlx_peak_generation_bytes": 6 * GIB,
+        "memory": {"min_host_free_pct": 45.0, "peak_footprint_bytes": 18 * GIB},
+    }
+    b = {
+        "mlx_peak_load_bytes": 10 * GIB,
+        "mlx_peak_encode_bytes": 5 * GIB,
+        "mlx_peak_generation_bytes": 20 * GIB,  # B's cached residual makes the generation peak worse
+        "memory": {"min_host_free_pct": 30.0, "peak_footprint_bytes": 22 * GIB},
+    }
+    merged = bc.merge_probe_results(a, b)
+    assert merged["mlx_peak_load_bytes"] == 23 * GIB  # A was worse here
+    assert merged["mlx_peak_generation_bytes"] == 20 * GIB  # B was worse here
+    assert merged["memory"]["peak_footprint_bytes"] == 22 * GIB
+    assert merged["memory"]["min_host_free_pct"] == 30.0  # the lower (worse) of the two
 
 
-def test_persist_chunk_round_trips_and_creates_dirs(tmp_path: Path) -> None:
-    result = _fake_worker("wrapper", [2.0, 1.0, 1.0])
-    written = bc._persist_chunk(tmp_path / "nested", "qwen-image", result)
-    assert written == bc._chunk_path(tmp_path / "nested", "qwen-image", "wrapper")
-    assert json.loads(written.read_text()) == result
+def test_merge_probe_results_propagates_an_abort_from_either_side() -> None:
+    """Bug: B aborting mid-probe is swallowed because the merge only ever looks at A's payload."""
+    a_ok = {
+        "mlx_peak_load_bytes": 1,
+        "mlx_peak_encode_bytes": 1,
+        "mlx_peak_generation_bytes": 1,
+        "memory": {"min_host_free_pct": 50.0, "peak_footprint_bytes": 1},
+    }
+    b_aborted = {"aborted": "active-memory watchdog"}
+    assert bc.merge_probe_results(a_ok, b_aborted) == b_aborted
+    assert bc.merge_probe_results(b_aborted, a_ok) == b_aborted
 
 
-def test_load_chunks_is_none_until_both_conditions_exist(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0]))
-    assert bc._load_chunks(tmp_path, "z-image", reps=3) is None
-    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0]))
-    loaded = bc._load_chunks(tmp_path, "z-image", reps=3)
-    assert loaded is not None
-    assert loaded["vanilla"]["rep_seconds"] == [3.0, 2.0, 2.0]
-    assert loaded["wrapper"]["skipped_per_rep"] == [4, 4, 4]
+def test_merged_probe_result_can_fail_a_probe_that_condition_a_alone_would_pass() -> None:
+    """Bug: the probe wiring still judges on A alone even though a merge helper exists -- this pins the
+    end-to-end shape (merge_probe_results feeding probe_record_from_worker) the K ruling requires."""
+    r = cr.recipe_for("klein-base-9b")
+    a = {
+        "mlx_peak_load_bytes": 15 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": 12 * GIB,
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB},
+    }
+    b = {
+        "mlx_peak_load_bytes": 15 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": 23 * GIB,  # B's residual tips this over the 24 GiB working set
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB},
+    }
+    rec = bc.probe_record_from_worker(r, bc.merge_probe_results(a, b), working_set_bytes=24 * GIB, versions=V)
+    assert rec["pass"] is False
+    assert rec["active_peak_bytes"] == 23 * GIB
 
 
-# --- provenance / reps stamps: both conditions of a row must come from one measurement setup ---
+def _fake_versions() -> dict[str, str]:
+    return {"mflux": "0.20.0", "mlx": "0.32.2", "mlx_taef": "0.8.3"}
 
 
-def test_load_chunks_accepts_a_pair_from_the_same_setup(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0]))
-    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0]))
-    loaded = bc._load_chunks(tmp_path, "z-image", reps=3)
-    assert loaded is not None and loaded["wrapper"]["provenance"]["mlx_teacache_version"] == "0.10.0"
+def _fake_spawn_writes_chunk(raw: Path):  # noqa: ANN201
+    def spawn(recipe: cr.Recipe, condition: str, *, probe: bool, smoke: bool) -> dict:
+        raw_dir = bc.raw_dir_for(raw, recipe.slug)
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / f"{condition}.png").write_bytes(b"x")
+        frames = bc.frames_dir_for(raw, recipe.slug, condition)
+        frames.mkdir(parents=True, exist_ok=True)
+        for i in range(recipe.steps):
+            (frames / f"step_step{i:02d}.png").write_bytes(b"x")
+        return {
+            "condition": condition,
+            "width": recipe.width,
+            "height": recipe.height,
+            "stamp": cr.recipe_stamp(recipe, versions=_fake_versions()),
+        }
+
+    return spawn
 
 
-def test_load_chunks_refuses_a_pair_measured_on_different_versions(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "z-image", _stamped("vanilla", [3.0, 2.0, 2.0], teacache="0.9.0"))
-    bc._persist_chunk(tmp_path, "z-image", _stamped("wrapper", [2.0, 1.0, 1.0], teacache="0.10.0"))
-    with pytest.raises(SystemExit, match="mlx_teacache_version.*0.9.0.*0.10.0"):
-        bc._load_chunks(tmp_path, "z-image", reps=3)
+def test_orchestrate_persists_a_chunk_per_budgeted_call_and_reports_what_remains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a chunk is reported complete before its PNG/frames exist, or a budget of 1 never lets a second
+    call finish the run (exit code stays 3 forever)."""
+    monkeypatch.setattr(bc, "_versions", _fake_versions)
+    chunks, raw, trash = tmp_path / "chunks", tmp_path / "raw", tmp_path / "trash"
+    spawn = _fake_spawn_writes_chunk(raw)
+
+    first = bc._orchestrate(
+        "flux1-dev", budget=1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+    )
+    assert first == 3
+    assert bc.chunk_path(chunks, "flux1-dev", "a").exists()
+    assert not bc.chunk_path(chunks, "flux1-dev", "b").exists()
+
+    second = bc._orchestrate(
+        "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+    )
+    assert second == 0
+    assert bc.chunk_path(chunks, "flux1-dev", "b").exists()
 
 
-def test_load_chunks_refuses_a_chunk_with_the_wrong_rep_count(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("vanilla", [3.0]))  # a --reps 1 preview
-    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
-    with pytest.raises(SystemExit, match="vanilla.json.*reps=1.*3"):
-        bc._load_chunks(tmp_path, "flux1-dev", reps=3)
+def test_orchestrate_records_an_abort_and_persists_no_chunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: an aborted worker payload is mistaken for a real chunk and persisted, or no .aborted.json
+    artifact is written for the caller to inspect."""
+    monkeypatch.setattr(bc, "_versions", _fake_versions)
+    chunks, raw, trash = tmp_path / "chunks", tmp_path / "raw", tmp_path / "trash"
+
+    def spawn(recipe: cr.Recipe, condition: str, *, probe: bool, smoke: bool) -> dict:
+        return {"aborted": "active-memory watchdog"}
+
+    result = bc._orchestrate(
+        "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+    )
+    assert result == 4
+    assert bc.chunk_path(chunks, "flux1-dev", "a").with_suffix(".aborted.json").exists()
+    assert not bc.chunk_path(chunks, "flux1-dev", "a").exists()
 
 
-def test_load_chunks_refuses_an_unstamped_chunk(tmp_path: Path) -> None:
-    bc._persist_chunk(tmp_path, "flux1-dev", _fake_worker("vanilla", [3.0, 2.0, 2.0]))
-    bc._persist_chunk(tmp_path, "flux1-dev", _stamped("wrapper", [2.0, 1.0, 1.0]))
-    with pytest.raises(SystemExit, match="vanilla.json"):
-        bc._load_chunks(tmp_path, "flux1-dev", reps=3)
+def test_orchestrate_retires_a_stale_aborted_marker_before_respawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a stale <cond>.aborted.json from a previous killed run survives a successful retry, so anything
+    globbing for abort artifacts (the heavy-runs ABORT_GLOB) still sees this run as aborted."""
+    monkeypatch.setattr(bc, "_versions", _fake_versions)
+    chunks, raw, trash = tmp_path / "chunks", tmp_path / "raw", tmp_path / "trash"
+    stale = bc.chunk_path(chunks, "flux1-dev", "a").with_suffix(".aborted.json")
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}")
+    spawn = _fake_spawn_writes_chunk(raw)
+
+    result = bc._orchestrate(
+        "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+    )
+
+    assert result == 0
+    assert not stale.exists()
+    assert any(trash.iterdir())
 
 
-# --- v0.10.1: worker result parsing (shared shape with bench_speedup) ---------
+def test_orchestrate_refuses_a_mismatched_stamp_and_persists_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a worker result measured under a different recipe/version is written to the chunk file instead
+    of being refused."""
+    monkeypatch.setattr(bc, "_versions", _fake_versions)
+    chunks, raw, trash = tmp_path / "chunks", tmp_path / "raw", tmp_path / "trash"
 
+    def spawn(recipe: cr.Recipe, condition: str, *, probe: bool, smoke: bool) -> dict:
+        stamp = {**cr.recipe_stamp(recipe, versions=_fake_versions()), "width": 1}
+        return {"condition": condition, "width": recipe.width, "height": recipe.height, "stamp": stamp}
 
-def test_parse_worker_line_finds_the_sentinel_payload() -> None:
-    assert bc._parse_worker_line(f"x\n{bc.WORKER_RESULT_SENTINEL}{json.dumps({'k': 2})}") == {"k": 2}
-    assert bc._parse_worker_line("nothing") is None
-
-
-def test_parse_worker_line_prefers_an_abort_payload_over_an_earlier_result() -> None:
-    ok = f"{bc.WORKER_RESULT_SENTINEL}{json.dumps({'rep_seconds': [1.0]})}"
-    ab = f"{bc.WORKER_RESULT_SENTINEL}{json.dumps({'aborted': 'active-memory watchdog'})}"
-    assert bc._parse_worker_line(f"{ok}\n{ab}\n") == {"aborted": "active-memory watchdog"}
+    with pytest.raises(SystemExit, match="width"):
+        bc._orchestrate(
+            "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+        )
+    assert not bc.chunk_path(chunks, "flux1-dev", "a").exists()

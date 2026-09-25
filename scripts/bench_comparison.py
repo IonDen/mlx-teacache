@@ -1,483 +1,114 @@
-"""Generate COMPARISON.md content: vanilla mflux vs mlx-teacache on the
-non-distilled FLUX variants. Produces per-variant webp images + a complete
-recoverable JSON report under _artifacts/.
+"""COMPARISON.md harness (schema 2): one tennis scene, A = TeaCache off, B = on, per-step taef previews.
 
-Run as:
-  uv run python scripts/bench_comparison.py
+Run from the py3.12 scratch venv (mflux 0.20):
 
-Architecture
-------------
+    python scripts/bench_comparison.py --probe --only klein-base-9b          # memory probe (writes no chunk)
+    python scripts/bench_comparison.py --only flux1-dev --max-workers 1       # one worker = one condition
+    python scripts/bench_comparison.py --only flux1-dev --finalize            # SSIM + contact sheets + report
+    python scripts/bench_comparison.py --only flux1-dev --finalize --export-jpg  # also writes the showcase JPGs
+    python scripts/bench_comparison.py --only flux1-dev --smoke               # 4 steps at 256x256, throwaway
 
-Each (variant, condition) pair runs in a SEPARATE subprocess so the rep-1
-timing is genuinely "cold" — no prior mflux generation in the same Python
-process, no warm MLX kernel state. The main script orchestrates 4
-subprocesses (2 variants x {vanilla, wrapper}), reads their stdout JSON,
-and aggregates into _artifacts/comparison_report.json.
-
-The same script file is the orchestrator AND the per-condition worker —
-selected by --condition / --variant flags. Workers print one JSON line at
-the end of stdout (their bench result); the orchestrator parses that line
-to assemble the final report.
-
-Two entries (non-distilled only, recommended-upstream settings):
-  - flux1-dev at 25 steps, guidance=3.5
-  - flux2-klein-base-4b at 50 steps, guidance=4.0 (canonical upstream CFG)
-
-The g=1.0 row was dropped: klein-base-4b is NOT guidance-distilled, so
-running it at guidance=1.0 produces washed-out output and the wrapper
-skips zero steps (no CFG → no caching engagement). The CFG row is the
-only meaningful klein-base-4b configuration for this comparison.
+One worker subprocess per (slug, condition), one generation each. Each worker loads the model in stages and evaluates
+the weights and the prompt embeddings before its timers (mflux loads lazily), stamps every step before and after the
+taef preview callback, and samples memory per phase. A chunk counts only when its recipe stamp matches and its final
+PNG and every preview frame exist. The v1 _artifacts/comparison_report.json is frozen (a published paper links it);
+this writes _artifacts/comparison/report.json. The mlx-teacache version and git sha are provenance, not part of the
+recipe stamp (an editable install changes them on every commit).
 """
-
-from __future__ import annotations
 
 import argparse
 import json
-import platform
-import statistics
+import os
+import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+import warnings
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
-from _bench_telemetry import streak_telemetry as _streak_telemetry
-from _mlx_watchdog import arm_mlx_watchdog
+from _comparison_recipes import Recipe
+from _comparison_sheet import frame_paths
+from _comparison_steps import medians_by_kind, preview_subtracted_speedup, steady_state_speedup
 
-# Shared portrait prompt — same across every variant. Single variable = recipe.
-PROMPT = (
-    "Portrait of a young woman with auburn hair and green eyes, soft "
-    "golden-hour window light, photorealistic, shallow depth of field, "
-    "50mm prime lens, subtle freckles, neutral background, cinematic "
-    "color grading."
-)
-SEED = 42
-HEIGHT = 1024
-WIDTH = 768
-REPS = 3  # rep 1 = cold (subprocess just started); reps 2-3 = warm
-HEADROOM_GIB = 4.0  # watchdog headroom; overridden by --headroom-gib in main()
-
-WEBP_QUALITY = 88
-WEBP_METHOD = 6  # Pillow's slowest+best encoder; ~1-2s on 768x1024.
-
+REPO = Path(__file__).resolve().parent.parent
+REPORT_PATH = REPO / "_artifacts" / "comparison" / "report.json"
+CHUNKS_DIR = REPO / "tests" / "_artifacts" / "comparison_chunks_v2"
+RAW_ROOT = REPO / "tests" / "_artifacts" / "comparison_raw"
+PROBE_DIR = REPO / "tests" / "_artifacts" / "comparison_probe"
+SMOKE_ROOT = REPO / "tests" / "_artifacts" / "comparison_smoke"
+CONDITIONS: tuple[str, ...] = ("a", "b")
 WORKER_RESULT_SENTINEL = "::BENCH_RESULT::"
+GIB = 1024**3
 
 
-@dataclass(frozen=True)
-class VariantConfig:
-    slug: str  # subdir name under _artifacts/comparison/
-    variant_id: str  # registry id (used only for reporting clarity)
-    num_inference_steps: int
-    guidance: float
-    loader: str  # "flux1-dev" / "klein-base-4b" / "z-image"
-    # Per-variant overrides. Defaults preserve the shared portrait recipe used by
-    # the q4 FLUX rows (768x1024 q4). Z-Image is q8, so it drops resolution to
-    # stay under the 32 GB unified-memory ceiling — same PROMPT + SEED, only the
-    # resolution changes (per the COMPARISON shared-prompt rule).
-    height: int = 1024
-    width: int = 768
-    quantize: int = 4
-    # Construction note recorded in the report so a reader can tell HOW the model
-    # was built (e.g. mixed-precision), since `quantize` alone is misleading for a
-    # variant that overrides it. "" means uniform q{quantize}.
-    build: str = ""
-    wired_cap_gb: int = (
-        22  # mx.set_wired_limit; must stay < max_recommended_working_set_size (25 on M1 Max 32GB)
-    )
-    # Free the MLX buffer cache between reps. Off for the q4 FLUX rows (their warm
-    # reps intentionally reuse the warm allocator). On for q8 Z-Image at 640x896,
-    # where a single gen peaks ~18.7 GB but the cache accumulates across reps in
-    # one process and OOMs the Metal command buffer on rep 2 without this.
-    clear_cache_between_reps: bool = False
-    # Soft memory limit (mx.set_memory_limit) in GB. 0 = use wired_cap_gb + 1 (the
-    # default for variants whose peak fits under wired+1). The 20B Qwen row sets
-    # this above its ~27.6 GB peak so the advisory soft limit doesn't force
-    # mid-generation cache eviction that would inflate the timing; the wired cap
-    # still bounds the panic-causing wired memory.
-    soft_cap_gb: int = 0
+def chunk_path(chunks_dir: Path, slug: str, condition: str) -> Path:
+    return chunks_dir / slug / f"{condition}.json"
 
 
-VARIANTS: tuple[VariantConfig, ...] = (
-    VariantConfig(
-        slug="flux1-dev",
-        variant_id="flux1-dev",
-        num_inference_steps=25,
-        guidance=3.5,
-        loader="flux1-dev",
-    ),
-    VariantConfig(
-        slug="klein-base-4b-cfg",
-        variant_id="flux2-klein-base-4b",
-        num_inference_steps=50,
-        guidance=4.0,
-        loader="klein-base-4b",
-    ),
-    VariantConfig(
-        slug="z-image",
-        variant_id="z-image-base",
-        num_inference_steps=50,
-        guidance=4.0,
-        loader="z-image",
-        height=896,
-        width=640,
-        quantize=8,
-        wired_cap_gb=24,  # 640x896 q8 peaks higher than the q4 rows; 24 < 25 recommended
-        clear_cache_between_reps=True,  # single gen ~18.7 GB; cache accumulation OOMs rep 2 without this
-    ),
-    VariantConfig(
-        slug="qwen-image",
-        variant_id="qwen-image",
-        num_inference_steps=50,
-        guidance=4.0,
-        loader="qwen-image",
-        # 20B Qwen-Image at the mixed-precision build (q8 edge blocks + bf16 embeddings,
-        # for showcase quality) peaks ~30.4 GB at 768x768 on a 32 GB M1 Max — it fits
-        # (the wired cap bounds non-pageable memory; the excess is pageable). 768x768
-        # / 50 steps is the official Qwen recipe; same PROMPT + SEED as every other
-        # row, only the resolution (and incidentally the aspect) changes, per the
-        # COMPARISON shared-prompt rule.
-        height=768,
-        width=768,
-        quantize=4,
-        build="mixed-precision: q8 first/last-6 transformer blocks + bf16 embeddings/projection (quantize=4 base)",
-        wired_cap_gb=21,  # device-derived ~0.85*24.96; bounds wired memory (peak ~30.4 GB total is pageable)
-        # Advisory only. The watchdog now bounds the run at memory_size - 4 GiB (28 GiB on
-        # this machine), so the mixed-precision build's ~30.4 GB peak will trip it: this row
-        # cannot run on a 32 GB Mac until its build or resolution is lowered.
-        soft_cap_gb=31,
-        clear_cache_between_reps=True,  # 20B near the 32 GB edge; cache accumulation OOMs reps without this
-    ),
-)
+def raw_dir_for(raw_root: Path, slug: str) -> Path:
+    return raw_root / slug
 
 
-# ---------------------------------------------------------------------------
-# WORKER side — runs in a subprocess for one (variant, condition) pair.
-# ---------------------------------------------------------------------------
+def frames_dir_for(raw_root: Path, slug: str, condition: str) -> Path:
+    return raw_root / slug / "frames" / condition
 
 
-def _load_flux(loader: str, quantize: int) -> Any:
-    from mflux.models.common.config.model_config import ModelConfig
-
-    if loader == "flux1-dev":
-        from mflux.models.flux.variants.txt2img.flux import Flux1
-
-        flux = Flux1.from_name("dev", quantize=quantize)
-    elif loader == "klein-base-4b":
-        from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
-
-        flux = Flux2Klein(quantize=quantize, model_config=ModelConfig.flux2_klein_base_4b())
-    elif loader == "z-image":
-        from mflux.models.z_image.variants.z_image import ZImage
-
-        flux = ZImage(quantize=quantize, model_config=ModelConfig.z_image())
-    elif loader == "qwen-image":
-        from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
-        from qwen_mixed_precision import enable_qwen_mixed_precision
-
-        # Showcase quality: mixed-precision (q8 edge blocks + bf16 embeddings) clears
-        # the uniform-q4 grain so the COMPARISON portraits look good. mlx-teacache
-        # stays quant-agnostic — this is a construction-time choice in the bench only.
-        enable_qwen_mixed_precision()
-        flux = QwenImage(quantize=quantize, model_config=ModelConfig.qwen_image())
-    else:
-        raise ValueError(f"unknown loader: {loader!r}")
-    flux.freeze()
-    return flux
+def chunk_is_complete(chunks_dir: Path, raw_root: Path, slug: str, condition: str, steps: int) -> bool:
+    if not chunk_path(chunks_dir, slug, condition).exists():
+        return False
+    if not (raw_dir_for(raw_root, slug) / f"{condition}.png").exists():
+        return False
+    frames = frames_dir_for(raw_root, slug, condition)
+    return frames.is_dir() and len(frame_paths(frames)) == steps
 
 
-def _generate(
-    flux: Any, *, num_inference_steps: int, guidance: float, height: int, width: int
-) -> tuple[float, Any]:
-    """Time one flux.generate_image call. Flushes GPU before stopping clock."""
-    import mlx.core as mx
-
-    start = time.perf_counter()
-    image = flux.generate_image(
-        prompt=PROMPT,
-        seed=SEED,
-        num_inference_steps=num_inference_steps,
-        height=height,
-        width=width,
-        guidance=guidance,
-    )
-    mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
-    elapsed = time.perf_counter() - start
-    return elapsed, image
+def check_chunk_stamp(chunk: dict[str, Any], expected: dict[str, object], path: Path) -> None:
+    hint = f"move {path.parent} and the matching raw outputs to the Trash for a fresh measurement"
+    stamp = chunk.get("stamp")
+    if not isinstance(stamp, dict) or not stamp:
+        raise SystemExit(f"{path}: no recipe stamp; {hint}")
+    differing = sorted(k for k in set(stamp) | set(expected) if stamp.get(k) != expected.get(k))
+    if differing:
+        raise SystemExit(f"{path}: measured under a different recipe ({', '.join(differing)}); {hint}")
 
 
-def _save_as_webp(image: Any, dest_webp: Path) -> None:
-    """Save mflux's image as webp via PNG intermediate.
-
-    Plan-audit Finding 1 fix: the intermediate file must have a real `.png`
-    suffix so Pillow can infer the format. `<stem>.tmp.png` (NOT
-    `<stem>.png.tmp`) keeps `.png` as the final suffix. After Pillow writes
-    the PNG we re-open it, encode as webp, and unlink the PNG so only the
-    webp survives in the repo.
-    """
-    from PIL import Image
-
-    dest_webp.parent.mkdir(parents=True, exist_ok=True)
-    png_tmp = dest_webp.with_name(dest_webp.stem + ".tmp.png")
-    image.save(path=str(png_tmp), export_json_metadata=False)
-    with Image.open(png_tmp) as pil_img:
-        pil_img.save(dest_webp, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
-    png_tmp.unlink()
+def plan_conditions(
+    chunks_dir: Path, raw_root: Path, slug: str, steps: int, expected: dict[str, object], budget: int
+) -> list[str]:
+    pending: list[str] = []
+    for condition in CONDITIONS:
+        if chunk_is_complete(chunks_dir, raw_root, slug, condition, steps):
+            path = chunk_path(chunks_dir, slug, condition)
+            check_chunk_stamp(json.loads(path.read_text()), expected, path)
+        else:
+            pending.append(condition)
+    return pending if budget < 0 else pending[:budget]
 
 
-def _run_worker_vanilla(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
-    import mlx.core as mx
-
-    flux = _load_flux(cfg.loader, cfg.quantize)
-    times: list[float] = []
-    for i in range(REPS):
-        elapsed, image = _generate(
-            flux,
-            num_inference_steps=cfg.num_inference_steps,
-            guidance=cfg.guidance,
-            height=cfg.height,
-            width=cfg.width,
+def load_pair(
+    chunks_dir: Path, raw_root: Path, slug: str, steps: int, expected: dict[str, object]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    pending = [c for c in CONDITIONS if not chunk_is_complete(chunks_dir, raw_root, slug, c, steps)]
+    if pending:
+        raise SystemExit(f"{slug}: chunks pending {pending}")
+    pair = []
+    for condition in CONDITIONS:
+        path = chunk_path(chunks_dir, slug, condition)
+        chunk = cast(dict[str, Any], json.loads(path.read_text()))
+        check_chunk_stamp(chunk, expected, path)
+        pair.append(chunk)
+    a, b = pair
+    if (a["width"], a["height"]) != (b["width"], b["height"]):
+        raise SystemExit(
+            f"{slug}: A and B differ in size ({a['width']}x{a['height']} vs {b['width']}x{b['height']})"
         )
-        times.append(elapsed)
-        if i == 0:
-            _save_as_webp(image, save_to)
-        print(
-            f"  vanilla rep {i + 1}: {elapsed:.2f}s (peak {mx.get_peak_memory() / 1024**3:.2f} GB)",
-            flush=True,
-        )
-        del image
-        if cfg.clear_cache_between_reps:
-            mx.clear_cache()
-    return {"condition": "vanilla", "rep_seconds": times, "peak_memory_gb": mx.get_peak_memory() / 1024**3}
+    return a, b
 
 
-def _run_worker_wrapper(cfg: VariantConfig, save_to: Path) -> dict[str, Any]:
-    import mlx.core as mx
-
-    from mlx_teacache import apply_teacache
-
-    flux = _load_flux(cfg.loader, cfg.quantize)
-    times: list[float] = []
-    skipped: list[int] = []
-    computed: list[int] = []
-    thresh_used: float = 0.0
-    skip_patterns: list[str] = []
-    max_streaks: list[int] = []
-    for i in range(REPS):
-        with apply_teacache(flux) as handle:
-            if i == 0:
-                thresh_used = handle.rel_l1_thresh
-            elapsed, image = _generate(
-                flux,
-                num_inference_steps=cfg.num_inference_steps,
-                guidance=cfg.guidance,
-                height=cfg.height,
-                width=cfg.width,
-            )
-            times.append(elapsed)
-            skipped.append(handle.stats.skipped_count)
-            computed.append(handle.stats.computed_count)
-            telemetry = _streak_telemetry(handle.stats)
-            skip_patterns.append(telemetry["skip_pattern"])
-            max_streaks.append(telemetry["max_consecutive_skips"])
-            if i == 0:
-                _save_as_webp(image, save_to)
-        print(
-            f"  wrapper rep {i + 1}: {elapsed:.2f}s (skipped {skipped[-1]}/{cfg.num_inference_steps}, "
-            f"max streak {max_streaks[-1]}, peak {mx.get_peak_memory() / 1024**3:.2f} GB)",
-            flush=True,
-        )
-        del image
-        del handle  # release the rep's cached residuals before clearing MLX's cache pool
-        if cfg.clear_cache_between_reps:
-            mx.clear_cache()
-    return {
-        "condition": "wrapper",
-        "rep_seconds": times,
-        "skipped_per_rep": skipped,
-        "computed_per_rep": computed,
-        "skip_pattern_per_rep": skip_patterns,
-        "max_consecutive_skips_per_rep": max_streaks,
-        "rel_l1_thresh_used": thresh_used,
-        "peak_memory_gb": mx.get_peak_memory() / 1024**3,
-    }
-
-
-def _worker_main(args: argparse.Namespace) -> None:
-    """Subprocess entrypoint. Runs one (variant, condition) pair and prints
-    a single JSON line prefixed by WORKER_RESULT_SENTINEL on stdout."""
-    cfg = next(v for v in VARIANTS if v.slug == args.variant)
-    # Memory guardrail — before any model load. wired must stay strictly below
-    # max_recommended_working_set_size (25 GB on M1 Max 32GB) so the worst case
-    # is a clean MLX OOM, never a kernel watchdog panic.
-    wired = cfg.wired_cap_gb
-    soft = cfg.soft_cap_gb or (wired + 1)
-    from _mlx_caps import install_caps
-
-    cache_gb = 1.0 if cfg.slug == "qwen-image" else 2.0  # qwen's active peak leaves ~1 GiB under the ceiling
-    wired_b, soft_b, cache_b = install_caps(wired_gb=wired, soft_gb=soft, cache_gb=cache_gb)
-    print(
-        f"  [worker] {cfg.slug}/{args.condition}: caps wired={wired_b / 1024**3:.2f} GB "
-        f"soft={soft_b / 1024**3:.2f} GB cache={cache_b / 1024**3:.2f} GB, "
-        f"res={cfg.width}x{cfg.height} q{cfg.quantize}",
-        flush=True,
-    )
-
-    def _on_abort(payload: dict[str, int]) -> None:
-        abort = {"aborted": "active-memory watchdog", "slug": cfg.slug, "condition": args.condition}
-        print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
-
-    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=HEADROOM_GIB)
-    save_to: Path = Path(args.save_to)
-    if args.condition == "vanilla":
-        result = _run_worker_vanilla(cfg, save_to)
-    elif args.condition == "wrapper":
-        result = _run_worker_wrapper(cfg, save_to)
-    else:
-        raise ValueError(f"unknown --condition {args.condition!r}")
-    print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# ORCHESTRATOR side — spawns the workers and assembles the report.
-# ---------------------------------------------------------------------------
-
-
-def _mflux_version() -> str:
-    try:
-        from importlib.metadata import version
-
-        return version("mflux")
-    except Exception:
-        return "unknown"
-
-
-def _mlx_teacache_version() -> str:
-    from mlx_teacache import __version__
-
-    return __version__
-
-
-def _provenance() -> dict[str, str]:
-    """Per-run provenance stamped into each variant entry and the top-level on
-    every write. ``datetime.now`` is the only impure part; the merge that consumes
-    this (``_merge_variant_into_report``) is pure and unit-tested."""
-    return {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
-        "mlx_teacache_version": _mlx_teacache_version(),
-        "mflux_version": _mflux_version(),
-    }
-
-
-def _merge_variant_into_report(
-    report: dict[str, Any], slug: str, entry: dict[str, Any], provenance: dict[str, str]
-) -> dict[str, Any]:
-    """Insert/replace one variant entry (stamped with its own provenance) and
-    refresh the report's top-level ``generated_at`` + hardware software-versions to
-    THIS run.
-
-    The report is assembled incrementally — one ``--only <slug>`` run per variant,
-    often across different mlx-teacache versions — so no single top-level value can
-    honestly describe every row. Per-variant ``provenance`` is authoritative for
-    its row; the top-level reflects the most recent write. Without this, a
-    ``--only`` resume reloaded a prior report and overwrote only the variant row,
-    keeping the earlier run's stale ``generated_at`` / version at the top level.
-    Pure: returns a new dict, never mutates the input."""
-    out = dict(report)
-    out["generated_at"] = provenance["generated_at"]
-    if out.get("hardware"):
-        out["hardware"] = {
-            **out["hardware"],
-            "mlx_teacache_version": provenance["mlx_teacache_version"],
-            "mflux_version": provenance["mflux_version"],
-        }
-    out["variants"] = {**out.get("variants", {}), slug: {**entry, "provenance": dict(provenance)}}
-    return out
-
-
-def _macos_sysctl(key: str) -> str | None:
-    """Read a macOS sysctl value as a string. Returns None on failure."""
-    if sys.platform != "darwin":
-        return None
-    try:
-        out = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, check=True)
-        return out.stdout.strip() or None
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return None
-
-
-def _detect_hardware(machine_label_override: str | None, ram_gb_override: int | None) -> dict[str, Any]:
-    """Plan-audit Finding 4 fix: hardware provenance recorded in the JSON.
-
-    Reads chip name + RAM via macOS sysctl. CLI flags override whatever
-    sysctl reports if the marketing chip name is missing or wrong (e.g.
-    a future macOS that doesn't expose `machdep.cpu.brand_string` cleanly)."""
-    chip = (
-        machine_label_override
-        or _macos_sysctl("machdep.cpu.brand_string")
-        or platform.processor()
-        or "Apple Silicon"
-    )
-    ram_bytes_str = _macos_sysctl("hw.memsize")
-    ram_gb: int | None = ram_gb_override
-    if ram_gb is None and ram_bytes_str is not None:
-        try:
-            ram_gb = round(int(ram_bytes_str) / (1024**3))
-        except ValueError:
-            ram_gb = None
-    return {
-        "chip": chip,
-        "ram_gb": ram_gb,  # may be None if neither sysctl nor override yielded a value
-        "machine": platform.machine(),
-        "os": f"{platform.system()} {platform.release()}",
-        "mlx_teacache_version": _mlx_teacache_version(),
-        "mflux_version": _mflux_version(),
-        "quantize": 4,
-        "dtype": "bf16",
-    }
-
-
-def _run_one_worker(slug: str, condition: str, save_to: Path) -> dict[str, Any]:
-    """Spawn the worker subprocess and capture its result line."""
-    cmd = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        "--worker",
-        "--variant",
-        slug,
-        "--condition",
-        condition,
-        "--save-to",
-        str(save_to),
-        "--reps",
-        str(REPS),  # orchestrator's REPS (possibly overridden by --reps) -> worker
-        "--headroom-gib",
-        str(HEADROOM_GIB),
-    ]
-    print(f"\n>> spawning worker: {slug} / {condition}", flush=True)
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    # Stream child stdout/stderr to the orchestrator's stdout so progress is visible.
-    if proc.stdout:
-        sys.stdout.write(proc.stdout)
-    if proc.stderr:
-        sys.stderr.write(proc.stderr)
-    payload = _parse_worker_line(proc.stdout)
-    if payload is not None and "aborted" in payload:
-        return payload  # the caller persists the abort artifact and stops
-    if proc.returncode != 0:
-        raise RuntimeError(f"worker failed for {slug}/{condition}: exit {proc.returncode}")
-    if payload is None:
-        raise RuntimeError(
-            f"worker for {slug}/{condition} did not emit a {WORKER_RESULT_SENTINEL} result line"
-        )
-    return payload
-
-
-def _parse_worker_line(stdout: str) -> dict[str, Any] | None:
-    """The worker's sentinel-prefixed JSON payload, or None if it never printed one.
-    An abort payload wins over an earlier result line: the watchdog can fire after
-    the result was printed (during image.save), and that run must not count."""
+def parse_worker_line(stdout: str) -> dict[str, Any] | None:
     found: dict[str, Any] | None = None
     for line in stdout.splitlines():
         if line.startswith(WORKER_RESULT_SENTINEL):
@@ -488,333 +119,694 @@ def _parse_worker_line(stdout: str) -> dict[str, Any] | None:
     return found
 
 
-def _condition_metrics(rep_seconds: list[float]) -> dict[str, float | None]:
-    """Cold = rep 1 (the subprocess just started); warm = median of reps 2+.
+_SUMMARY_KEYS = (
+    "load_seconds",
+    "encode_seconds",
+    "generation_seconds",
+    "mlx_peak_load_bytes",
+    "mlx_peak_encode_bytes",
+    "mlx_peak_generation_bytes",
+    "frames",
+    "released_encoders",
+    "git_sha",
+    "mlx_teacache_version",
+)
+_B_KEYS = ("rel_l1_thresh", "skipped", "computed", "max_consecutive_skips", "skip_pattern", "decision_kinds")
+# mflux only wraps FLUX.2 Klein's and Z-Image's predict step in mx.compile; FLUX.1 and Qwen-Image have no
+# compiled predict step at all, so they can never be credited with compile avoidance regardless of chip.
+_COMPILED_PREDICT_LOADERS = frozenset({"klein-base-4b", "klein-base-9b", "z-image"})
 
-    A one-rep images-only preview (``--reps 1``) has no warm measurement, so warm
-    is ``None`` rather than crashing on ``statistics.median([])``. Pure."""
+
+def condition_summary(result: dict[str, Any], *, is_b: bool) -> dict[str, Any]:
+    out = {k: result[k] for k in _SUMMARY_KEYS}
+    memory = result["memory"]
+    out.update(
+        peak_resident_bytes=memory["peak_resident_bytes"],
+        peak_footprint_bytes=memory["peak_footprint_bytes"],
+        min_host_free_pct=memory["min_host_free_pct"],
+        memory_phases=memory.get("phases", {}),
+    )
+    out["compute_seconds"] = list(result["compute_seconds"])
+    out["preview_seconds"] = list(result["preview_seconds"])
+    out["preview_seconds_total"] = sum(result["preview_seconds"])
+    kinds = result["decision_kinds"] if is_b else ["computed"] * len(result["compute_seconds"])
+    out["step_medians"] = medians_by_kind(result["compute_seconds"], kinds)
+    if is_b:
+        out.update({k: result[k] for k in _B_KEYS})
+    return out
+
+
+def assemble_entry(
+    recipe: Recipe,
+    a: dict[str, Any],
+    b: dict[str, Any],
+    *,
+    ssim: float,
+    provenance: dict[str, str],
+    mflux_compiles_on_this_chip: bool,
+) -> dict[str, Any]:
+    if len(a["compute_seconds"]) != len(b["compute_seconds"]):
+        raise ValueError(f"{recipe.slug}: A and B recorded different step counts")
+    base = f"_artifacts/comparison/{recipe.slug}"
     return {
-        "cold": rep_seconds[0],
-        "warm": statistics.median(rep_seconds[1:]) if len(rep_seconds) > 1 else None,
+        "variant_id": recipe.variant_id,
+        "display_name": recipe.display_name,
+        "checkpoint": recipe.checkpoint,
+        "decoder": recipe.decoder,
+        "bench_report": recipe.bench_report,
+        "steps": recipe.steps,
+        "guidance": recipe.guidance,
+        "quantize": recipe.quantize,
+        "width": a["width"],
+        "height": a["height"],
+        "free_encoders": recipe.free_encoders,
+        "a_compiled_predict": recipe.loader in _COMPILED_PREDICT_LOADERS and mflux_compiles_on_this_chip,
+        "prompt_sha256": a["stamp"]["prompt_sha256"],
+        "a": condition_summary(a, is_b=False),
+        "b": condition_summary(b, is_b=True),
+        "speedup_wall": a["generation_seconds"] / b["generation_seconds"],
+        "speedup_steady": steady_state_speedup(a["compute_seconds"], b["compute_seconds"]),
+        "speedup_preview_subtracted": preview_subtracted_speedup(
+            a_wall=a["generation_seconds"],
+            a_preview=a["preview_seconds"],
+            b_wall=b["generation_seconds"],
+            b_preview=b["preview_seconds"],
+        ),
+        "ssim": ssim,
+        "provenance": dict(provenance),
+        "images": {
+            "a": f"{base}/a.jpg",
+            "b": f"{base}/b.jpg",
+            "steps_a": f"{base}/steps-a.jpg",
+            "steps_b": f"{base}/steps-b.jpg",
+        },
     }
 
 
-def _speedup(vanilla: float | None, wrapper: float | None) -> float | None:
-    """vanilla/wrapper wall-clock ratio, or ``None`` when either side is missing
-    (a one-rep preview has no warm timing) or the denominator is zero. Pure."""
-    if vanilla is None or wrapper is None or wrapper == 0:
+def merge_entry(
+    report: dict[str, Any], slug: str, entry: dict[str, Any], *, generated_at: str
+) -> dict[str, Any]:
+    out = dict(report)
+    out["generated_at"] = generated_at
+    out["variants"] = {**report.get("variants", {}), slug: entry}
+    return out
+
+
+def reset_condition_outputs(
+    raw_root: Path, slug: str, condition: str, *, trash: Path, tag: str
+) -> list[Path]:
+    """Move a previous attempt's frames and final PNG to the Trash (rule F) before a worker writes new ones."""
+    moved: list[Path] = []
+    final = raw_dir_for(raw_root, slug) / f"{condition}.png"
+    frames = frames_dir_for(raw_root, slug, condition)
+    for path, label in ((final, f"{slug}-{condition}-final"), (frames, f"{slug}-{condition}-frames")):
+        if path.exists():
+            dest = trash / f"comparison-{label}-{tag}{path.suffix}"
+            shutil.move(str(path), dest)
+            moved.append(dest)
+    return moved
+
+
+def retire_chunk(path: Path, *, trash: Path, tag: str) -> Path | None:
+    """Move a stale chunk JSON out of the way before its worker respawns (rule F: Trash, never rm).
+
+    Without this, a re-run that fails after ``image.save`` can leave an old chunk paired with a fresh image
+    and fresh preview frames, so the next successful worker's chunk gets counted complete against stale
+    provenance. Returns the Trash destination, or None if there was nothing to move."""
+    if not path.exists():
         return None
-    return vanilla / wrapper
-
-
-def _fmt_speedup(x: float | None) -> str:
-    return f"{x:.2f}x" if x is not None else "n/a"
-
-
-# --- Per-condition chunk persistence + resume --------------------------------
-# One (variant, condition) worker = one chunk. The worker result is written to
-# disk the moment the worker returns and a re-invocation reuses persisted
-# chunks, so a variant's ~1-2 h showcase run can be split into two finite jobs
-# (--max-workers 1) and an interruption loses at most the in-flight worker.
-
-_CONDITIONS: tuple[str, ...] = ("vanilla", "wrapper")
-
-
-def _chunk_path(chunks_dir: Path, slug: str, condition: str) -> Path:
-    return chunks_dir / slug / f"{condition}.json"
-
-
-def _pending_conditions(chunks_dir: Path, slug: str) -> list[str]:
-    """Conditions of one variant with no persisted worker result yet, in run order."""
-    return [c for c in _CONDITIONS if not _chunk_path(chunks_dir, slug, c).exists()]
-
-
-def _persist_chunk(chunks_dir: Path, slug: str, result: dict[str, Any]) -> Path:
-    """Write one worker result to its chunk file (atomic replace); return the path."""
-    dest = _chunk_path(chunks_dir, slug, str(result["condition"]))
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(result, indent=2))
-    tmp.replace(dest)
+    trash.mkdir(parents=True, exist_ok=True)
+    dest = trash / f"comparison-chunk-{path.parent.name}-{path.stem}-{tag}{path.suffix}"
+    shutil.move(str(path), dest)
     return dest
 
 
-_PROVENANCE_KEYS: tuple[str, ...] = ("mlx_teacache_version", "mflux_version")
+def soft_cap_gb(wired_cap_gb: float, cache_gb: float, working_set_bytes: int) -> float:
+    """The advisory soft memory cap: wired_cap_gb + 1 GiB headroom, but never above what the device's
+    working set leaves after the cache pool. ``wired_cap_gb + 1`` alone can sit above the working set
+    (Z-Image: wired 24 -> soft 25, above a 24.96 GiB working set)."""
+    return min(wired_cap_gb + 1, working_set_bytes / GIB - cache_gb)
 
 
-def _load_chunks(chunks_dir: Path, slug: str, *, reps: int) -> dict[str, dict[str, Any]] | None:
-    """Both persisted worker results for one variant, or None while either is missing.
+def positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {value}")
+    return value
 
-    Refuses (SystemExit) to pair chunks that were not measured under one setup:
-    each chunk must be stamped with ``reps`` equal to this invocation's and with a
-    ``provenance`` whose package versions match across the pair — otherwise a row
-    could silently combine a vanilla timing from one release with a wrapper timing
-    from another under a single provenance stamp."""
-    if _pending_conditions(chunks_dir, slug):
-        return None
-    loaded = {
-        c: cast(dict[str, Any], json.loads(_chunk_path(chunks_dir, slug, c).read_text())) for c in _CONDITIONS
+
+def _now_tag() -> str:
+    """Second resolution alone lets two retires in the same run (a chunk and its stale .aborted.json
+    marker, or two fast test retries) collide on one Trash destination; microseconds make every tag unique."""
+    return datetime.now().strftime("%Y-%m-%d-%H%M%S-%f")
+
+
+def _versions() -> dict[str, str]:
+    from importlib.metadata import version
+
+    return {"mflux": version("mflux"), "mlx": version("mlx"), "mlx_taef": version("mlx-taef")}
+
+
+def _git_sha() -> str:
+    out = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True, check=False
+    )
+    return out.stdout.strip() or "unknown"
+
+
+def _load_probes(slug: str) -> list[dict[str, Any]]:
+    return [
+        cast(dict[str, Any], json.loads(p.read_text())) for p in sorted(PROBE_DIR.glob(f"{slug}_*x*.json"))
+    ]
+
+
+def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: int) -> dict[str, Any]:
+    """One generation with every guard in place; staged load; per-phase memory. Returns the result dict."""
+    import mlx.core as mx
+    from _comparison_memory import (
+        PeakSampler,
+        SamplerError,
+        host_free_pct,
+        mlx_resident_sampler,
+        phys_footprint_bytes,
+    )
+    from _comparison_models import (
+        DENOISER_ATTRS,
+        ENCODER_ATTRS,
+        assert_prompt_cache_hit,
+        evaluate_modules,
+        load_model,
+        precompute_prompt,
+        release_text_encoders,
+    )
+    from _comparison_recipes import SEED, prompt_for
+    from _comparison_steps import decision_kinds, register_stamped_preview, split_steps
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    import mlx_teacache
+
+    reset_condition_outputs(raw_root, recipe.slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
+    frames_dir = frames_dir_for(raw_root, recipe.slug, condition)
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    out_png = raw_dir_for(raw_root, recipe.slug) / f"{condition}.png"
+    prompt = prompt_for(recipe)
+
+    sampler = PeakSampler(
+        sample_resident=mlx_resident_sampler(),
+        sample_footprint=phys_footprint_bytes,
+        sample_host_free=host_free_pct,
+    )
+    sampler.start()
+    failed = False
+    try:
+        # Load: encoders first; the denoiser waits until the encoders are gone where the recipe frees them.
+        t0 = time.perf_counter()
+        flux = load_model(recipe)
+        evaluate_modules(flux, ENCODER_ATTRS)
+        preview = LivePreviewCallback(
+            flux=flux,
+            variant=recipe.decoder,
+            every=1,
+            numbered_frames=True,
+            save_to=frames_dir / "step.png",
+            on_error="raise",
+        )
+        mx.eval(preview.model.parameters())
+        load_seconds = time.perf_counter() - t0
+        mlx_peak_load = int(mx.get_peak_memory())
+        sampler.end_phase("load")
+
+        # Encode, then free the encoders (where set), then evaluate the transformer and VAE. The denoiser
+        # eval is materialization/quantization, not prompt encoding, so its time is folded into
+        # load_seconds; encode_seconds covers only precompute_prompt + release_text_encoders. The memory
+        # phase boundary stays here (mlx_peak_encode_bytes is still the peak across this whole window).
+        mx.reset_peak_memory()
+        t1 = time.perf_counter()
+        precompute_prompt(flux, recipe, prompt)
+        released = release_text_encoders(flux) if recipe.free_encoders else []
+        encode_seconds = time.perf_counter() - t1
+        t2 = time.perf_counter()
+        evaluate_modules(flux, DENOISER_ATTRS)
+        load_seconds += time.perf_counter() - t2
+        mlx_peak_encode = int(mx.get_peak_memory())
+        sampler.end_phase("encode")
+
+        pre, post = register_stamped_preview(flux.callbacks.register, preview)
+        handle = None
+        if condition == "b":
+            from mlx_teacache import apply_teacache
+            from mlx_teacache.errors import TeaCacheUncalibratedCheckpointWarning
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", TeaCacheUncalibratedCheckpointWarning)
+                handle = apply_teacache(flux)
+
+        mx.clear_cache()  # so load leftovers do not sit in the generation window
+        mx.reset_peak_memory()
+        gen_start = time.perf_counter()
+        image = flux.generate_image(
+            prompt=prompt,
+            seed=SEED,
+            num_inference_steps=steps,
+            height=recipe.height,
+            width=recipe.width,
+            guidance=recipe.guidance,
+        )
+        mx.synchronize()
+        generation_seconds = time.perf_counter() - gen_start
+        mlx_peak_generation = int(mx.get_peak_memory())
+        sampler.end_phase("generation")
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        if failed:
+            # A real error is already propagating; a sampler-teardown failure on top of it must not mask it.
+            try:
+                sampler.stop()
+            except SamplerError as exc:
+                print(
+                    f"{recipe.slug}/{condition}: memory sampler also failed during teardown: {exc}",
+                    file=sys.stderr,
+                )
+        else:
+            memory = sampler.stop()
+
+    assert_prompt_cache_hit(flux, recipe)
+    if len(preview.saved_paths) != steps:
+        raise RuntimeError(f"expected {steps} preview frames, got {len(preview.saved_paths)}")
+    compute, preview_cost = split_steps(gen_start, pre.stamps, post.stamps)
+    image.save(path=str(out_png), export_json_metadata=False, overwrite=True)
+
+    result: dict[str, Any] = {
+        "condition": condition,
+        "width": recipe.width,
+        "height": recipe.height,
+        "load_seconds": load_seconds,
+        "encode_seconds": encode_seconds,
+        "generation_seconds": generation_seconds,
+        "compute_seconds": compute,
+        "preview_seconds": preview_cost,
+        "mlx_peak_load_bytes": mlx_peak_load,
+        "mlx_peak_encode_bytes": mlx_peak_encode,
+        "mlx_peak_generation_bytes": mlx_peak_generation,
+        "memory": memory,
+        "frames": len(preview.saved_paths),
+        "released_encoders": released,
+        "mlx_teacache_version": mlx_teacache.__version__,
     }
-    hint = f"move {chunks_dir / slug} to the Trash for a fresh measurement"
-    for c, chunk in loaded.items():
-        path = _chunk_path(chunks_dir, slug, c)
-        if "provenance" not in chunk or "reps" not in chunk:
-            raise SystemExit(f"persisted chunk {path} has no reps/provenance stamp; {hint}")
-        if int(chunk["reps"]) != reps:
-            raise SystemExit(
-                f"persisted chunk {path} was measured with reps={chunk['reps']} but this "
-                f"invocation uses reps={reps}; {hint}"
-            )
-    for key in _PROVENANCE_KEYS:
-        values = {c: loaded[c]["provenance"].get(key) for c in _CONDITIONS}
-        if len(set(values.values())) != 1:
-            raise SystemExit(
-                f"{slug}: vanilla/wrapper chunks were measured on different {key} "
-                f"({values['vanilla']} vs {values['wrapper']}); {hint}"
-            )
-    return loaded
+    if handle is not None:
+        from _bench_telemetry import streak_telemetry
+
+        kinds = decision_kinds(handle.stats.last_generation.decisions, steps)
+        telemetry = streak_telemetry(handle.stats)
+        result.update(
+            rel_l1_thresh=handle.rel_l1_thresh,
+            decision_kinds=kinds,
+            skipped=kinds.count("skipped"),
+            computed=kinds.count("computed"),
+            max_consecutive_skips=telemetry["max_consecutive_skips"],
+            skip_pattern=telemetry["skip_pattern"],
+        )
+        handle.restore()
+    return result
+
+
+def _install_guards(recipe: Recipe, label: str) -> None:
+    import mlx.core as mx
+    from _mlx_caps import install_caps
+    from _mlx_watchdog import arm_mlx_watchdog
+
+    working_set_bytes = int(mx.device_info()["max_recommended_working_set_size"])
+    soft_gb = soft_cap_gb(recipe.wired_cap_gb, recipe.cache_gb, working_set_bytes)
+    wired_b, soft_b, cache_b = install_caps(
+        wired_gb=recipe.wired_cap_gb, soft_gb=soft_gb, cache_gb=recipe.cache_gb
+    )
+    print(
+        f"  [worker] {label}: caps wired={wired_b / GIB:.2f} soft={soft_b / GIB:.2f} cache={cache_b / GIB:.2f} GiB",
+        flush=True,
+    )
+
+    def _on_abort(payload: dict[str, int]) -> None:
+        line = json.dumps({"aborted": "active-memory watchdog", "label": label, **payload})
+        print(f"{WORKER_RESULT_SENTINEL}{line}", flush=True)
+
+    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=4.0)
+
+
+def _smoke_recipe(recipe: Recipe) -> Recipe:
+    from dataclasses import replace
+
+    # 4, not 2: TeaCache always computes the first and last step (skip_first_n_steps=1 +
+    # skip_last_n_steps=1), so 2 steps leave nothing outside that always-computed window and
+    # condition B raises InvalidStepWindowError.
+    return replace(recipe, steps=4, width=256, height=256, free_encoders=True)
+
+
+def _worker_main(args: argparse.Namespace) -> None:
+    from _comparison_recipes import recipe_for, recipe_stamp, with_resolution
+
+    recipe = with_resolution(recipe_for(args.only), args.width, args.height)
+    if args.smoke:
+        recipe = _smoke_recipe(recipe)
+    raw_root = SMOKE_ROOT if args.smoke else (PROBE_DIR / "raw" if args.probe else RAW_ROOT)
+    _install_guards(recipe, f"{recipe.slug}/{args.condition}")
+    steps = 3 if args.probe else recipe.steps
+    result = _run_generation(recipe, args.condition, raw_root=raw_root, steps=steps)
+    result["stamp"] = recipe_stamp(recipe, versions=_versions())
+    result["git_sha"] = _git_sha()
+    print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
+
+
+def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[str, Any]:
+    """Run one worker; stream its output live (heavy-runs monitoring) while collecting it for the result line."""
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--worker",
+        "--only",
+        recipe.slug,
+        "--condition",
+        condition,
+        "--width",
+        str(recipe.width),
+        "--height",
+        str(recipe.height),
+    ]
+    cmd += ["--probe"] if probe else []
+    cmd += ["--smoke"] if smoke else []
+    env = {**os.environ, "HF_HUB_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
+    print(
+        f"\n>> worker {recipe.slug}/{condition} {recipe.width}x{recipe.height}{' probe' if probe else ''}",
+        flush=True,
+    )
+    lines: list[str] = []
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=None, text=True, env=env) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+        returncode = proc.wait()
+    payload = parse_worker_line("".join(lines))
+    if payload is not None and "aborted" in payload:
+        return payload
+    if returncode != 0 or payload is None:
+        raise RuntimeError(f"worker {recipe.slug}/{condition} failed: exit {returncode}")
+    return payload
+
+
+def merge_probe_results(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Merge condition A and B's raw probe measurements into one worst-case reading.
+
+    A 3-step probe of condition A alone never sees B's cached TeaCache residuals, which measurably add
+    0.5-0.8 GiB on top of everything A holds. So the probe records the worse side per field -- the higher
+    peak, the higher footprint, the lower host-free floor -- and an abort on either side fails the whole
+    probe, the same as an A-only abort always has."""
+    if "aborted" in a:
+        return a
+    if "aborted" in b:
+        return b
+    return {
+        "mlx_peak_load_bytes": max(a["mlx_peak_load_bytes"], b["mlx_peak_load_bytes"]),
+        "mlx_peak_encode_bytes": max(a["mlx_peak_encode_bytes"], b["mlx_peak_encode_bytes"]),
+        "mlx_peak_generation_bytes": max(a["mlx_peak_generation_bytes"], b["mlx_peak_generation_bytes"]),
+        "memory": {
+            "peak_footprint_bytes": max(
+                a["memory"]["peak_footprint_bytes"], b["memory"]["peak_footprint_bytes"]
+            ),
+            "min_host_free_pct": min(a["memory"]["min_host_free_pct"], b["memory"]["min_host_free_pct"]),
+        },
+    }
+
+
+def probe_record_from_worker(
+    recipe: Recipe, result: dict[str, Any], *, working_set_bytes: int, versions: dict[str, str]
+) -> dict[str, Any]:
+    """Map a worker's raw result (or an ``aborted`` payload) onto ``probe_record``'s inputs: the three MLX
+    phase peaks, the host free-memory floor, and the OS process footprint mlx-guard actually kills on."""
+    from _comparison_recipes import probe_record
+
+    if "aborted" in result:
+        return probe_record(
+            recipe,
+            phase_peaks={},
+            min_host_free_pct=None,
+            working_set_bytes=working_set_bytes,
+            versions=versions,
+            aborted=str(result["aborted"]),
+        )
+    memory = result["memory"]
+    record = probe_record(
+        recipe,
+        phase_peaks={
+            "load": result["mlx_peak_load_bytes"],
+            "encode": result["mlx_peak_encode_bytes"],
+            "generation": result["mlx_peak_generation_bytes"],
+        },
+        min_host_free_pct=memory["min_host_free_pct"],
+        working_set_bytes=working_set_bytes,
+        versions=versions,
+        peak_footprint_bytes=memory["peak_footprint_bytes"],
+    )
+    record["memory"] = memory
+    return record
+
+
+def _probe(slug: str, *, fallback: bool) -> int:
+    """3-step probe of BOTH conditions: B holds cached TeaCache residuals on top of everything A holds
+    (+0.5-0.8 GiB measured), so judging the probe on A alone misses B's worse memory. The record gates on
+    whichever condition peaked higher (``merge_probe_results``); an abort on either side fails it."""
+    import mlx.core as mx
+    from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, recipe_for, with_resolution
+
+    base = recipe_for(slug)
+    if base.fallback is None:
+        raise SystemExit(f"{slug} has no fallback and needs no probe")
+    recipe = with_resolution(base, *base.fallback) if fallback else base
+    working_set = int(mx.device_info().get("max_recommended_working_set_size", WORKING_SET_BYTES_DEFAULT))
+    result_a = _spawn(recipe, "a", probe=True, smoke=False)
+    result_b = _spawn(recipe, "b", probe=True, smoke=False)
+    merged = merge_probe_results(result_a, result_b)
+    record = probe_record_from_worker(recipe, merged, working_set_bytes=working_set, versions=_versions())
+    _write_probe(record)
+    print(f"probe {slug} {recipe.width}x{recipe.height}: pass={record['pass']}", flush=True)
+    return 0  # a failed probe is a measurement, not a failure; resolve_resolution acts on it
+
+
+def _write_probe(record: dict[str, Any]) -> None:
+    PROBE_DIR.mkdir(parents=True, exist_ok=True)
+    (PROBE_DIR / f"{record['slug']}_{record['width']}x{record['height']}.json").write_text(
+        json.dumps(record, indent=2)
+    )
+
+
+def _probe_failed(slug: str, *, fallback: bool, reason: str) -> None:
+    """Hand-record a probe killed from outside (mlx-guard kills the whole group, so no record was written)."""
+    from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, probe_record, recipe_for, with_resolution
+
+    base = recipe_for(slug)
+    recipe = with_resolution(base, *base.fallback) if fallback and base.fallback else base
+    _write_probe(
+        probe_record(
+            recipe,
+            phase_peaks={},
+            min_host_free_pct=None,
+            working_set_bytes=WORKING_SET_BYTES_DEFAULT,
+            versions=_versions(),
+            aborted=reason,
+        )
+    )
+
+
+def _resolved(slug: str, *, smoke: bool) -> Recipe:
+    from _comparison_recipes import recipe_for, resolve_resolution
+
+    if smoke:
+        return _smoke_recipe(recipe_for(slug))
+    return resolve_resolution(recipe_for(slug), _load_probes(slug), versions=_versions())
 
 
 def _orchestrate(
-    cfg: VariantConfig,
-    base_dir: Path,
+    slug: str,
     *,
-    chunks_dir: Path,
-    worker_budget: list[int],
-    provenance: dict[str, str],
-) -> dict[str, Any] | None:
-    """Run the pending vanilla / wrapper subprocesses for one variant (within the
-    remaining worker budget), persisting each result; return the merged JSON entry
-    once both conditions are on disk, else None (partial — re-invoke to continue).
+    budget: int,
+    smoke: bool,
+    spawn: Callable[..., dict[str, Any]] | None = None,
+    trash: Path | None = None,
+    chunks_dir: Path | None = None,
+    raw_dir: Path | None = None,
+) -> int:
+    from _comparison_recipes import recipe_stamp
 
-    ``worker_budget`` is a one-element list holding the number of workers this
-    invocation may still spawn (a negative value means unlimited); it is decremented
-    in place so the budget spans variants."""
-    variant_dir = base_dir / cfg.slug
-    vanilla_path = variant_dir / "vanilla.webp"
-    wrapper_path = variant_dir / "wrapper.webp"
-    image_for = {"vanilla": vanilla_path, "wrapper": wrapper_path}
-
-    pending = _pending_conditions(chunks_dir, cfg.slug)
-    reused = [c for c in _CONDITIONS if c not in pending]
-    if reused:
-        print(f"  RESUMING: reusing persisted {reused} from {chunks_dir / cfg.slug}")
-    for condition in pending:
-        if worker_budget[0] == 0:
-            print(f"  worker budget exhausted before {cfg.slug}/{condition}; re-invoke to continue")
-            break
-        result = _run_one_worker(cfg.slug, condition, image_for[condition])
+    spawn_fn = spawn or _spawn
+    trash_dir = trash if trash is not None else (Path.home() / ".Trash")
+    recipe = _resolved(slug, smoke=smoke)
+    chunks = chunks_dir if chunks_dir is not None else (SMOKE_ROOT / "chunks" if smoke else CHUNKS_DIR)
+    raw_root = raw_dir if raw_dir is not None else (SMOKE_ROOT if smoke else RAW_ROOT)
+    expected = recipe_stamp(recipe, versions=_versions())
+    for condition in plan_conditions(chunks, raw_root, slug, recipe.steps, expected, budget):
+        path = chunk_path(chunks, slug, condition)
+        retire_chunk(path, trash=trash_dir, tag=_now_tag())
+        retire_chunk(path.with_suffix(".aborted.json"), trash=trash_dir, tag=_now_tag())
+        result = spawn_fn(recipe, condition, probe=False, smoke=smoke)
         if "aborted" in result:
-            aborted = _chunk_path(chunks_dir, cfg.slug, condition).with_suffix(".aborted.json")
-            aborted.parent.mkdir(parents=True, exist_ok=True)
-            aborted.write_text(json.dumps(result, indent=2))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.with_suffix(".aborted.json").write_text(json.dumps(result, indent=2))
             print(
-                f"\n== ABORTED by the memory watchdog on {cfg.slug}/{condition}: "
-                f"{result['resident_bytes'] / 1024**3:.2f} GB resident > "
-                f"{result['ceiling_bytes'] / 1024**3:.2f} GB ceiling; artifact {aborted}. "
-                "Nothing persisted as a result. ==",
-                flush=True,
+                f"== ABORTED by the memory watchdog on {slug}/{condition}; nothing persisted ==", flush=True
             )
-            raise SystemExit(4)
-        # Stamp the chunk with this run's reps + provenance so a later invocation can
-        # refuse to pair it with a chunk from a different setup.
-        written = _persist_chunk(chunks_dir, cfg.slug, {**result, "reps": REPS, "provenance": provenance})
-        print(f"  chunk persisted: {written}", flush=True)
-        if worker_budget[0] > 0:
-            worker_budget[0] -= 1
+            return 4
+        check_chunk_stamp(result, expected, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(result, indent=2))
+        tmp.replace(path)
+        print(f"  chunk persisted: {path}", flush=True)
+    remaining = plan_conditions(chunks, raw_root, slug, recipe.steps, expected, -1)
+    return 3 if remaining else 0
 
-    loaded = _load_chunks(chunks_dir, cfg.slug, reps=REPS)
-    if loaded is None:
-        print(f"  PARTIAL: {cfg.slug} still pending {_pending_conditions(chunks_dir, cfg.slug)}; not merged")
-        return None
-    vanilla, wrapper = loaded["vanilla"], loaded["wrapper"]
 
-    v = _condition_metrics(vanilla["rep_seconds"])
-    w = _condition_metrics(wrapper["rep_seconds"])
-    speedup_warm = _speedup(v["warm"], w["warm"])
-    speedup_cold = _speedup(v["cold"], w["cold"])
+def _finalize(slug: str, *, export_jpg: bool = False) -> None:
+    """Both chunks done → SSIM on the raw PNGs, contact sheets, report entry, render check.
 
-    print(
-        f"  cold: vanilla {v['cold']:.2f}s | wrapper {w['cold']:.2f}s "
-        f"| speedup_cold {_fmt_speedup(speedup_cold)}"
-    )
-    if v["warm"] is not None and w["warm"] is not None:
-        print(
-            f"  warm: vanilla {v['warm']:.2f}s | wrapper {w['warm']:.2f}s "
-            f"| speedup_warm {_fmt_speedup(speedup_warm)}"
+    ``export_jpg`` additionally converts the four raw PNGs to the JPGs COMPARISON.md and the per-model
+    pages actually link — off by default so a routine re-finalize (step L) does not touch the committed,
+    already-optimised JPGs; pass it only when regenerating the showcase images themselves."""
+    import numpy as np
+    from _comparison_recipes import recipe_stamp
+    from _comparison_sheet import build_contact_sheet, export_jpgs
+    from PIL import Image
+    from skimage.metrics import structural_similarity
+
+    recipe = _resolved(slug, smoke=False)
+    a, b = load_pair(CHUNKS_DIR, RAW_ROOT, slug, recipe.steps, recipe_stamp(recipe, versions=_versions()))
+    if a["git_sha"] != b["git_sha"]:
+        print(f"  warning: A ran at {a['git_sha']}, B at {b['git_sha']}", flush=True)
+    raw = raw_dir_for(RAW_ROOT, slug)
+    with Image.open(raw / "a.png") as ia, Image.open(raw / "b.png") as ib:
+        ssim = float(
+            structural_similarity(
+                np.asarray(ia.convert("RGB")), np.asarray(ib.convert("RGB")), channel_axis=2, data_range=255
+            )
         )
-    else:
-        print("  warm: (images-only preview — --reps 1, no warm timing)")
+    for cond, kinds in (("a", ["computed"] * recipe.steps), ("b", b["decision_kinds"])):
+        build_contact_sheet(frame_paths(frames_dir_for(RAW_ROOT, slug, cond)), kinds).save(
+            raw / f"steps-{cond}.png"
+        )
+    if export_jpg:
+        export_jpgs(raw, REPO / "_artifacts" / "comparison" / slug)
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    provenance = {
+        "generated_at": generated_at,
+        "git_sha_a": a["git_sha"],
+        "git_sha_b": b["git_sha"],
+        "mlx_teacache_version": a["mlx_teacache_version"],
+        **{k: str(v) for k, v in a["stamp"].items() if k.startswith("version_")},
+    }
+    header = _report_header()
+    entry = assemble_entry(
+        recipe,
+        a,
+        b,
+        ssim=ssim,
+        provenance=provenance,
+        mflux_compiles_on_this_chip=header["mflux_compiles_on_this_chip"],
+    )
+    report: dict[str, Any] = (
+        json.loads(REPORT_PATH.read_text()) if REPORT_PATH.exists() else {"schema_version": 2, "variants": {}}
+    )
+    report.pop("mflux_compiles_predict", None)  # pre-rename key; header below always supplies the new one
+    report = {**merge_entry(report, slug, entry, generated_at=generated_at), **header}
+    sys.path.insert(0, str(REPO / "docs"))
+    import _generate_comparison
+
+    _generate_comparison.render_blocks(report)  # fails loudly if the page cannot render this entry
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REPORT_PATH.write_text(json.dumps(report, indent=2))
+    print(
+        f"{slug}: ssim={ssim:.4f} wall={entry['speedup_wall']:.2f}x steady={entry['speedup_steady']:.2f}x "
+        f"preview-subtracted={entry['speedup_preview_subtracted']:.2f}x -> {REPORT_PATH}",
+        flush=True,
+    )
+
+
+def _report_header() -> dict[str, Any]:
+    import platform
+
+    from _comparison_recipes import PROMPT, QWEN_PROMPT_SUFFIX, SEED
+    from mflux.utils.apple_silicon import AppleSiliconUtil
+
+    def sysctl(key: str) -> str:
+        return subprocess.run(
+            ["sysctl", "-n", key], capture_output=True, text=True, check=False
+        ).stdout.strip()
 
     return {
-        "variant_id": cfg.variant_id,
-        "num_inference_steps": cfg.num_inference_steps,
-        "guidance": cfg.guidance,
-        "height": cfg.height,
-        "width": cfg.width,
-        "quantize": cfg.quantize,
-        "build": cfg.build or f"uniform q{cfg.quantize}",
-        "vanilla": {
-            "rep_seconds": vanilla["rep_seconds"],
-            "cold_seconds": v["cold"],
-            "warm_median_seconds": v["warm"],
-            "peak_memory_gb": vanilla.get("peak_memory_gb"),
-        },
-        "wrapper": {
-            "rep_seconds": wrapper["rep_seconds"],
-            "cold_seconds": w["cold"],
-            "warm_median_seconds": w["warm"],
-            "skipped_per_rep": wrapper["skipped_per_rep"],
-            "computed_per_rep": wrapper["computed_per_rep"],
-            "skip_pattern_per_rep": wrapper.get("skip_pattern_per_rep", []),
-            "max_consecutive_skips_per_rep": wrapper.get("max_consecutive_skips_per_rep", []),
-            "rel_l1_thresh_used": wrapper["rel_l1_thresh_used"],
-            "peak_memory_gb": wrapper.get("peak_memory_gb"),
-        },
-        "speedup_warm": speedup_warm,
-        "speedup_cold": speedup_cold,
-        "chunk_provenance": {c: loaded[c]["provenance"] for c in _CONDITIONS},
-        "image_paths": {
-            "vanilla": str(vanilla_path.relative_to(base_dir.parent.parent)),
-            "wrapper": str(wrapper_path.relative_to(base_dir.parent.parent)),
+        "schema_version": 2,
+        "prompt": PROMPT,
+        "qwen_prompt_suffix": QWEN_PROMPT_SUFFIX,
+        "seed": SEED,
+        "protocol": "one cold generation per condition in its own process; weights and prompt embeddings evaluated "
+        "before the clock; taef preview decoded every step",
+        # mflux mx.compiles the FLUX.2 Klein / Z-Image predict step on every chip except M1/M2 (which
+        # AppleSiliconUtil treats as eager). One flag for the whole run; assemble_entry AND-gates it with
+        # whether the model itself has a compiled predict step at all (per-entry ``a_compiled_predict``).
+        "mflux_compiles_on_this_chip": not AppleSiliconUtil.is_m1_or_m2(),
+        "hardware": {
+            "chip": sysctl("machdep.cpu.brand_string"),
+            "ram_gb": round(int(sysctl("hw.memsize") or 0) / GIB),
+            "os": f"macOS {platform.mac_ver()[0]}",
+            "python": platform.python_version(),
         },
     }
 
 
 def main() -> None:
-    global REPS
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--worker",
-        action="store_true",
-        help="(internal) run as a worker subprocess for one (variant, condition) pair.",
-    )
-    parser.add_argument(
-        "--reps",
-        type=int,
-        default=None,
-        help="Override reps per condition (e.g. 1 for an images-only preview; default 3 for timing).",
-    )
-    parser.add_argument("--variant", help="Variant slug (worker mode only).")
-    parser.add_argument("--condition", help="vanilla or wrapper (worker mode only).")
-    parser.add_argument("--save-to", help="Image destination path (worker mode only).")
-    parser.add_argument(
-        "--output-root",
-        type=Path,
-        default=Path(__file__).parent.parent / "_artifacts",
-        help="Root directory for outputs. Default: <repo>/_artifacts/",
-    )
-    parser.add_argument(
-        "--machine-label",
-        default=None,
-        help="Override the chip name written into comparison_report.json's hardware section "
-        "(e.g. 'Apple M1 Max'). Defaults to macOS sysctl machdep.cpu.brand_string.",
-    )
-    parser.add_argument(
-        "--ram-gb",
-        type=int,
-        default=None,
-        help="Override the RAM-GB field. Defaults to round(hw.memsize / 1 GiB) on macOS.",
-    )
-    parser.add_argument(
-        "--only",
-        default=None,
-        help="Restrict orchestration to a single variant slug (e.g. 'klein-base-4b-cfg'). "
-        "Useful for resuming after a partial run.",
-    )
-    parser.add_argument(
-        "--chunks-dir",
-        type=Path,
-        default=Path(__file__).parent.parent / "tests" / "_artifacts" / "comparison_chunks",
-        dest="chunks_dir",
-        help=(
-            "Directory for per-(variant, condition) worker results (git-ignored). Existing "
-            "chunks are REUSED on re-invocation — move a variant's subdir to the Trash for a "
-            "fresh measurement."
-        ),
-    )
-    parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=None,
-        dest="max_workers",
-        help=(
-            "Spawn at most this many worker subprocesses this invocation (one worker = one "
-            "(variant, condition), all reps inside it), then exit; a variant is merged into "
-            "the report only once both of its conditions are on disk. --max-workers 1 splits "
-            "each variant's showcase run into two finite jobs; an invocation that completes "
-            "no variant exits with status 3."
-        ),
-    )
-    args = parser.parse_args()
-    if args.reps is not None:  # applies to both orchestrator (report) and worker subprocess
-        REPS = args.reps
+    from _comparison_recipes import RECIPES
 
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--worker", action="store_true", help="(internal) run one condition in this process")
+    ap.add_argument("--only", required=True, choices=[r.slug for r in RECIPES])
+    ap.add_argument("--condition", choices=CONDITIONS, default="a")
+    ap.add_argument("--width", type=int)
+    ap.add_argument("--height", type=int)
+    ap.add_argument(
+        "--probe",
+        action="store_true",
+        help="3-step memory probe of conditions A and B, gated on the worse; writes no chunk",
+    )
+    ap.add_argument(
+        "--fallback", action="store_true", help="with --probe / --probe-failed: the fallback size"
+    )
+    ap.add_argument(
+        "--probe-failed", action="store_true", help="record a probe killed from outside as failed"
+    )
+    ap.add_argument("--reason", default="killed by mlx-guard")
+    ap.add_argument("--max-workers", type=positive_int, default=None)
+    ap.add_argument("--finalize", action="store_true", help="SSIM + contact sheets + report entry")
+    ap.add_argument(
+        "--export-jpg",
+        action="store_true",
+        help="with --finalize: also write the showcase JPGs to _artifacts/comparison/<slug>/",
+    )
+    ap.add_argument(
+        "--smoke", action="store_true", help="4 steps at 256x256 into tests/_artifacts/comparison_smoke"
+    )
+    args = ap.parse_args()
     if args.worker:
         _worker_main(args)
         return
-
-    base_dir: Path = args.output_root / "comparison"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    report_path: Path = args.output_root / "comparison_report.json"
-
-    provenance = _provenance()
-    report: dict[str, Any] = {
-        "schema_version": 1,
-        "generated_at": provenance["generated_at"],
-        "hardware": _detect_hardware(args.machine_label, args.ram_gb),
-        "prompt": PROMPT,
-        "seed": SEED,
-        "height": HEIGHT,
-        "width": WIDTH,
-        "reps_per_condition": REPS,
-        "isolation": "subprocess-per-condition",
-        # Assembled incrementally (one --only run per variant, across versions);
-        # each variant's "provenance" is authoritative, the top-level reflects the
-        # latest write.
-        "variants": {},
-    }
-
-    variants_to_run = tuple(v for v in VARIANTS if v.slug == args.only) if args.only else VARIANTS
-    if args.only and not variants_to_run:
-        raise SystemExit(f"--only {args.only!r} did not match any variant slug")
-
-    if report_path.exists():
-        # Always merge into the existing report: each completed variant overwrites
-        # only its own row, so a --max-workers / --only run that finishes a subset
-        # of variants can never drop the others. Move the report to the Trash for
-        # a from-scratch file.
-        report = json.loads(report_path.read_text())
-        print(f"Merging into existing report at {report_path}")
-
-    worker_budget = [args.max_workers if args.max_workers is not None else -1]
-    merged_any = False
-    for cfg in variants_to_run:
-        print(
-            f"\n=== {cfg.variant_id} (slug={cfg.slug}) — "
-            f"{cfg.num_inference_steps} steps, guidance={cfg.guidance} ==="
-        )
-        entry = _orchestrate(
-            cfg, base_dir, chunks_dir=args.chunks_dir, worker_budget=worker_budget, provenance=provenance
-        )
-        if entry is None:
-            continue
-        report = _merge_variant_into_report(report, cfg.slug, entry, provenance)
-        merged_any = True
-
-    if not merged_any:
-        print(f"\nNo variant completed this invocation; report at {report_path} left untouched.")
-        sys.exit(3)
-    report_path.write_text(json.dumps(report, indent=2))
-    print(f"\nReport written: {report_path}")
-    for slug, entry in report["variants"].items():
-        warm = entry["wrapper"]["warm_median_seconds"]
-        warm_str = (
-            f"wrapper_warm={warm:.2f}s speedup_warm={_fmt_speedup(entry['speedup_warm'])}"
-            if warm is not None
-            else "(images-only preview)"
-        )
-        print(f"  {slug:24s} {warm_str} skipped[0]={entry['wrapper']['skipped_per_rep'][0]}")
+    if args.probe_failed:
+        _probe_failed(args.only, fallback=args.fallback, reason=args.reason)
+        return
+    if args.probe:
+        raise SystemExit(_probe(args.only, fallback=args.fallback))
+    if args.finalize:
+        _finalize(args.only, export_jpg=args.export_jpg)
+        return
+    budget = args.max_workers if args.max_workers is not None else -1
+    raise SystemExit(_orchestrate(args.only, budget=budget, smoke=args.smoke))
 
 
 if __name__ == "__main__":

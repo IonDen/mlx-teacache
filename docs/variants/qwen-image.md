@@ -19,21 +19,11 @@ The detector matches `model_config.aliases` containing `"qwen-image"` or `"qwen"
 - Default `rel_l1_thresh`: **0.30** (per-variant default, set from the threshold sweep)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At the 768×768 shared portrait recipe on M1 Max 32 GB (`bench_comparison.py`, subprocess-per-condition, 3 reps):
-
-| Condition | Warm-median wall-clock | Peak memory |
-|---|---|---|
-| vanilla | 1207.2 s | 30.4 GB |
-| wrapper (full TeaCache) | 695.1 s | 30.8 GB |
-
-- **Warm speedup: 1.74×** (1.63× cold), with 25 of 48 active steps skipped at `rel_l1_thresh=0.30`. **This is the v0.9.0 measurement.** Under v0.10.0 the same threshold skips more — 33 of 48 on the red-apple bench recipe, at SSIM 0.967 against vanilla instead of 0.978 — so this row and its images are a record of 0.9.x, not of the current gate; see the CHANGELOG's 0.10.0 entry and the README's Benchmarks footnote ⁷.
-- Most of the win is step-skipping: reusing the cached transformer-body residual on skipped steps, each skip avoiding both CFG branches' 60-block bodies. Qwen-Image's `_predict` is **not** `mx.compile`-wrapped in mflux, so the FLUX.2/Z-Image compile-avoidance effect does not exist here — the v0.10.0 three-way bench did time the wrapper 1.10× ahead of vanilla with the gate disabled and pixel-identical output, but the v0.11.0 bench below, with the text encoders freed in every condition, puts that at 1.04×, inside the spread of the vanilla reps, so the README's Benchmarks footnote ⁷ now reports 2.68× combined and 2.57× from gating and treats the rest as noise.
-
-Reproduce with `uv run python scripts/bench_comparison.py --only qwen-image`. Full report at `_artifacts/comparison_report.json`; images under `_artifacts/comparison/qwen-image/`.
+On the comparison page's single run at 672×896, q4, the wrapper took the generation from 693.6 s to 336.7 s (2.06× on this run, preview decoding included), skipping 26 of 50 steps at SSIM 0.92 against vanilla. See [the comparison page](../comparison/qwen-image.md) for the images and the step-by-step preview sheets.
 
 ## Image quality on consumer memory
 
-Stock uniform 4-bit quantization over-quantizes Qwen-Image's quantization-sensitive layers and produces a grainy, low-detail skin texture on a 32 GB Mac — a Qwen + q4 limitation, independent of TeaCache (the wrapper faithfully reproduces whatever the base model generates). The comparison portraits here were rendered with a mixed-precision build that keeps the first/last transformer blocks at 8-bit and the embeddings + final projection at bf16, which clears the artifact and still fits 32 GB (~30.4 GB peak). mlx-teacache stays quantization-agnostic; this is a model-construction choice. To reproduce the showcase quality, install the predicate before building the model:
+Stock uniform 4-bit quantization over-quantizes Qwen-Image's quantization-sensitive layers and produces a grainy, low-detail skin texture on a 32 GB Mac — a Qwen + q4 limitation, independent of TeaCache (the wrapper faithfully reproduces whatever the base model generates). The earlier comparison page used a mixed-precision build that keeps the first/last transformer blocks at 8-bit and the embeddings + final projection at bf16, which clears the artifact at a higher peak (~30.4 GB); the current page uses stock 4-bit instead (17.6 GiB peak), so its portrait keeps a light speckle where the mixed-precision build would not. mlx-teacache stays quantization-agnostic; this is a model-construction choice. To reproduce the mixed-precision build's quality, install the predicate before constructing the model:
 
 ```python
 import mlx.nn as nn

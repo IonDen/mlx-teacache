@@ -35,7 +35,7 @@ At the 512×512 red-apple bench recipe on M1 Max 32 GB (subprocess-per-rep, 3 re
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant z-image --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.10.0_bench_z_image.json`.
 
-The portrait row in [COMPARISON.md](../../COMPARISON.md) is a separate generation at 640×896 q8 (the shared comparison prompt): 1.33× warm, 14/48 skips, SSIM 0.957, peak 18.7 GB → 13.1 GB. The speedup is higher at 640×896 than at 512² because each skipped step saves more absolute compute, so the per-step gating overhead amortizes better.
+A separate 640×896 q8 generation on the comparison page skips 16 of 50 steps for a 1.39× speedup on that run, at SSIM 0.93 — see [docs/comparison/z-image-base.md](../comparison/z-image-base.md). That's a higher skip count than the 15 of 48 active steps at the 512² bench above.
 
 ## Threshold sweep
 

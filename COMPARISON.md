@@ -102,16 +102,26 @@ This page skips two kinds of runs. `flux1-schnell` and the distilled FLUX.2 Klei
 
 ## Reproduce
 
-Every run on this page used mflux 0.20.0 in a Python 3.12 environment. Each model takes one command to check memory where its recipe needs it, two more to run condition A and then B, and a last one to merge the pair into a report entry and build the step sheets:
+Every run on this page used mflux 0.20.0 in a Python 3.12 environment; this repository's own lock resolves an older mflux, so set one up on its own:
 
 ```bash
-uv run python scripts/bench_comparison.py --probe --only <slug>          # only for slugs with a memory fallback
-uv run python scripts/bench_comparison.py --only <slug> --max-workers 1  # runs once for A, again for B
-uv run python scripts/bench_comparison.py --only <slug> --max-workers 1
-uv run python scripts/bench_comparison.py --only <slug> --finalize       # SSIM, contact sheets, report entry
+uv venv --python 3.12
+uv pip install "mflux==0.20.0" "mlx-taef==0.8.3" scikit-image -e .
 ```
 
-Replace `<slug>` with one of `flux1-dev`, `flux1-krea-dev`, `klein-base-4b`, `z-image-base`, `klein-base-9b`. On this machine the A-plus-B pair took roughly 7 minutes for either FLUX.1 model, 15 minutes for klein-base-4b or z-image-base, and half an hour for klein-base-9b, almost all of it generation time. Each model's own page has the exact seconds.
+The worker subprocesses run offline, so download every checkpoint first — `hf download black-forest-labs/FLUX.1-dev`, `hf download black-forest-labs/FLUX.1-Krea-dev`, `hf download black-forest-labs/FLUX.2-klein-base-4B`, `hf download Tongyi-MAI/Z-Image`, `hf download black-forest-labs/FLUX.2-klein-base-9B`, and `hf download Qwen/Qwen-Image`. Three of those sit behind the FLUX Non-Commercial click-through — FLUX.1 [dev], FLUX.1 Krea [dev], and FLUX.2 [klein] base 9B — so accept the license on each model's Hugging Face page before downloading it.
+
+Each model takes one command to check memory where its recipe needs it, two more to run condition A and then B, and a last one to merge the pair into a report entry and build the step sheets:
+
+```bash
+uv run python scripts/bench_comparison.py --probe --only <slug>            # only for slugs with a memory fallback
+uv run python scripts/bench_comparison.py --probe --fallback --only <slug> # only if the probe above fails
+uv run python scripts/bench_comparison.py --only <slug> --max-workers 1    # runs once for A, again for B
+uv run python scripts/bench_comparison.py --only <slug> --max-workers 1
+uv run python scripts/bench_comparison.py --only <slug> --finalize         # SSIM, contact sheets, report entry
+```
+
+Replace `<slug>` with one of `flux1-dev`, `flux1-krea-dev`, `klein-base-4b`, `z-image-base`, `klein-base-9b`, `qwen-image`; only `klein-base-9b` and `qwen-image` carry a memory fallback, so the probe lines only apply to those two. On this machine the A-plus-B pair took roughly 7 minutes for either FLUX.1 model, 15 minutes for klein-base-4b or z-image-base, 17 minutes for qwen-image, and half an hour for klein-base-9b, almost all of it generation time. Each model's own page has the exact seconds.
 
 The worker subprocesses write their raw PNGs and preview frames to this repository's ignored test-artifacts folder, not tracked in git. The JPGs on this page are compressed copies of those raw outputs, so SSIM was measured on the lossless PNGs before compression, not on what you're looking at here.
 

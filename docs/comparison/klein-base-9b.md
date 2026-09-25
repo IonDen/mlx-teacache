@@ -48,6 +48,8 @@ On this run the gate skips 11 of 50 steps. Same player, same pose, same light be
 ### Reproduce
 
 ```bash
+uv run python scripts/bench_comparison.py --probe --only klein-base-9b
+uv run python scripts/bench_comparison.py --probe --fallback --only klein-base-9b
 uv run python scripts/bench_comparison.py --only klein-base-9b --max-workers 1
 uv run python scripts/bench_comparison.py --only klein-base-9b --max-workers 1
 uv run python scripts/bench_comparison.py --only klein-base-9b --finalize

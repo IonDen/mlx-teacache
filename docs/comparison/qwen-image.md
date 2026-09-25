@@ -50,6 +50,8 @@ On this run the gate skips 26 of 50 steps. Unlike the other models on this page,
 ### Reproduce
 
 ```bash
+uv run python scripts/bench_comparison.py --probe --only qwen-image
+uv run python scripts/bench_comparison.py --probe --fallback --only qwen-image
 uv run python scripts/bench_comparison.py --only qwen-image --max-workers 1
 uv run python scripts/bench_comparison.py --only qwen-image --max-workers 1
 uv run python scripts/bench_comparison.py --only qwen-image --finalize

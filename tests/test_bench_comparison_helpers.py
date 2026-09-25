@@ -281,6 +281,75 @@ def test_now_tag_carries_microseconds_so_two_retires_in_one_second_never_collide
     assert tag == "2026-09-25-100000-123456"
 
 
+def test_quality_probe_dir_nests_by_slug_then_name(tmp_path: Path) -> None:
+    """Bug: the nesting order is reversed (name/slug), which breaks the brief's documented layout
+    tests/_artifacts/quality_probe/<slug>/<NAME>/."""
+    assert bc.quality_probe_dir(tmp_path, "flux1-dev", "tighter-guidance") == (
+        tmp_path / "flux1-dev" / "tighter-guidance"
+    )
+
+
+def test_quality_probe_dir_matches_run_generations_path_slug_nesting(tmp_path: Path) -> None:
+    """Bug: quality_probe_dir and _run_generation's path_slug="<slug>/<name>" trick (raw_dir_for /
+    frames_dir_for joined on a slug containing "/") stop agreeing on where the final PNG and frames land,
+    so the worker's record.json ends up in a directory the image and frames are not actually written to."""
+    out_dir = bc.quality_probe_dir(tmp_path, "flux1-dev", "tighter-guidance")
+    path_slug = "flux1-dev/tighter-guidance"
+    assert bc.raw_dir_for(tmp_path, path_slug) == out_dir
+    assert bc.frames_dir_for(tmp_path, path_slug, "a") == out_dir / "frames" / "a"
+
+
+def test_reset_quality_probe_dir_moves_an_existing_name_dir_to_the_trash(tmp_path: Path) -> None:
+    """Bug: a stale NAME dir from a previous probe survives and its old record.json/frames get mixed with a
+    fresh run's outputs, or the dir is deleted outright instead of moved to the Trash (rule F)."""
+    root, trash = tmp_path / "root", tmp_path / "trash"
+    target = bc.quality_probe_dir(root, "flux1-dev", "tighter-guidance")
+    target.mkdir(parents=True)
+    (target / "record.json").write_text("{}")
+    (target / "a.png").write_bytes(b"x")
+
+    dest = bc.reset_quality_probe_dir(root, "flux1-dev", "tighter-guidance", trash=trash, tag="t")
+
+    assert dest is not None and dest.exists() and dest.parent == trash
+    assert (dest / "record.json").exists()  # the whole dir moved, not just its contents
+    assert not target.exists()
+    assert bc.reset_quality_probe_dir(root, "flux1-dev", "tighter-guidance", trash=trash, tag="t2") is None
+
+
+def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks() -> None:
+    """Bug: the record drops one of the brief's required fields (name, overrides, prompt, negative_prompt,
+    generation seconds, peaks, min host free), so a candidate setting can't actually be judged from it."""
+    recipe = cr.apply_overrides(cr.recipe_for("flux1-dev"), guidance=7.0, prompt="a red bicycle")
+    result = {
+        "generation_seconds": 12.5,
+        "mlx_peak_load_bytes": 1 * GIB,
+        "mlx_peak_encode_bytes": 2 * GIB,
+        "mlx_peak_generation_bytes": 3 * GIB,
+        "memory": {
+            "peak_resident_bytes": 4 * GIB,
+            "peak_footprint_bytes": 5 * GIB,
+            "min_host_free_pct": 42.0,
+        },
+    }
+    record = bc.quality_probe_record(
+        "tighter-guidance", recipe, overrides={"guidance": 7.0, "prompt": "a red bicycle"}, result=result
+    )
+    assert record["name"] == "tighter-guidance"
+    assert record["slug"] == "flux1-dev"
+    assert record["overrides"] == {"guidance": 7.0, "prompt": "a red bicycle"}
+    assert record["prompt"] == "a red bicycle"
+    assert record["negative_prompt"] is None
+    assert record["generation_seconds"] == 12.5
+    assert record["min_host_free_pct"] == 42.0
+    assert record["peaks"] == {
+        "mlx_peak_load_bytes": 1 * GIB,
+        "mlx_peak_encode_bytes": 2 * GIB,
+        "mlx_peak_generation_bytes": 3 * GIB,
+        "peak_resident_bytes": 4 * GIB,
+        "peak_footprint_bytes": 5 * GIB,
+    }
+
+
 def test_max_workers_must_be_positive() -> None:
     """Bug: --max-workers 0 makes every invocation exit 3 and run-units re-invokes forever."""
     import argparse

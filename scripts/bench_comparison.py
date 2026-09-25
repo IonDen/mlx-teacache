@@ -39,6 +39,7 @@ CHUNKS_DIR = REPO / "tests" / "_artifacts" / "comparison_chunks_v2"
 RAW_ROOT = REPO / "tests" / "_artifacts" / "comparison_raw"
 PROBE_DIR = REPO / "tests" / "_artifacts" / "comparison_probe"
 SMOKE_ROOT = REPO / "tests" / "_artifacts" / "comparison_smoke"
+QUALITY_PROBE_ROOT = REPO / "tests" / "_artifacts" / "quality_probe"
 CONDITIONS: tuple[str, ...] = ("a", "b")
 WORKER_RESULT_SENTINEL = "::BENCH_RESULT::"
 GIB = 1024**3
@@ -54,6 +55,48 @@ def raw_dir_for(raw_root: Path, slug: str) -> Path:
 
 def frames_dir_for(raw_root: Path, slug: str, condition: str) -> Path:
     return raw_root / slug / "frames" / condition
+
+
+def quality_probe_dir(root: Path, slug: str, name: str) -> Path:
+    return root / slug / name
+
+
+def reset_quality_probe_dir(root: Path, slug: str, name: str, *, trash: Path, tag: str) -> Path | None:
+    """Move an existing quality-probe NAME dir to the Trash before a fresh run writes into it (rule F)."""
+    target = quality_probe_dir(root, slug, name)
+    if not target.exists():
+        return None
+    trash.mkdir(parents=True, exist_ok=True)
+    dest = trash / f"quality-probe-{slug}-{name}-{tag}"
+    shutil.move(str(target), dest)
+    return dest
+
+
+def quality_probe_record(
+    name: str, recipe: Recipe, *, overrides: dict[str, object], result: dict[str, Any]
+) -> dict[str, Any]:
+    """The JSON record for one quality-probe generation: what was overridden, the resolved prompt and
+    negative, generation time, and the memory peaks -- everything needed to judge a candidate setting
+    without touching chunks, the report, or _artifacts/."""
+    from _comparison_recipes import prompt_for
+
+    memory = result["memory"]
+    return {
+        "name": name,
+        "slug": recipe.slug,
+        "overrides": dict(overrides),
+        "prompt": prompt_for(recipe),
+        "negative_prompt": recipe.negative_prompt,
+        "generation_seconds": result["generation_seconds"],
+        "peaks": {
+            "mlx_peak_load_bytes": result["mlx_peak_load_bytes"],
+            "mlx_peak_encode_bytes": result["mlx_peak_encode_bytes"],
+            "mlx_peak_generation_bytes": result["mlx_peak_generation_bytes"],
+            "peak_resident_bytes": memory["peak_resident_bytes"],
+            "peak_footprint_bytes": memory["peak_footprint_bytes"],
+        },
+        "min_host_free_pct": memory["min_host_free_pct"],
+    }
 
 
 def chunk_is_complete(chunks_dir: Path, raw_root: Path, slug: str, condition: str, steps: int) -> bool:
@@ -280,8 +323,13 @@ def _load_probes(slug: str) -> list[dict[str, Any]]:
     ]
 
 
-def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: int) -> dict[str, Any]:
-    """One generation with every guard in place; staged load; per-phase memory. Returns the result dict."""
+def _run_generation(
+    recipe: Recipe, condition: str, *, raw_root: Path, steps: int, path_slug: str | None = None
+) -> dict[str, Any]:
+    """One generation with every guard in place; staged load; per-phase memory. Returns the result dict.
+
+    ``path_slug`` overrides ``recipe.slug`` for output-path nesting only (the quality-probe worker nests by
+    ``<slug>/<name>`` instead of ``<slug>``); every other use of the recipe is unaffected."""
     import mlx.core as mx
     from _comparison_memory import (
         PeakSampler,
@@ -295,6 +343,7 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
         ENCODER_ATTRS,
         assert_prompt_cache_hit,
         evaluate_modules,
+        generate_kwargs_for,
         load_model,
         precompute_prompt,
         release_text_encoders,
@@ -305,10 +354,11 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
 
     import mlx_teacache
 
-    reset_condition_outputs(raw_root, recipe.slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
-    frames_dir = frames_dir_for(raw_root, recipe.slug, condition)
+    slug = path_slug or recipe.slug
+    reset_condition_outputs(raw_root, slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
+    frames_dir = frames_dir_for(raw_root, slug, condition)
     frames_dir.mkdir(parents=True, exist_ok=True)
-    out_png = raw_dir_for(raw_root, recipe.slug) / f"{condition}.png"
+    out_png = raw_dir_for(raw_root, slug) / f"{condition}.png"
     prompt = prompt_for(recipe)
 
     sampler = PeakSampler(
@@ -371,6 +421,7 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
             height=recipe.height,
             width=recipe.width,
             guidance=recipe.guidance,
+            **generate_kwargs_for(recipe),
         )
         mx.synchronize()
         generation_seconds = time.perf_counter() - gen_start
@@ -466,6 +517,10 @@ def _smoke_recipe(recipe: Recipe) -> Recipe:
 def _worker_main(args: argparse.Namespace) -> None:
     from _comparison_recipes import recipe_for, recipe_stamp, with_resolution
 
+    if args.quality_probe:
+        _quality_probe_worker(args)
+        return
+
     recipe = with_resolution(recipe_for(args.only), args.width, args.height)
     if args.smoke:
         recipe = _smoke_recipe(recipe)
@@ -478,8 +533,54 @@ def _worker_main(args: argparse.Namespace) -> None:
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
 
 
+def _quality_probe_worker(args: argparse.Namespace) -> None:
+    """(internal, --worker --quality-probe) One condition-A generation with the given overrides; writes the
+    final PNG, preview frames and a JSON record under QUALITY_PROBE_ROOT/<slug>/<name>/. Touches no chunk,
+    no report, no _artifacts/."""
+    from _comparison_recipes import apply_overrides, recipe_for
+
+    name = args.quality_probe
+    overrides: dict[str, object] = {
+        k: v
+        for k, v in {
+            "width": args.width,
+            "height": args.height,
+            "guidance": args.guidance,
+            "quantize": args.quantize,
+            "prompt": args.prompt_file.read_text().strip() if args.prompt_file else None,
+            "negative_prompt": args.negative_file.read_text().strip() if args.negative_file else None,
+        }.items()
+        if v is not None
+    }
+    recipe = apply_overrides(recipe_for(args.only), **overrides)
+    reset_quality_probe_dir(
+        QUALITY_PROBE_ROOT, recipe.slug, name, trash=Path.home() / ".Trash", tag=_now_tag()
+    )
+    _install_guards(recipe, f"{recipe.slug}/quality-probe/{name}")
+    result = _run_generation(
+        recipe, "a", raw_root=QUALITY_PROBE_ROOT, steps=recipe.steps, path_slug=f"{recipe.slug}/{name}"
+    )
+    record = quality_probe_record(name, recipe, overrides=overrides, result=result)
+    out_dir = quality_probe_dir(QUALITY_PROBE_ROOT, recipe.slug, name)
+    (out_dir / "record.json").write_text(json.dumps(record, indent=2))
+    print(f"{WORKER_RESULT_SENTINEL}{json.dumps(record)}", flush=True)
+
+
+def _stream_worker(cmd: list[str]) -> tuple[int, str]:
+    """Run a worker subprocess; stream its output live (heavy-runs monitoring) while collecting it."""
+    env = {**os.environ, "HF_HUB_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
+    lines: list[str] = []
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=None, text=True, env=env) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+        returncode = proc.wait()
+    return returncode, "".join(lines)
+
+
 def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[str, Any]:
-    """Run one worker; stream its output live (heavy-runs monitoring) while collecting it for the result line."""
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -495,25 +596,49 @@ def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[
     ]
     cmd += ["--probe"] if probe else []
     cmd += ["--smoke"] if smoke else []
-    env = {**os.environ, "HF_HUB_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
     print(
         f"\n>> worker {recipe.slug}/{condition} {recipe.width}x{recipe.height}{' probe' if probe else ''}",
         flush=True,
     )
-    lines: list[str] = []
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=None, text=True, env=env) as proc:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            lines.append(line)
-        returncode = proc.wait()
-    payload = parse_worker_line("".join(lines))
+    returncode, out = _stream_worker(cmd)
+    payload = parse_worker_line(out)
     if payload is not None and "aborted" in payload:
         return payload
     if returncode != 0 or payload is None:
         raise RuntimeError(f"worker {recipe.slug}/{condition} failed: exit {returncode}")
     return payload
+
+
+def _quality_probe(args: argparse.Namespace) -> int:
+    """Top-level --quality-probe NAME --only <slug>: forward only the overrides the caller actually gave to
+    ONE condition-A worker (prompt/negative as file paths, so the worker re-reads them itself instead of
+    round-tripping arbitrary text through argv). The worker applies them with apply_overrides."""
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--worker",
+        "--quality-probe",
+        args.quality_probe,
+        "--only",
+        args.only,
+    ]
+    for flag, value in (
+        ("--width", args.width),
+        ("--height", args.height),
+        ("--guidance", args.guidance),
+        ("--quantize", args.quantize),
+    ):
+        if value is not None:
+            cmd += [flag, str(value)]
+    if args.prompt_file is not None:
+        cmd += ["--prompt-file", str(args.prompt_file)]
+    if args.negative_file is not None:
+        cmd += ["--negative-file", str(args.negative_file)]
+    print(f"\n>> quality-probe {args.only}/{args.quality_probe}", flush=True)
+    returncode, _ = _stream_worker(cmd)
+    if returncode != 0:
+        raise RuntimeError(f"quality-probe worker {args.only}/{args.quality_probe} failed: exit {returncode}")
+    return 0
 
 
 def merge_probe_results(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
@@ -793,6 +918,19 @@ def main() -> None:
     ap.add_argument(
         "--smoke", action="store_true", help="4 steps at 256x256 into tests/_artifacts/comparison_smoke"
     )
+    ap.add_argument(
+        "--quality-probe",
+        metavar="NAME",
+        default=None,
+        help="one-off generation to compare a candidate setting; writes tests/_artifacts/quality_probe/"
+        "<slug>/NAME/ only -- no chunk, no report, no _artifacts/",
+    )
+    ap.add_argument("--guidance", type=float, default=None, help="with --quality-probe: override guidance")
+    ap.add_argument("--quantize", type=int, default=None, help="with --quality-probe: override quantize bits")
+    ap.add_argument("--prompt-file", type=Path, default=None, help="with --quality-probe: prompt text file")
+    ap.add_argument(
+        "--negative-file", type=Path, default=None, help="with --quality-probe: negative-prompt text file"
+    )
     args = ap.parse_args()
     if args.worker:
         _worker_main(args)
@@ -805,6 +943,8 @@ def main() -> None:
     if args.finalize:
         _finalize(args.only, export_jpg=args.export_jpg)
         return
+    if args.quality_probe:
+        raise SystemExit(_quality_probe(args))
     budget = args.max_workers if args.max_workers is not None else -1
     raise SystemExit(_orchestrate(args.only, budget=budget, smoke=args.smoke))
 

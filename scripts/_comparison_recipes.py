@@ -23,6 +23,8 @@ QWEN_PROMPT_SUFFIX = ", Ultra HD, 4K, cinematic composition."  # Alibaba's refer
 SEED = 42
 WORKING_SET_BYTES_DEFAULT = int(24.96 * 1024**3)  # M1 Max 32 GB max_recommended_working_set_size
 MIN_HOST_FREE_PCT = 20.0
+GUARD_LIMIT_BYTES = 25 * 1024**3  # mlx-guard's process-footprint kill threshold
+FOOTPRINT_HEADROOM_BYTES = 1 * 1024**3  # footprint runs ~2-4 GiB above MLX's own peak; stay well clear
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -198,12 +200,18 @@ def probe_record(
     working_set_bytes: int,
     versions: dict[str, str],
     aborted: str | None = None,
+    peak_footprint_bytes: int | None = None,
 ) -> dict[str, object]:
     active = max(phase_peaks.values()) if phase_peaks else 0
+    footprint_ok = (
+        peak_footprint_bytes is not None
+        and peak_footprint_bytes + FOOTPRINT_HEADROOM_BYTES < GUARD_LIMIT_BYTES
+    )
     passed = (
         aborted is None
         and min_host_free_pct is not None
         and bool(phase_peaks)
+        and footprint_ok
         and probe_passes(
             active_peak_bytes=active,
             cache_limit_bytes=int(recipe.cache_gb * 1024**3),
@@ -218,6 +226,7 @@ def probe_record(
         "pass": passed,
         "aborted": aborted,
         "active_peak_bytes": active,
+        "peak_footprint_bytes": peak_footprint_bytes,
         "phase_peaks": dict(phase_peaks),
         "min_host_free_pct": min_host_free_pct,
         "working_set_bytes": working_set_bytes,

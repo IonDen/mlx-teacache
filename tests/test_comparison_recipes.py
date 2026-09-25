@@ -133,6 +133,40 @@ def test_probe_record_fails_when_aborted_or_host_never_sampled() -> None:
     )
 
 
+def test_probe_record_fails_when_the_process_footprint_crosses_the_guard_limit() -> None:
+    """Bug: the probe judges only MLX's own peak, ignoring the OS process footprint mlx-guard actually kills
+    on (25 GiB, running 2-4 GiB above MLX's count) -- a probe can pass while mlx-guard would still kill it."""
+    r = cr.recipe_for("klein-base-9b")  # cache_gb=2.0
+    peaks = {"load": 15 * GIB, "encode": 10 * GIB, "generation": 12 * GIB}  # MLX peak: well under budget
+
+    within_budget = cr.probe_record(
+        r,
+        phase_peaks=peaks,
+        min_host_free_pct=40.0,
+        working_set_bytes=24 * GIB,
+        versions=V,
+        peak_footprint_bytes=20 * GIB,
+    )
+    assert within_budget["pass"] is True
+
+    over_guard_limit = cr.probe_record(
+        r,
+        phase_peaks=peaks,
+        min_host_free_pct=40.0,
+        working_set_bytes=24 * GIB,
+        versions=V,
+        peak_footprint_bytes=int(24.5 * GIB),
+    )
+    assert over_guard_limit["pass"] is False
+    assert over_guard_limit["peak_footprint_bytes"] == int(24.5 * GIB)
+
+    footprint_never_sampled = cr.probe_record(
+        r, phase_peaks=peaks, min_host_free_pct=40.0, working_set_bytes=24 * GIB, versions=V
+    )
+    assert footprint_never_sampled["pass"] is False
+    assert footprint_never_sampled["peak_footprint_bytes"] is None
+
+
 def _rec(recipe: cr.Recipe, passed: bool) -> dict[str, object]:
     return {
         "width": recipe.width,

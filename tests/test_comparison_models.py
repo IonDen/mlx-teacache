@@ -35,7 +35,39 @@ def test_assert_prompt_cache_hit_counts_entries_for_cache_models_only() -> None:
 
 
 def test_release_text_encoders_clears_only_encoders() -> None:
-    """Bug: the transformer or VAE is released (black image), or an encoder survives (memory)."""
-    flux = SimpleNamespace(text_encoder=object(), transformer=object(), vae=object())
-    assert models.release_text_encoders(flux) == ["text_encoder"]
-    assert flux.text_encoder is None and flux.transformer is not None and flux.vae is not None
+    """Bug: the transformer or VAE is released (black image), or an encoder survives (memory), or only one of
+    the three encoder attrs (clip/t5/text) actually gets released."""
+    flux = SimpleNamespace(
+        clip_text_encoder=object(),
+        t5_text_encoder=object(),
+        text_encoder=object(),
+        transformer=object(),
+        vae=object(),
+    )
+    assert models.release_text_encoders(flux) == ["clip_text_encoder", "t5_text_encoder", "text_encoder"]
+    assert flux.clip_text_encoder is None and flux.t5_text_encoder is None and flux.text_encoder is None
+    assert flux.transformer is not None and flux.vae is not None
+
+
+def test_evaluate_modules_batches_by_byte_threshold_and_skips_missing_attrs() -> None:
+    """Bug: one mx.eval(module.parameters()) call materializes an entire module at once, which can hold a
+    large share of a bf16 model's weights (e.g. Qwen-Image) in memory simultaneously."""
+    import mlx.core as mx
+
+    params = {f"w{i}": mx.zeros((1024,), dtype=mx.float32) for i in range(5)}  # 4096 bytes each
+    module = SimpleNamespace(parameters=lambda: params)
+    flux = SimpleNamespace(text_encoder=module, transformer=None)  # transformer: present but None
+    calls: list[list] = []
+    clears: list[int] = []
+    models.evaluate_modules(
+        flux,
+        ["text_encoder", "transformer", "vae"],  # vae: missing entirely
+        batch_bytes=10_000,
+        eval_fn=calls.append,
+        clear_fn=lambda: clears.append(1),
+    )
+    seen = [id(arr) for batch in calls for arr in batch]
+    assert seen == [id(arr) for arr in params.values()]  # every array exactly once, in order
+    assert len(calls) >= 2
+    assert all(sum(arr.nbytes for arr in batch) >= 10_000 for batch in calls[:-1])
+    assert clears == [1]  # only text_encoder was present and non-None -> exactly one module evaluated

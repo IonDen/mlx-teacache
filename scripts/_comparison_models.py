@@ -58,13 +58,41 @@ def load_model(recipe: Recipe) -> Any:
     return flux
 
 
-def evaluate_modules(flux: Any, names: Sequence[str]) -> None:
+def evaluate_modules(
+    flux: Any,
+    names: Sequence[str],
+    *,
+    batch_bytes: int = 256 * 1024**2,
+    eval_fn: Callable[[list[Any]], None] | None = None,
+    clear_fn: Callable[[], None] | None = None,
+) -> None:
+    """Evaluate each present module's parameters in byte-budgeted batches, clearing the cache between modules.
+
+    Qwen/Qwen-Image weights are bf16 on the Hub and mflux quantizes them lazily, so evaluating a whole module
+    in one ``mx.eval`` call can hold a large share of the ~41 GB bf16 source in memory at once. Batching keeps
+    the peak bounded by ``batch_bytes`` instead of by the module's total size."""
     import mlx.core as mx
+    from mlx.utils import tree_flatten
+
+    do_eval = eval_fn or mx.eval
+    do_clear = clear_fn or mx.clear_cache
 
     for name in names:
         module = getattr(flux, name, None)
-        if module is not None:
-            mx.eval(module.parameters())
+        if module is None:
+            continue
+        batch: list[Any] = []
+        batch_size = 0
+        for _, array in tree_flatten(module.parameters()):
+            batch.append(array)
+            batch_size += array.nbytes
+            if batch_size >= batch_bytes:
+                do_eval(batch)
+                batch = []
+                batch_size = 0
+        if batch:
+            do_eval(batch)
+        do_clear()
 
 
 def _cached_call(result: Any, key: dict[str, Any], label: str) -> Callable[..., Any]:

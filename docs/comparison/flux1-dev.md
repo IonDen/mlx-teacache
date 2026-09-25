@@ -40,7 +40,7 @@ Recipe: 25 steps, guidance 3.5, q4, 768×1024, seed 42. Checkpoint `black-forest
 
 ### Notes
 
-The committed multi-run bench (footnote ¹ in the README) measured this variant's 1.57× combined speedup as about 1.41× from skipping steps and 1.11× from avoiding mflux's compiled prediction step, across three cold reps; the footnote also notes the vanilla reps varied more that session than the wrapped ones, so the split is approximate. FLUX.1's CLIP-L text encoder reads only the first 77 tokens of a prompt, while T5 reads the whole thing, so CLIP-L never sees most of this scene's roughly 170 words.
+The committed multi-run bench (footnote ¹ in the README) measured this variant's 1.57× combined speedup as all step-skipping, across three cold reps. mflux has no compiled prediction step for FLUX.1 to avoid, so a session where the no-gate wrapper timed 1.11× ahead of vanilla was just run-to-run spread, not a second speedup mechanism, the same as footnote ⁸ found for Krea. FLUX.1's CLIP-L text encoder reads only the first 77 tokens of a prompt, while T5 reads the whole thing, so CLIP-L never sees most of this scene's roughly 170 words.
 
 On this run the gate skips five steps, landing at steps 4, 6, 8, 10 and 13, never two in a row. The pose and scene stay the same between A and B, but B redraws some details: the hand near the ball opens instead of gripping the racket, and the wristband visible in A is gone from B's wrist. That kind of local redraw is what pulls the SSIM down to 0.84 even though the two read as the same shot. Both A and B carry a small sportswear logo on the visor and top that the model added on its own, a habit of the model, not something TeaCache does.
 

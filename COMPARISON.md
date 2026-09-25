@@ -25,7 +25,7 @@ Seed 42 for every model.
 On this run: 1.25× faster (1.25× with preview decoding left out) · SSIM 0.84 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_flux1_dev.json) · [More details →](docs/comparison/flux1-dev.md)
 <!-- COMPARISON:flux1-dev:summary END -->
 
-The multi-run bench (footnote ¹) splits this variant's 1.57× speedup into about 1.4× from skipping steps and 1.1× from avoiding mflux's compiled prediction step.
+The multi-run bench (footnote ¹) measured this variant's 1.57× speedup as all step-skipping. FLUX.1 has no compiled prediction step, so there's no compile effect to separate out.
 
 ## FLUX.1 Krea [dev]
 

@@ -11,6 +11,9 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - COMPARISON.md is rebuilt: one tennis-at-sunset scene per non-distilled model, generated once with TeaCache off and once with it on, each pair backed by its own page of per-step previews and full generation details. The comparison report moves to `_artifacts/comparison/report.json` (schema 2); the earlier report stays where it was. The distilled-vs-base Klein study moves to its own page.
 - The Qwen-Image calibrated-checkpoint check is now a small shared function. No behavior change.
 
+### Fixed
+- README footnote ¹ no longer credits part of FLUX.1-dev's speedup to `mx.compile`-path avoidance. mflux does not compile the FLUX.1 predict step, and the gap the footnote described was run-to-run spread, not a second speedup mechanism.
+
 ## [0.11.1] — 2026-09-24
 
 mflux 0.20 support. The pin widens to `mflux>=0.17.5,<0.21`. No change to the public API, the gate, the coefficients or any generated image.

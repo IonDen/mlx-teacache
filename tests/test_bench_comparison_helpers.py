@@ -189,3 +189,12 @@ def test_max_workers_must_be_positive() -> None:
     assert bc.positive_int("1") == 1
     with pytest.raises(argparse.ArgumentTypeError):
         bc.positive_int("0")
+
+
+def test_smoke_recipe_leaves_a_step_outside_teacaches_always_computed_window() -> None:
+    """Bug: smoke steps leave no step outside TeaCache's always-computed first/last window, so condition
+    B raises."""
+    smoke = bc._smoke_recipe(cr.recipe_for("flux1-dev"))
+    assert smoke.steps >= 3
+    assert smoke.width == 256 and smoke.height == 256
+    assert smoke.free_encoders is True

@@ -294,13 +294,18 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
         mlx_peak_load = int(mx.get_peak_memory())
         sampler.end_phase("load")
 
-        # Encode, then free the encoders (where set), then evaluate the transformer and VAE.
+        # Encode, then free the encoders (where set), then evaluate the transformer and VAE. The denoiser
+        # eval is materialization/quantization, not prompt encoding, so its time is folded into
+        # load_seconds; encode_seconds covers only precompute_prompt + release_text_encoders. The memory
+        # phase boundary stays here (mlx_peak_encode_bytes is still the peak across this whole window).
         mx.reset_peak_memory()
         t1 = time.perf_counter()
         precompute_prompt(flux, recipe, prompt)
         released = release_text_encoders(flux) if recipe.free_encoders else []
-        evaluate_modules(flux, DENOISER_ATTRS)
         encode_seconds = time.perf_counter() - t1
+        t2 = time.perf_counter()
+        evaluate_modules(flux, DENOISER_ATTRS)
+        load_seconds += time.perf_counter() - t2
         mlx_peak_encode = int(mx.get_peak_memory())
         sampler.end_phase("encode")
 
@@ -393,7 +398,10 @@ def _install_guards(recipe: Recipe, label: str) -> None:
 def _smoke_recipe(recipe: Recipe) -> Recipe:
     from dataclasses import replace
 
-    return replace(recipe, steps=2, width=256, height=256, free_encoders=True)
+    # 4, not 2: TeaCache always computes the first and last step (skip_first_n_steps=1 +
+    # skip_last_n_steps=1), so 2 steps leave nothing outside that always-computed window and
+    # condition B raises InvalidStepWindowError.
+    return replace(recipe, steps=4, width=256, height=256, free_encoders=True)
 
 
 def _worker_main(args: argparse.Namespace) -> None:

@@ -68,8 +68,10 @@ def test_stop_raises_when_the_host_was_never_sampled() -> None:
 
 @darwin
 def test_rusage_struct_matches_the_v0_layout() -> None:
-    """Bug: a field added/dropped shifts ri_phys_footprint onto ri_resident_size."""
+    """Bug: a field added/dropped shifts ri_phys_footprint onto ri_resident_size -- sizeof alone would miss
+    a same-size field swap ahead of it, so this also pins ri_phys_footprint's own byte offset."""
     assert ctypes.sizeof(cm._RusageInfoV0) == 96
+    assert cm._RusageInfoV0.ri_phys_footprint.offset == 72
 
 
 @darwin

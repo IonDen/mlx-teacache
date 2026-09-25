@@ -68,13 +68,23 @@ def test_register_stamped_preview_orders_pre_preview_post() -> None:
     assert registered == [pre, preview, post] and pre.phase == "pre" and post.phase == "post"
 
 
-def test_default_register_stamped_preview_evaluates_only_before_the_preview() -> None:
+def test_default_register_stamped_preview_evaluates_only_before_the_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Bug: the pre stamper stops evaluating the latents (e.g. its eval_fn wiring regresses to None), which
-    would silently push step t's compute cost into the preview gap without any test catching it."""
+    would silently push step t's compute cost into the preview gap without any test catching it. Spies on
+    the module-level ``_mx_eval`` default rather than reaching into the stampers' private ``_eval``
+    attribute, so this keeps working if the implementation stops storing a bound method there."""
+    calls: list[object] = []
+    monkeypatch.setattr(cs, "_mx_eval", calls.append)
     preview = SimpleNamespace(call_in_loop=lambda **kw: None)
     pre, post = cs.register_stamped_preview(lambda cb: None, preview)
-    assert pre._eval is not None
-    assert post._eval is None
+
+    latents = object()
+    pre.call_in_loop(t=0, seed=42, prompt="p", latents=latents, config=None, time_steps=None)
+    post.call_in_loop(t=0, seed=42, prompt="p", latents=latents, config=None, time_steps=None)
+
+    assert calls == [latents]  # pre evaluated the latents exactly once; post never touched _mx_eval
 
 
 def test_split_steps_rejects_length_mismatch_and_time_going_backwards() -> None:

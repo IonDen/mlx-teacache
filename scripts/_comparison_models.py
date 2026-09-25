@@ -69,8 +69,11 @@ def evaluate_modules(
     """Evaluate each present module's parameters in byte-budgeted batches, clearing the cache between modules.
 
     Qwen/Qwen-Image weights are bf16 on the Hub and mflux quantizes them lazily, so evaluating a whole module
-    in one ``mx.eval`` call can hold a large share of the ~41 GB bf16 source in memory at once. Batching keeps
-    the peak bounded by ``batch_bytes`` instead of by the module's total size."""
+    in one ``mx.eval`` call can hold a large share of the ~41 GB bf16 source in memory at once. ``batch_bytes``
+    counts the already-quantized output (``array.nbytes`` on each parameter mflux's lazy graph will produce),
+    not the bf16 source each of those arrays is read and quantized from; evaluating one batch touches several
+    times that many bf16 bytes while it runs. Batching still keeps the peak bounded by a few × ``batch_bytes``
+    instead of by the module's total size — it is not a hard ceiling at exactly ``batch_bytes``."""
     import mlx.core as mx
     from mlx.utils import tree_flatten
 

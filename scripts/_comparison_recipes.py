@@ -45,6 +45,8 @@ class Recipe:
     free_encoders: bool = False
     wired_cap_gb: int = 22
     cache_gb: float = 2.0
+    prompt: str | None = None  # per-model override; replaces the shared PROMPT when set
+    negative_prompt: str | None = None
 
 
 RECIPES: tuple[Recipe, ...] = (
@@ -150,7 +152,8 @@ def recipe_for(slug: str) -> Recipe:
 
 
 def prompt_for(recipe: Recipe) -> str:
-    return PROMPT + QWEN_PROMPT_SUFFIX if recipe.slug == "qwen-image" else PROMPT
+    base = recipe.prompt if recipe.prompt is not None else PROMPT
+    return base + QWEN_PROMPT_SUFFIX if recipe.slug == "qwen-image" else base
 
 
 def prompt_sha256(text: str) -> str:
@@ -159,6 +162,29 @@ def prompt_sha256(text: str) -> str:
 
 def with_resolution(recipe: Recipe, width: int, height: int) -> Recipe:
     return replace(recipe, width=width, height=height)
+
+
+def apply_overrides(
+    recipe: Recipe,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    guidance: float | None = None,
+    quantize: int | None = None,
+    prompt: str | None = None,
+    negative_prompt: str | None = None,
+) -> Recipe:
+    """Replace only the given (non-None) fields; a quality probe's candidate settings over one recipe."""
+    changes = {
+        "width": width,
+        "height": height,
+        "guidance": guidance,
+        "quantize": quantize,
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+    }
+    given = {k: v for k, v in changes.items() if v is not None}
+    return replace(recipe, **given) if given else recipe
 
 
 def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, object]:
@@ -178,6 +204,7 @@ def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, objec
         "wired_cap_gb": recipe.wired_cap_gb,
         "seed": SEED,
         "prompt_sha256": prompt_sha256(prompt_for(recipe)),
+        "negative_prompt_sha256": prompt_sha256(recipe.negative_prompt or ""),
         **{f"version_{k}": val for k, val in sorted(versions.items())},
     }
 

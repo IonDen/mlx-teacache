@@ -31,6 +31,20 @@ def test_qwen_alone_gets_the_vendor_suffix() -> None:
     assert all(cr.prompt_for(r) == cr.PROMPT for r in cr.RECIPES if r.slug != "qwen-image")
 
 
+def test_prompt_override_replaces_the_shared_prompt() -> None:
+    """Bug: a per-model prompt override is ignored and the shared PROMPT is used anyway."""
+    r = dataclasses.replace(cr.recipe_for("flux1-dev"), prompt="a red bicycle in the rain")
+    assert cr.prompt_for(r) == "a red bicycle in the rain"
+
+
+def test_prompt_override_on_qwen_still_gets_the_vendor_suffix() -> None:
+    """Bug: overriding the prompt drops Qwen's suffix rule, or the suffix leaks onto a non-Qwen override."""
+    qwen = dataclasses.replace(cr.recipe_for("qwen-image"), prompt="a red bicycle in the rain")
+    assert cr.prompt_for(qwen) == "a red bicycle in the rain" + cr.QWEN_PROMPT_SUFFIX
+    non_qwen = dataclasses.replace(cr.recipe_for("flux1-dev"), prompt="a red bicycle in the rain")
+    assert cr.QWEN_PROMPT_SUFFIX not in cr.prompt_for(non_qwen)
+
+
 def test_prompt_stays_short_enough_for_the_t5_budget() -> None:
     """Bug: an edited prompt grows past ~180 words (~240 T5 tokens), close to FLUX.1's 512-token cap."""
     assert len(cr.PROMPT.split()) <= 180
@@ -66,6 +80,8 @@ def test_unknown_slug_raises() -> None:
         ("height", 512),
         ("cache_gb", 3.0),
         ("wired_cap_gb", 20),
+        ("prompt", "a different scene entirely"),
+        ("negative_prompt", "blurry, low quality"),
     ],
 )
 def test_recipe_stamp_changes_with_every_measured_field(field: str, value: object) -> None:
@@ -81,6 +97,45 @@ def test_recipe_stamp_hashes_the_prompt_actually_sent() -> None:
     stamp = cr.recipe_stamp(cr.recipe_for("qwen-image"), versions=V)
     assert stamp["prompt_sha256"] == cr.prompt_sha256(cr.PROMPT + cr.QWEN_PROMPT_SUFFIX)
     assert "git_sha" not in stamp and stamp["version_mflux"] == "0.20.0"
+
+
+def test_negative_prompt_sha256_hashes_empty_string_when_unset() -> None:
+    """Bug: an unset negative hashes as something other than "", so a chunk from before this field existed
+    (or a recipe that never sets a negative) can't compare equal to a freshly-computed stamp."""
+    r = cr.recipe_for("flux1-dev")
+    assert r.negative_prompt is None
+    stamp = cr.recipe_stamp(r, versions=V)
+    assert stamp["negative_prompt_sha256"] == cr.prompt_sha256("")
+
+
+def test_negative_prompt_sha256_hashes_the_real_negative_when_set() -> None:
+    """Bug: the stamp hashes a placeholder instead of the actual negative text, so two different negatives
+    collide on one stamp and a stale chunk gets reused."""
+    r = dataclasses.replace(cr.recipe_for("flux1-dev"), negative_prompt="blurry, low quality")
+    stamp = cr.recipe_stamp(r, versions=V)
+    assert stamp["negative_prompt_sha256"] == cr.prompt_sha256("blurry, low quality")
+
+
+def test_apply_overrides_replaces_only_the_given_fields() -> None:
+    """Bug: apply_overrides touches a field the caller left unset, or ignores one the caller did set."""
+    r = cr.recipe_for("flux1-dev")
+    out = cr.apply_overrides(r, guidance=7.0, prompt="a bicycle")
+    assert out.guidance == 7.0 and out.prompt == "a bicycle"
+    assert out.width == r.width and out.height == r.height and out.negative_prompt is None
+    assert out.quantize == r.quantize and out.slug == r.slug
+
+
+def test_apply_overrides_with_nothing_given_returns_an_equal_recipe() -> None:
+    """Bug: calling apply_overrides with every field left at None still mutates something."""
+    r = cr.recipe_for("flux1-dev")
+    assert cr.apply_overrides(r) == r
+
+
+def test_apply_overrides_sets_width_height_quantize_and_negative_prompt() -> None:
+    """Bug: one of the numeric/negative override fields is silently dropped from apply_overrides."""
+    r = cr.recipe_for("z-image-base")
+    out = cr.apply_overrides(r, width=512, height=512, quantize=4, negative_prompt="watermark")
+    assert (out.width, out.height, out.quantize, out.negative_prompt) == (512, 512, 4, "watermark")
 
 
 def test_probe_passes_is_strict_on_both_limits() -> None:

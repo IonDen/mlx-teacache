@@ -44,3 +44,13 @@ def test_overridden_encoder_methods_take_the_keys_the_harness_uses() -> None:
     for fn in (Flux2Klein._encode_prompt_pair, ZImage._encode_prompts):
         params = set(inspect.signature(fn).parameters) - {"self"}
         assert params == {"prompt", "negative_prompt", "guidance"}, (fn.__qualname__, params)
+
+
+def test_report_header_records_mflux_own_predict_compile_decision() -> None:
+    """Bug: the report header doesn't record mflux's own mx.compile decision for FLUX.2/Z-Image predict, so
+    a reader can't separate mlx-teacache's mx.compile-avoidance speedup from mflux's baseline behavior."""
+    import bench_comparison as bc
+    from mflux.utils.apple_silicon import AppleSiliconUtil
+
+    header = bc._report_header()
+    assert header["mflux_compiles_predict"] == (not AppleSiliconUtil.is_m1_or_m2())

@@ -51,9 +51,9 @@ def test_compute_and_preview_are_attributed_to_their_own_step() -> None:
     clock = _Clock()
     compute, preview = [5.0, 3.0, 1.0, 3.0], [0.2, 0.3, 0.2, 0.25]
     registered: list = []
-    pre, post = cs.register_stamped_preview(registered.append, _preview(clock, preview))
-    pre._clock = post._clock = clock
-    pre._eval = lambda lat: lat.evaluate()
+    pre, post = cs.register_stamped_preview(
+        registered.append, _preview(clock, preview), clock=clock, eval_fn=lambda lat: lat.evaluate()
+    )
     _loop(registered, clock, compute)
     got_compute, got_preview = cs.split_steps(0.0, pre.stamps, post.stamps)
     assert got_compute == pytest.approx(compute)
@@ -66,6 +66,15 @@ def test_register_stamped_preview_orders_pre_preview_post() -> None:
     registered: list = []
     pre, post = cs.register_stamped_preview(registered.append, preview)
     assert registered == [pre, preview, post] and pre.phase == "pre" and post.phase == "post"
+
+
+def test_default_register_stamped_preview_evaluates_only_before_the_preview() -> None:
+    """Bug: the pre stamper stops evaluating the latents (e.g. its eval_fn wiring regresses to None), which
+    would silently push step t's compute cost into the preview gap without any test catching it."""
+    preview = SimpleNamespace(call_in_loop=lambda **kw: None)
+    pre, post = cs.register_stamped_preview(lambda cb: None, preview)
+    assert pre._eval is not None
+    assert post._eval is None
 
 
 def test_split_steps_rejects_length_mismatch_and_time_going_backwards() -> None:

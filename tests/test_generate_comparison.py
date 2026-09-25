@@ -72,7 +72,7 @@ def _report() -> dict:
         "prompt": "P",
         "seed": 42,
         "qwen_prompt_suffix": ", S.",
-        "hardware": {"chip": "Apple M1 Max", "ram_gb": 32, "os": "Darwin 27.0.0", "python": "3.12.9"},
+        "hardware": {"chip": "Apple M1 Max", "ram_gb": 32, "os": "macOS 27.0", "python": "3.12.9"},
         "variants": {"flux1-dev": entry},
     }
 
@@ -81,10 +81,20 @@ def test_summary_rows_put_each_condition_in_its_own_column() -> None:
     """Bug: A and B columns swapped, or the wall and preview-subtracted speedups swapped."""
     s = gen.render_blocks(_report())["flux1-dev:summary"]
     assert "| Generation | 239.1 s · peak 10.4 GiB | 198.9 s · peak 7.6 GiB · 12 of 25 steps skipped |" in s
-    e = _report()["variants"]["flux1-dev"]
-    assert f"On this run: {e['speedup_wall']:.2f}× faster ({e['speedup_preview_subtracted']:.2f}× with" in s
+    # Literal, not re-derived from the entry: 239.14 / 198.9 = 1.20x wall; (239.14-6.0) / (198.9-6.5) = 1.21x
+    # preview-subtracted (a_preview = 25 * 0.24 = 6.0 s, b_preview = 25 * 0.26 = 6.5 s).
+    assert "On this run: 1.20× faster (1.21× with" in s
     assert "SSIM 0.97" in s and "(docs/comparison/flux1-dev.md)" in s
     assert "(_artifacts/v0.10.0_bench_flux1_dev.json)" in s
+
+
+def test_machine_line_reports_the_macos_marketing_version_not_the_kernel() -> None:
+    """Bug: the header prints 'macOS kernel Darwin 27.0.0' -- Darwin is the kernel name, not the macOS
+    version a reader expects (e.g. 'macOS 27.0')."""
+    assert (
+        gen.render_blocks(_report())["machine"]
+        == "Apple M1 Max, 32 GB unified memory, macOS 27.0, Python 3.12.9."
+    )
 
 
 def test_details_rows_are_per_condition() -> None:

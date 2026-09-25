@@ -3,7 +3,7 @@
 import ctypes
 import os
 import sys
-import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -44,15 +44,17 @@ def test_phases_keep_their_own_peaks_and_the_totals_span_all_phases() -> None:
 
 def test_a_failing_sample_in_the_thread_makes_stop_raise() -> None:
     """Bug: the daemon thread dies silently and the probe passes on frozen, optimistic numbers."""
+    sampled = threading.Event()
 
     def host() -> float:
+        sampled.set()
         raise OSError("sysctl failed")
 
     s = cm.PeakSampler(
         sample_resident=lambda: 1, sample_footprint=lambda: 1, sample_host_free=host, poll_s=0.001
     )
     s.start()
-    time.sleep(0.05)
+    assert sampled.wait(2), "the sampler thread never called host()"
     with pytest.raises(cm.SamplerError, match="sysctl failed"):
         s.stop()
 

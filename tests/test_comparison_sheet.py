@@ -37,7 +37,9 @@ def test_grid_geometry(tmp_path: Path) -> None:
 def test_each_frame_lands_in_its_own_tile_in_order(tmp_path: Path) -> None:
     """Bug: every frame pasted into tile 0, or frames placed out of order."""
     n = 6
-    sheet = sh.build_contact_sheet(_frames(tmp_path, n), ["computed"] * n, cols=4, thumb_width=48).convert("RGB")
+    sheet = sh.build_contact_sheet(_frames(tmp_path, n), ["computed"] * n, cols=4, thumb_width=48).convert(
+        "RGB"
+    )
     tile_w, tile_h = _tile_size(48, 64)
     for i in range(n):
         cx = (i % 4) * tile_w + sh.TILE_PAD + 24
@@ -47,7 +49,9 @@ def test_each_frame_lands_in_its_own_tile_in_order(tmp_path: Path) -> None:
 
 def test_skipped_tiles_get_the_border_and_computed_do_not(tmp_path: Path) -> None:
     """Bug: skipped steps are not marked, or every tile is."""
-    sheet = sh.build_contact_sheet(_frames(tmp_path, 2), ["computed", "skipped"], cols=2, thumb_width=48).convert("RGB")
+    sheet = sh.build_contact_sheet(
+        _frames(tmp_path, 2), ["computed", "skipped"], cols=2, thumb_width=48
+    ).convert("RGB")
     tile_w, _ = _tile_size(48, 64)
     assert sheet.getpixel((tile_w + 1, 1)) == sh.SKIPPED_BORDER
     assert sheet.getpixel((1, 1)) != sh.SKIPPED_BORDER
@@ -66,7 +70,11 @@ def test_frame_paths_sort_numerically_and_ignore_other_files(tmp_path: Path) -> 
     for i in (10, 2, 0):
         Image.new("RGB", (4, 4)).save(tmp_path / f"step_step{i:02d}.png")
     Image.new("RGB", (4, 4)).save(tmp_path / "final.png")
-    assert [p.name for p in sh.frame_paths(tmp_path)] == ["step_step00.png", "step_step02.png", "step_step10.png"]
+    assert [p.name for p in sh.frame_paths(tmp_path)] == [
+        "step_step00.png",
+        "step_step02.png",
+        "step_step10.png",
+    ]
 
 
 def test_a_frame_of_another_size_raises(tmp_path: Path) -> None:

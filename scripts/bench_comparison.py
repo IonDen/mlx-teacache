@@ -772,7 +772,9 @@ def main() -> None:
     ap.add_argument("--width", type=int)
     ap.add_argument("--height", type=int)
     ap.add_argument(
-        "--probe", action="store_true", help="3-step memory probe of condition A; writes no chunk"
+        "--probe",
+        action="store_true",
+        help="3-step memory probe of conditions A and B, gated on the worse; writes no chunk",
     )
     ap.add_argument(
         "--fallback", action="store_true", help="with --probe / --probe-failed: the fallback size"

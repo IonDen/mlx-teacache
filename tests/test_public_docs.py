@@ -21,6 +21,7 @@ _PUBLIC_DOCS = [
     "docs/comparison/z-image-base.md",
     "docs/comparison/klein-base-9b.md",
     "docs/comparison/klein-distilled-vs-base.md",
+    "docs/comparison/qwen-image.md",
 ]
 
 

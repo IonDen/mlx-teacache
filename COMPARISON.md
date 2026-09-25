@@ -12,7 +12,7 @@ Apple M1 Max, 32 GB unified memory, macOS 27.0, Python 3.12.12.
 
 > A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused, joyful determination: flushed cheeks, bright eyes, a light sheen of sweat on her forehead and temples. She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, natural skin texture, sharp focus on her face.
 
-Seed 42 for every model.
+Seed 42 for every model. Qwen-Image appends its vendor's suggested suffix, `, Ultra HD, 4K, cinematic composition.`, to this prompt.
 
 ## FLUX.1 [dev]
 
@@ -78,6 +78,19 @@ On this run: 1.27× faster (1.27× with preview decoding left out) · SSIM 0.86 
 <!-- COMPARISON:klein-base-9b:summary END -->
 
 At its matching 512² recipe, footnote ⁵ splits this variant's 1.37× multi-run speedup into 1.34× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper's eager path is also behind the peak-memory drop from about 22 GB to 9.5 GB that footnote reports.
+
+## Qwen-Image
+
+<!-- COMPARISON:qwen-image:summary START -->
+|  | A: TeaCache off | B: TeaCache on |
+|---|---|---|
+| Image | ![A: TeaCache off](_artifacts/comparison/qwen-image/a.jpg) | ![B: TeaCache on](_artifacts/comparison/qwen-image/b.jpg) |
+| Generation | 693.6 s · peak 17.6 GiB | 336.7 s · peak 17.6 GiB · 26 of 50 steps skipped |
+
+On this run: 2.06× faster (2.10× with preview decoding left out) · SSIM 0.92 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_qwen_image.json) · [More details →](docs/comparison/qwen-image.md)
+<!-- COMPARISON:qwen-image:summary END -->
+
+Footnote ⁷ measured this variant's 2.68× multi-run speedup as step-skipping: mflux doesn't compile Qwen's prediction step, and the no-gate wrapper's 1.04× over vanilla sits inside the spread between vanilla reps, so there's no compile effect to separate out.
 
 ## Distilled Klein vs Base Klein
 

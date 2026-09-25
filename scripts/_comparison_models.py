@@ -122,6 +122,23 @@ def generate_kwargs_for(recipe: Recipe) -> dict[str, Any]:
     return {}
 
 
+_NO_NEGATIVE_ROUTE_LOADERS: tuple[str, ...] = ("flux1-dev", "flux1-krea-dev")
+
+
+def negative_used_for(recipe: Recipe) -> bool:
+    """Whether the recipe's negative prompt, if any, actually reaches the model.
+
+    False when unset, when ``guidance <= 1.0`` (mflux drops a CFG-only negative below that threshold --
+    Klein's own ``_encode_prompt_pair`` gates on exactly this), or when the loader's ``generate_image`` has
+    no route for a negative at all (FLUX.1/Krea; ``precompute_prompt`` already raises before generation if
+    such a recipe sets one, so this loader branch is otherwise unreachable in a real run)."""
+    if not recipe.negative_prompt:
+        return False
+    if recipe.guidance <= 1.0:
+        return False
+    return recipe.loader not in _NO_NEGATIVE_ROUTE_LOADERS
+
+
 def precompute_prompt(flux: Any, recipe: Recipe, prompt: str) -> None:
     import mlx.core as mx
 

@@ -1,5 +1,6 @@
 """Pure helpers of the schema-2 comparison harness (pure-core lane: bench_comparison imports mflux lazily)."""
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -317,8 +318,9 @@ def test_reset_quality_probe_dir_moves_an_existing_name_dir_to_the_trash(tmp_pat
 
 
 def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks() -> None:
-    """Bug: the record drops one of the brief's required fields (name, overrides, prompt, negative_prompt,
-    generation seconds, peaks, min host free), so a candidate setting can't actually be judged from it."""
+    """Bug: the record drops one of the required fields (name, the resolved-recipe stamp, overrides, prompt,
+    negative_prompt, negative_used, width/height/steps/guidance/quantize, generation seconds, peaks, memory
+    phases, min host free), so a candidate setting can't actually be judged from it."""
     recipe = cr.apply_overrides(cr.recipe_for("flux1-dev"), guidance=7.0, prompt="a red bicycle")
     result = {
         "generation_seconds": 12.5,
@@ -329,18 +331,28 @@ def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks()
             "peak_resident_bytes": 4 * GIB,
             "peak_footprint_bytes": 5 * GIB,
             "min_host_free_pct": 42.0,
+            "phases": {"load": {"peak_resident_bytes": 1}},
         },
     }
     record = bc.quality_probe_record(
-        "tighter-guidance", recipe, overrides={"guidance": 7.0, "prompt": "a red bicycle"}, result=result
+        "tighter-guidance",
+        recipe,
+        overrides={"guidance": 7.0, "prompt": "a red bicycle"},
+        result=result,
+        versions=V,
     )
     assert record["name"] == "tighter-guidance"
     assert record["slug"] == "flux1-dev"
+    assert record["stamp"] == cr.recipe_stamp(recipe, versions=V)
     assert record["overrides"] == {"guidance": 7.0, "prompt": "a red bicycle"}
+    assert (record["width"], record["height"], record["steps"]) == (recipe.width, recipe.height, recipe.steps)
+    assert (record["guidance"], record["quantize"]) == (7.0, recipe.quantize)
     assert record["prompt"] == "a red bicycle"
     assert record["negative_prompt"] is None
+    assert record["negative_used"] is False
     assert record["generation_seconds"] == 12.5
     assert record["min_host_free_pct"] == 42.0
+    assert record["memory_phases"] == {"load": {"peak_resident_bytes": 1}}
     assert record["peaks"] == {
         "mlx_peak_load_bytes": 1 * GIB,
         "mlx_peak_encode_bytes": 2 * GIB,
@@ -348,6 +360,21 @@ def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks()
         "peak_resident_bytes": 4 * GIB,
         "peak_footprint_bytes": 5 * GIB,
     }
+
+
+def test_quality_probe_record_negative_used_true_for_a_real_negative_that_reaches_the_model() -> None:
+    """Bug: negative_used is hardcoded False, or true even when mflux would drop the negative."""
+    recipe = cr.apply_overrides(cr.recipe_for("z-image-base"), negative_prompt="watermark")
+    result = {
+        "generation_seconds": 1.0,
+        "mlx_peak_load_bytes": 0,
+        "mlx_peak_encode_bytes": 0,
+        "mlx_peak_generation_bytes": 0,
+        "memory": {"peak_resident_bytes": 0, "peak_footprint_bytes": 0, "min_host_free_pct": 50.0},
+    }
+    record = bc.quality_probe_record("n", recipe, overrides={}, result=result, versions=V)
+    assert record["negative_used"] is True
+    assert record["memory_phases"] == {}  # absent "phases" key defaults to {}, not a KeyError
 
 
 def test_max_workers_must_be_positive() -> None:
@@ -585,3 +612,142 @@ def test_orchestrate_refuses_a_mismatched_stamp_and_persists_nothing(
             "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
         )
     assert not bc.chunk_path(chunks, "flux1-dev", "a").exists()
+
+
+def test_quality_probe_name_rejects_path_traversal_and_accepts_plain_names() -> None:
+    """Bug: an unvalidated NAME lets --quality-probe ../x (or a/b) escape QUALITY_PROBE_ROOT through
+    quality_probe_dir's plain path join, writing or Trash-moving outside tests/_artifacts/quality_probe/."""
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("../x")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("a/b")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("")
+    assert bc.quality_probe_name("tighter-guidance_v2.1") == "tighter-guidance_v2.1"
+
+
+def test_read_override_file_rejects_empty_and_strips_whitespace(tmp_path: Path) -> None:
+    """Bug: a prompt/negative file that is empty (or all whitespace) after stripping is silently applied as
+    an empty-string override instead of being rejected with a clear message."""
+    empty = tmp_path / "empty.txt"
+    empty.write_text("   \n\t")
+    with pytest.raises(SystemExit, match="empty"):
+        bc._read_override_file(empty, label="prompt")
+
+    real = tmp_path / "real.txt"
+    real.write_text("  a bicycle in the rain  \n")
+    assert bc._read_override_file(real, label="prompt") == "a bicycle in the rain"
+
+
+def test_quantize_choices_are_restricted_to_supported_bit_depths(capsys: pytest.CaptureFixture[str]) -> None:
+    """Bug: --quantize accepts any int (e.g. 7), which mlx-lm/mflux quantization doesn't support."""
+    parser = bc._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--only", "flux1-dev", "--quantize", "7"])
+    capsys.readouterr()
+    ns = parser.parse_args(["--only", "flux1-dev", "--quantize", "4"])
+    assert ns.quantize == 4
+
+
+def test_quality_probe_is_mutually_exclusive_with_probe_smoke_and_finalize(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bug: --quality-probe can be combined with --probe/--smoke/--finalize on one command line, silently
+    running the wrong mode instead of refusing the ambiguous combination."""
+    parser = bc._build_parser()
+    for other in ("--probe", "--smoke", "--finalize"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--only", "flux1-dev", "--quality-probe", "n", other])
+        capsys.readouterr()
+    # sanity: --quality-probe alone parses fine
+    ns = parser.parse_args(["--only", "flux1-dev", "--quality-probe", "n"])
+    assert ns.quality_probe == "n"
+
+
+def test_quality_probe_records_an_abort_and_returns_exit_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a watchdog abort during --quality-probe is thrown away as a bare RuntimeError (and the process
+    exits non-zero with no artifact) instead of being recorded like a regular worker's chunk abort, with the
+    same exit-4 convention _orchestrate uses."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"aborted": "active-memory watchdog"}
+
+    args = argparse.Namespace(
+        only="flux1-dev",
+        quality_probe="tighter-guidance",
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+    )
+    result = bc._quality_probe(args, run_worker=fake_run_worker)
+
+    assert result == 4
+    record = bc.quality_probe_dir(root, "flux1-dev", "tighter-guidance") / "record.aborted.json"
+    assert json.loads(record.read_text()) == {"aborted": "active-memory watchdog"}
+
+
+def test_quality_probe_returns_zero_and_writes_no_abort_file_on_a_normal_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a normal (non-aborted) worker result is mistaken for a failure, or a spurious abort file is
+    written even though nothing aborted."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"name": "tighter-guidance"}
+
+    args = argparse.Namespace(
+        only="flux1-dev",
+        quality_probe="tighter-guidance",
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+    )
+    result = bc._quality_probe(args, run_worker=fake_run_worker)
+
+    assert result == 0
+    assert not (bc.quality_probe_dir(root, "flux1-dev", "tighter-guidance") / "record.aborted.json").exists()
+
+
+def test_quality_probe_forwards_only_the_overrides_actually_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: an override the user never set on the command line (e.g. width) is still forwarded to the worker
+    with some default/None-derived value, making the worker's record look like the user asked for something
+    they didn't."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+    seen: dict[str, list[str]] = {}
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen["cmd"] = cmd
+        return {"name": "n"}
+
+    args = argparse.Namespace(
+        only="flux1-dev",
+        quality_probe="n",
+        width=512,
+        height=None,
+        guidance=7.0,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+    )
+    bc._quality_probe(args, run_worker=fake_run_worker)
+
+    cmd = seen["cmd"]
+    assert "--width" in cmd and "512" in cmd
+    assert "--guidance" in cmd and "7.0" in cmd
+    assert "--height" not in cmd
+    assert "--quantize" not in cmd

@@ -134,6 +134,25 @@ def test_generate_kwargs_for_threads_the_negative_only_where_generate_image_acce
     assert models.generate_kwargs_for(flux1) == {}
 
 
+def test_negative_used_for_is_false_when_unset_low_guidance_or_unsupported_loader() -> None:
+    """Bug: the quality-probe record claims a negative was used when mflux actually dropped it (guidance <=
+    1.0, or a loader like FLUX.1/Krea that has no route for a negative at all)."""
+    base = cr.recipe_for("klein-base-4b")  # guidance=4.0
+    assert models.negative_used_for(base) is False  # no negative set at all
+
+    with_neg = dataclasses.replace(base, negative_prompt="blurry")
+    assert models.negative_used_for(with_neg) is True
+
+    at_threshold = dataclasses.replace(with_neg, guidance=1.0)
+    assert models.negative_used_for(at_threshold) is False  # mflux's own > 1.0 check, boundary
+
+    just_above = dataclasses.replace(with_neg, guidance=1.0001)
+    assert models.negative_used_for(just_above) is True
+
+    flux1_with_neg = dataclasses.replace(cr.recipe_for("flux1-dev"), negative_prompt="blurry")
+    assert models.negative_used_for(flux1_with_neg) is False  # FLUX.1 has no negative route regardless
+
+
 def test_release_text_encoders_clears_only_encoders() -> None:
     """Bug: the transformer or VAE is released (black image), or an encoder survives (memory), or only one of
     the three encoder attrs (clip/t5/text) actually gets released."""

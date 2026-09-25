@@ -189,8 +189,11 @@ def apply_overrides(
 
 def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, object]:
     """Every field that changes what a chunk or probe measured, including memory budget fields.
-    Git sha and mlx-teacache version are provenance only (an editable hatch-vcs install changes both on every commit)."""
-    return {
+    Git sha and mlx-teacache version are provenance only (an editable hatch-vcs install changes both on every
+    commit). ``negative_prompt_sha256`` is emitted only when the recipe actually sets a negative, so every
+    chunk and probe record written before this field existed keeps comparing equal (``check_chunk_stamp`` is
+    an exact key-set match, not a superset match)."""
+    stamp: dict[str, object] = {
         "slug": recipe.slug,
         "checkpoint": recipe.checkpoint,
         "decoder": recipe.decoder,
@@ -204,9 +207,11 @@ def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, objec
         "wired_cap_gb": recipe.wired_cap_gb,
         "seed": SEED,
         "prompt_sha256": prompt_sha256(prompt_for(recipe)),
-        "negative_prompt_sha256": prompt_sha256(recipe.negative_prompt or ""),
         **{f"version_{k}": val for k, val in sorted(versions.items())},
     }
+    if recipe.negative_prompt:
+        stamp["negative_prompt_sha256"] = prompt_sha256(recipe.negative_prompt)
+    return stamp
 
 
 def probe_passes(

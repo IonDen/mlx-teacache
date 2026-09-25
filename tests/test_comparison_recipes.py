@@ -99,21 +99,42 @@ def test_recipe_stamp_hashes_the_prompt_actually_sent() -> None:
     assert "git_sha" not in stamp and stamp["version_mflux"] == "0.20.0"
 
 
-def test_negative_prompt_sha256_hashes_empty_string_when_unset() -> None:
-    """Bug: an unset negative hashes as something other than "", so a chunk from before this field existed
-    (or a recipe that never sets a negative) can't compare equal to a freshly-computed stamp."""
+def test_negative_prompt_sha256_absent_and_stamp_unchanged_when_unset() -> None:
+    """Bug: the stamp always emits negative_prompt_sha256 (even as sha256("")), so every chunk and probe
+    record written before this field existed is refused by check_chunk_stamp's exact-match comparison
+    ("measured under a different recipe") even though nothing about the measurement actually changed."""
     r = cr.recipe_for("flux1-dev")
     assert r.negative_prompt is None
     stamp = cr.recipe_stamp(r, versions=V)
-    assert stamp["negative_prompt_sha256"] == cr.prompt_sha256("")
+    assert "negative_prompt_sha256" not in stamp
+    assert stamp == {
+        "slug": "flux1-dev",
+        "checkpoint": r.checkpoint,
+        "decoder": r.decoder,
+        "steps": r.steps,
+        "guidance": r.guidance,
+        "quantize": r.quantize,
+        "width": r.width,
+        "height": r.height,
+        "free_encoders": r.free_encoders,
+        "cache_gb": r.cache_gb,
+        "wired_cap_gb": r.wired_cap_gb,
+        "seed": cr.SEED,
+        "prompt_sha256": cr.prompt_sha256(cr.PROMPT),
+        "version_mflux": "0.20.0",
+        "version_mlx": "0.32.2",
+        "version_mlx_taef": "0.8.3",
+    }
 
 
-def test_negative_prompt_sha256_hashes_the_real_negative_when_set() -> None:
+def test_negative_prompt_sha256_present_and_hashes_the_real_negative_when_set() -> None:
     """Bug: the stamp hashes a placeholder instead of the actual negative text, so two different negatives
-    collide on one stamp and a stale chunk gets reused."""
-    r = dataclasses.replace(cr.recipe_for("flux1-dev"), negative_prompt="blurry, low quality")
+    collide on one stamp and a stale chunk gets reused; or setting a negative doesn't add the key at all."""
+    unset = cr.recipe_for("flux1-dev")
+    r = dataclasses.replace(unset, negative_prompt="blurry, low quality")
     stamp = cr.recipe_stamp(r, versions=V)
     assert stamp["negative_prompt_sha256"] == cr.prompt_sha256("blurry, low quality")
+    assert stamp != cr.recipe_stamp(unset, versions=V)
 
 
 def test_apply_overrides_replaces_only_the_given_fields() -> None:

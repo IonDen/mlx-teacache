@@ -46,8 +46,8 @@ from typing import Any, cast
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _mlx_watchdog import arm_mlx_watchdog
 
-# Shared portrait recipe — identical to scripts/bench_comparison.py so the images
-# line up with the rest of COMPARISON.md. One prompt + seed across every condition.
+# Portrait recipe for the distilled-vs-base study, on its own page. One prompt +
+# seed across every condition in this script.
 PROMPT = (
     "Portrait of a young woman with auburn hair and green eyes, soft "
     "golden-hour window light, photorealistic, shallow depth of field, "

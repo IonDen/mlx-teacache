@@ -1,5 +1,6 @@
 """Comparison page generator: numbers come from the report, prose stays hand-written (pure-core lane)."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -135,3 +136,27 @@ def test_page_blocks_split_main_page_from_subpages() -> None:
     """Bug: a sub-page is required to carry the main page's blocks, or vice versa."""
     assert gen.page_blocks(None, ["flux1-dev"]) == {"machine", "flux1-dev:summary"}
     assert gen.page_blocks("flux1-dev", ["flux1-dev"]) == {"flux1-dev:sheets", "flux1-dev:details"}
+
+
+def test_committed_pages_match_the_committed_report() -> None:
+    """Bug: a page was hand-edited after --write, or --write was never re-run before commit, so the
+    committed prose no longer matches the committed report's numbers."""
+    report = json.loads(gen.REPORT.read_text())
+    blocks = gen.render_blocks(report)
+    for page, required in gen._pages(report):
+        original = page.read_text()
+        assert gen.splice(original, blocks, required=required) == original, f"{page} is out of date"
+
+
+def test_committed_report_image_and_bench_paths_all_exist() -> None:
+    """Bug: an image or bench-report path in the committed report points at a file that was never
+    committed, or was moved or deleted after the report was written."""
+    report = json.loads(gen.REPORT.read_text())
+    missing = []
+    for slug, v in report["variants"].items():
+        for key, rel in v["images"].items():
+            if not (gen.REPO / rel).exists():
+                missing.append(f"{slug}.images.{key} -> {rel}")
+        if not (gen.REPO / v["bench_report"]).exists():
+            missing.append(f"{slug}.bench_report -> {v['bench_report']}")
+    assert not missing, f"report paths do not exist on disk: {missing}"

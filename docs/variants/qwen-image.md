@@ -23,7 +23,7 @@ On the comparison page's single run at 672×896, q4, the wrapper took the genera
 
 ## Image quality on consumer memory
 
-Stock uniform 4-bit quantization over-quantizes Qwen-Image's quantization-sensitive layers and produces a grainy, low-detail skin texture on a 32 GB Mac — a Qwen + q4 limitation, independent of TeaCache (the wrapper faithfully reproduces whatever the base model generates). The comparison portraits here were rendered with a mixed-precision build that keeps the first/last transformer blocks at 8-bit and the embeddings + final projection at bf16, which clears the artifact and still fits 32 GB (~30.4 GB peak). mlx-teacache stays quantization-agnostic; this is a model-construction choice. To reproduce the showcase quality, install the predicate before building the model:
+Stock uniform 4-bit quantization over-quantizes Qwen-Image's quantization-sensitive layers and produces a grainy, low-detail skin texture on a 32 GB Mac — a Qwen + q4 limitation, independent of TeaCache (the wrapper faithfully reproduces whatever the base model generates). The earlier comparison page used a mixed-precision build that keeps the first/last transformer blocks at 8-bit and the embeddings + final projection at bf16, which clears the artifact at a higher peak (~30.4 GB); the current page uses stock 4-bit instead (17.6 GiB peak), so its portrait keeps a light speckle where the mixed-precision build would not. mlx-teacache stays quantization-agnostic; this is a model-construction choice. To reproduce the mixed-precision build's quality, install the predicate before constructing the model:
 
 ```python
 import mlx.nn as nn

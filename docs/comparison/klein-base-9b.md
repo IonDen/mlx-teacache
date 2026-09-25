@@ -48,9 +48,15 @@ On this run the gate skips 11 of 50 steps. Same player, same pose, same light be
 ### Reproduce
 
 ```bash
-uv run python scripts/bench_comparison.py --probe --only klein-base-9b
-uv run python scripts/bench_comparison.py --probe --fallback --only klein-base-9b
-uv run python scripts/bench_comparison.py --only klein-base-9b --max-workers 1
-uv run python scripts/bench_comparison.py --only klein-base-9b --max-workers 1
-uv run python scripts/bench_comparison.py --only klein-base-9b --finalize
+uv run --no-sync python scripts/bench_comparison.py --probe --only klein-base-9b
+uv run --no-sync python scripts/bench_comparison.py --probe --fallback --only klein-base-9b
+uv run --no-sync python scripts/bench_comparison.py --only klein-base-9b --max-workers 1
+uv run --no-sync python scripts/bench_comparison.py --only klein-base-9b --max-workers 1
+uv run --no-sync python scripts/bench_comparison.py --only klein-base-9b --finalize --export-jpg
+uv run --no-sync python docs/_generate_comparison.py --write
 ```
+
+Run every command with `--no-sync`: plain `uv run` re-syncs to this repository's own lock file, which can
+downgrade mlx underneath the venv the [main Reproduce section](../../COMPARISON.md#reproduce) sets up. The
+published JPGs went through an additional image optimiser after `--export-jpg` wrote them, so a
+reproduction's JPGs differ in size from the committed ones even though they show the same pixels.

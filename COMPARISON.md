@@ -14,6 +14,8 @@ Apple M1 Max, 32 GB unified memory, macOS 27.0, Python 3.12.12.
 
 Seed 42 for every model. Qwen-Image appends its vendor's suggested suffix, `, Ultra HD, 4K, cinematic composition.`, to this prompt.
 
+Four of the six models render at 768×1024: FLUX.1 [dev], FLUX.1 Krea [dev], FLUX.2 [klein] base 4B, and FLUX.2 [klein] base 9B. Z-Image renders at 640×896, its pinned 8-bit recipe — 672×896 would pad the token sequence the gate reads. Qwen-Image renders at 672×896, the size its memory probe allowed.
+
 ## FLUX.1 [dev]
 
 <!-- COMPARISON:flux1-dev:summary START -->
@@ -109,21 +111,24 @@ uv venv --python 3.12
 uv pip install "mflux==0.20.0" "mlx-taef==0.8.3" scikit-image -e .
 ```
 
+Run every command below with `--no-sync`. Plain `uv run` re-syncs to this repository's own lock file first, which can quietly downgrade mlx underneath the venv you just built; CI's own newest-mflux job runs with `--no-sync` for the same reason.
+
 The worker subprocesses run offline, so download every checkpoint first — `hf download black-forest-labs/FLUX.1-dev`, `hf download black-forest-labs/FLUX.1-Krea-dev`, `hf download black-forest-labs/FLUX.2-klein-base-4B`, `hf download Tongyi-MAI/Z-Image`, `hf download black-forest-labs/FLUX.2-klein-base-9B`, and `hf download Qwen/Qwen-Image`. Three of those sit behind the FLUX Non-Commercial click-through — FLUX.1 [dev], FLUX.1 Krea [dev], and FLUX.2 [klein] base 9B — so accept the license on each model's Hugging Face page before downloading it.
 
-Each model takes one command to check memory where its recipe needs it, two more to run condition A and then B, and a last one to merge the pair into a report entry and build the step sheets:
+Each model takes one command to check memory where its recipe needs it, two more to run condition A and then B, one to merge the pair into a report entry and export its JPGs, and a last one to regenerate this page and the model's own page from that report:
 
 ```bash
-uv run python scripts/bench_comparison.py --probe --only <slug>            # only for slugs with a memory fallback
-uv run python scripts/bench_comparison.py --probe --fallback --only <slug> # only if the probe above fails
-uv run python scripts/bench_comparison.py --only <slug> --max-workers 1    # runs once for A, again for B
-uv run python scripts/bench_comparison.py --only <slug> --max-workers 1
-uv run python scripts/bench_comparison.py --only <slug> --finalize         # SSIM, contact sheets, report entry
+uv run --no-sync python scripts/bench_comparison.py --probe --only <slug>            # only for slugs with a memory fallback
+uv run --no-sync python scripts/bench_comparison.py --probe --fallback --only <slug> # only if the probe above fails
+uv run --no-sync python scripts/bench_comparison.py --only <slug> --max-workers 1    # runs once for A, again for B
+uv run --no-sync python scripts/bench_comparison.py --only <slug> --max-workers 1
+uv run --no-sync python scripts/bench_comparison.py --only <slug> --finalize --export-jpg  # SSIM, contact sheets, report entry, JPGs
+uv run --no-sync python docs/_generate_comparison.py --write                               # regenerate this page and the model's page
 ```
 
 Replace `<slug>` with one of `flux1-dev`, `flux1-krea-dev`, `klein-base-4b`, `z-image-base`, `klein-base-9b`, `qwen-image`; only `klein-base-9b` and `qwen-image` carry a memory fallback, so the probe lines only apply to those two. On this machine the A-plus-B pair took roughly 7 minutes for either FLUX.1 model, 15 minutes for klein-base-4b or z-image-base, 17 minutes for qwen-image, and half an hour for klein-base-9b, almost all of it generation time. Each model's own page has the exact seconds.
 
-The worker subprocesses write their raw PNGs and preview frames to this repository's ignored test-artifacts folder, not tracked in git. The JPGs on this page are compressed copies of those raw outputs, so SSIM was measured on the lossless PNGs before compression, not on what you're looking at here.
+The worker subprocesses write their raw PNGs and preview frames to this repository's ignored test-artifacts folder, not tracked in git; `--finalize --export-jpg` converts the four PNGs a finished run leaves there into the JPGs this page links. The published JPGs went through an additional image optimiser after that step, so a reproduction's JPGs will differ in size from the committed ones even though they show the same pixels. SSIM was measured on the lossless PNGs before either compression step, not on what you're looking at here.
 
 ---
 

@@ -5,7 +5,7 @@ Run from the py3.12 scratch venv (mflux 0.20):
     python scripts/bench_comparison.py --probe --only klein-base-9b          # memory probe (writes no chunk)
     python scripts/bench_comparison.py --only flux1-dev --max-workers 1       # one worker = one condition
     python scripts/bench_comparison.py --only flux1-dev --finalize            # SSIM + contact sheets + report
-    python scripts/bench_comparison.py --only flux1-dev --smoke               # 2 steps at 256x256, throwaway
+    python scripts/bench_comparison.py --only flux1-dev --smoke               # 4 steps at 256x256, throwaway
 
 One worker subprocess per (slug, condition), one generation each. Each worker loads the model in stages and evaluates
 the weights and the prompt embeddings before its timers (mflux loads lazily), stamps every step before and after the
@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 import warnings
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -215,6 +216,27 @@ def reset_condition_outputs(
     return moved
 
 
+def retire_chunk(path: Path, *, trash: Path, tag: str) -> Path | None:
+    """Move a stale chunk JSON out of the way before its worker respawns (rule F: Trash, never rm).
+
+    Without this, a re-run that fails after ``image.save`` can leave an old chunk paired with a fresh image
+    and fresh preview frames, so the next successful worker's chunk gets counted complete against stale
+    provenance. Returns the Trash destination, or None if there was nothing to move."""
+    if not path.exists():
+        return None
+    trash.mkdir(parents=True, exist_ok=True)
+    dest = trash / f"comparison-chunk-{path.parent.name}-{path.stem}-{tag}{path.suffix}"
+    shutil.move(str(path), dest)
+    return dest
+
+
+def soft_cap_gb(wired_cap_gb: float, cache_gb: float, working_set_bytes: int) -> float:
+    """The advisory soft memory cap: wired_cap_gb + 1 GiB headroom, but never above what the device's
+    working set leaves after the cache pool. ``wired_cap_gb + 1`` alone can sit above the working set
+    (Z-Image: wired 24 -> soft 25, above a 24.96 GiB working set)."""
+    return min(wired_cap_gb + 1, working_set_bytes / GIB - cache_gb)
+
+
 def positive_int(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -248,7 +270,13 @@ def _load_probes(slug: str) -> list[dict[str, Any]]:
 def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: int) -> dict[str, Any]:
     """One generation with every guard in place; staged load; per-phase memory. Returns the result dict."""
     import mlx.core as mx
-    from _comparison_memory import PeakSampler, host_free_pct, mlx_resident_sampler, phys_footprint_bytes
+    from _comparison_memory import (
+        PeakSampler,
+        SamplerError,
+        host_free_pct,
+        mlx_resident_sampler,
+        phys_footprint_bytes,
+    )
     from _comparison_models import (
         DENOISER_ATTRS,
         ENCODER_ATTRS,
@@ -276,6 +304,7 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
         sample_host_free=host_free_pct,
     )
     sampler.start()
+    failed = False
     try:
         # Load: encoders first; the denoiser waits until the encoders are gone where the recipe frees them.
         t0 = time.perf_counter()
@@ -319,6 +348,7 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
                 warnings.simplefilter("error", TeaCacheUncalibratedCheckpointWarning)
                 handle = apply_teacache(flux)
 
+        mx.clear_cache()  # so load leftovers do not sit in the generation window
         mx.reset_peak_memory()
         gen_start = time.perf_counter()
         image = flux.generate_image(
@@ -333,8 +363,21 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
         generation_seconds = time.perf_counter() - gen_start
         mlx_peak_generation = int(mx.get_peak_memory())
         sampler.end_phase("generation")
+    except BaseException:
+        failed = True
+        raise
     finally:
-        memory = sampler.stop()
+        if failed:
+            # A real error is already propagating; a sampler-teardown failure on top of it must not mask it.
+            try:
+                sampler.stop()
+            except SamplerError as exc:
+                print(
+                    f"{recipe.slug}/{condition}: memory sampler also failed during teardown: {exc}",
+                    file=sys.stderr,
+                )
+        else:
+            memory = sampler.stop()
 
     assert_prompt_cache_hit(flux, recipe)
     if len(preview.saved_paths) != steps:
@@ -377,11 +420,14 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
 
 
 def _install_guards(recipe: Recipe, label: str) -> None:
+    import mlx.core as mx
     from _mlx_caps import install_caps
     from _mlx_watchdog import arm_mlx_watchdog
 
+    working_set_bytes = int(mx.device_info()["max_recommended_working_set_size"])
+    soft_gb = soft_cap_gb(recipe.wired_cap_gb, recipe.cache_gb, working_set_bytes)
     wired_b, soft_b, cache_b = install_caps(
-        wired_gb=recipe.wired_cap_gb, soft_gb=recipe.wired_cap_gb + 1, cache_gb=recipe.cache_gb
+        wired_gb=recipe.wired_cap_gb, soft_gb=soft_gb, cache_gb=recipe.cache_gb
     )
     print(
         f"  [worker] {label}: caps wired={wired_b / GIB:.2f} soft={soft_b / GIB:.2f} cache={cache_b / GIB:.2f} GiB",
@@ -457,9 +503,42 @@ def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[
     return payload
 
 
+def probe_record_from_worker(
+    recipe: Recipe, result: dict[str, Any], *, working_set_bytes: int, versions: dict[str, str]
+) -> dict[str, Any]:
+    """Map a worker's raw result (or an ``aborted`` payload) onto ``probe_record``'s inputs: the three MLX
+    phase peaks, the host free-memory floor, and the OS process footprint mlx-guard actually kills on."""
+    from _comparison_recipes import probe_record
+
+    if "aborted" in result:
+        return probe_record(
+            recipe,
+            phase_peaks={},
+            min_host_free_pct=None,
+            working_set_bytes=working_set_bytes,
+            versions=versions,
+            aborted=str(result["aborted"]),
+        )
+    memory = result["memory"]
+    record = probe_record(
+        recipe,
+        phase_peaks={
+            "load": result["mlx_peak_load_bytes"],
+            "encode": result["mlx_peak_encode_bytes"],
+            "generation": result["mlx_peak_generation_bytes"],
+        },
+        min_host_free_pct=memory["min_host_free_pct"],
+        working_set_bytes=working_set_bytes,
+        versions=versions,
+        peak_footprint_bytes=memory["peak_footprint_bytes"],
+    )
+    record["memory"] = memory
+    return record
+
+
 def _probe(slug: str, *, fallback: bool) -> int:
     import mlx.core as mx
-    from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, probe_record, recipe_for, with_resolution
+    from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, recipe_for, with_resolution
 
     base = recipe_for(slug)
     if base.fallback is None:
@@ -467,28 +546,7 @@ def _probe(slug: str, *, fallback: bool) -> int:
     recipe = with_resolution(base, *base.fallback) if fallback else base
     working_set = int(mx.device_info().get("max_recommended_working_set_size", WORKING_SET_BYTES_DEFAULT))
     result = _spawn(recipe, "a", probe=True, smoke=False)
-    if "aborted" in result:
-        record = probe_record(
-            recipe,
-            phase_peaks={},
-            min_host_free_pct=None,
-            working_set_bytes=working_set,
-            versions=_versions(),
-            aborted=str(result["aborted"]),
-        )
-    else:
-        record = probe_record(
-            recipe,
-            phase_peaks={
-                "load": result["mlx_peak_load_bytes"],
-                "encode": result["mlx_peak_encode_bytes"],
-                "generation": result["mlx_peak_generation_bytes"],
-            },
-            min_host_free_pct=result["memory"]["min_host_free_pct"],
-            working_set_bytes=working_set,
-            versions=_versions(),
-        )
-        record["memory"] = result["memory"]
+    record = probe_record_from_worker(recipe, result, working_set_bytes=working_set, versions=_versions())
     _write_probe(record)
     print(f"probe {slug} {recipe.width}x{recipe.height}: pass={record['pass']}", flush=True)
     return 0  # a failed probe is a measurement, not a failure; resolve_resolution acts on it
@@ -527,16 +585,28 @@ def _resolved(slug: str, *, smoke: bool) -> Recipe:
     return resolve_resolution(recipe_for(slug), _load_probes(slug), versions=_versions())
 
 
-def _orchestrate(slug: str, *, budget: int, smoke: bool) -> int:
+def _orchestrate(
+    slug: str,
+    *,
+    budget: int,
+    smoke: bool,
+    spawn: Callable[..., dict[str, Any]] | None = None,
+    trash: Path | None = None,
+    chunks_dir: Path | None = None,
+    raw_dir: Path | None = None,
+) -> int:
     from _comparison_recipes import recipe_stamp
 
+    spawn_fn = spawn or _spawn
+    trash_dir = trash if trash is not None else (Path.home() / ".Trash")
     recipe = _resolved(slug, smoke=smoke)
-    chunks = SMOKE_ROOT / "chunks" if smoke else CHUNKS_DIR
-    raw_root = SMOKE_ROOT if smoke else RAW_ROOT
+    chunks = chunks_dir if chunks_dir is not None else (SMOKE_ROOT / "chunks" if smoke else CHUNKS_DIR)
+    raw_root = raw_dir if raw_dir is not None else (SMOKE_ROOT if smoke else RAW_ROOT)
     expected = recipe_stamp(recipe, versions=_versions())
     for condition in plan_conditions(chunks, raw_root, slug, recipe.steps, expected, budget):
         path = chunk_path(chunks, slug, condition)
-        result = _spawn(recipe, condition, probe=False, smoke=smoke)
+        retire_chunk(path, trash=trash_dir, tag=_now_tag())
+        result = spawn_fn(recipe, condition, probe=False, smoke=smoke)
         if "aborted" in result:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.with_suffix(".aborted.json").write_text(json.dumps(result, indent=2))
@@ -607,6 +677,7 @@ def _report_header() -> dict[str, Any]:
     import platform
 
     from _comparison_recipes import PROMPT, QWEN_PROMPT_SUFFIX, SEED
+    from mflux.utils.apple_silicon import AppleSiliconUtil
 
     def sysctl(key: str) -> str:
         return subprocess.run(
@@ -620,10 +691,11 @@ def _report_header() -> dict[str, Any]:
         "seed": SEED,
         "protocol": "one cold generation per condition in its own process; weights and prompt embeddings evaluated "
         "before the clock; taef preview decoded every step",
+        "mflux_compiles_predict": not AppleSiliconUtil.is_m1_or_m2(),
         "hardware": {
             "chip": sysctl("machdep.cpu.brand_string"),
             "ram_gb": round(int(sysctl("hw.memsize") or 0) / GIB),
-            "os": f"{platform.system()} {platform.release()}",
+            "os": f"macOS {platform.mac_ver()[0]}",
             "python": platform.python_version(),
         },
     }
@@ -651,7 +723,7 @@ def main() -> None:
     ap.add_argument("--max-workers", type=positive_int, default=None)
     ap.add_argument("--finalize", action="store_true", help="SSIM + contact sheets + report entry")
     ap.add_argument(
-        "--smoke", action="store_true", help="2 steps at 256x256 into tests/_artifacts/comparison_smoke"
+        "--smoke", action="store_true", help="4 steps at 256x256 into tests/_artifacts/comparison_smoke"
     )
     args = ap.parse_args()
     if args.worker:

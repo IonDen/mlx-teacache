@@ -43,9 +43,14 @@ class StepStamper:
 
 
 def register_stamped_preview(
-    register: Callable[[Any], None], preview: Any
+    register: Callable[[Any], None],
+    preview: Any,
+    *,
+    clock: Callable[[], float] = time.perf_counter,
+    eval_fn: Callable[[Any], None] | None = None,
 ) -> tuple[StepStamper, StepStamper]:
-    pre, post = StepStamper(phase="pre"), StepStamper(phase="post")
+    pre = StepStamper(phase="pre", clock=clock, eval_fn=eval_fn)
+    post = StepStamper(phase="post", clock=clock)
     register(pre)
     register(preview)
     register(post)

@@ -108,7 +108,7 @@ def _details(slug: str, v: dict[str, Any]) -> str:
 
 def _machine(report: dict[str, Any]) -> str:
     h = report["hardware"]
-    return f"{h['chip']}, {h['ram_gb']} GB unified memory, macOS kernel {h['os']}, Python {h['python']}."
+    return f"{h['chip']}, {h['ram_gb']} GB unified memory, {h['os']}, Python {h['python']}."
 
 
 def render_blocks(report: dict[str, Any]) -> dict[str, str]:

@@ -62,15 +62,32 @@ def quality_probe_dir(root: Path, slug: str, name: str) -> Path:
     return root / slug / name
 
 
-def reset_quality_probe_dir(root: Path, slug: str, name: str, *, trash: Path, tag: str) -> Path | None:
-    """Move an existing quality-probe NAME dir to the Trash before a fresh run writes into it (rule F)."""
-    target = quality_probe_dir(root, slug, name)
-    if not target.exists():
-        return None
-    trash.mkdir(parents=True, exist_ok=True)
-    dest = trash / f"quality-probe-{slug}-{name}-{tag}"
-    shutil.move(str(target), dest)
-    return dest
+def quality_probe_record_path(
+    root: Path, slug: str, name: str, condition: str, *, aborted: bool = False
+) -> Path:
+    """Condition A keeps ``record.json`` (the name the A-only probes already use); B gets ``record.b.json``,
+    so a TeaCache-on probe sits next to the TeaCache-off one under the same NAME without overwriting it."""
+    stem = "record" if condition == "a" else f"record.{condition}"
+    return quality_probe_dir(root, slug, name) / f"{stem}{'.aborted' if aborted else ''}.json"
+
+
+def reset_quality_probe_outputs(
+    root: Path, slug: str, name: str, condition: str, *, trash: Path, tag: str
+) -> list[Path]:
+    """Move one condition's previous probe outputs (final PNG, frames, record, abort record) to the Trash
+    (rule F) before a fresh run of that condition; the other condition's files stay where they are."""
+    moved: list[Path] = []
+    for aborted in (False, True):
+        record = quality_probe_record_path(root, slug, name, condition, aborted=aborted)
+        if record.exists():
+            trash.mkdir(parents=True, exist_ok=True)
+            dest = trash / f"quality-probe-{slug}-{name}-{record.stem}-{tag}{record.suffix}"
+            shutil.move(str(record), dest)
+            moved.append(dest)
+    if quality_probe_dir(root, slug, name).exists():
+        trash.mkdir(parents=True, exist_ok=True)
+        moved += reset_condition_outputs(root, f"{slug}/{name}", condition, trash=trash, tag=tag)
+    return moved
 
 
 def quality_probe_record(
@@ -89,9 +106,19 @@ def quality_probe_record(
     from _comparison_recipes import prompt_for, recipe_stamp
 
     memory = result["memory"]
+    teacache = (
+        {
+            key: result[key]
+            for key in ("rel_l1_thresh", "skipped", "computed", "max_consecutive_skips", "skip_pattern")
+        }
+        if "rel_l1_thresh" in result
+        else None
+    )
     return {
         "name": name,
         "slug": recipe.slug,
+        "condition": result.get("condition", "a"),
+        "teacache": teacache,
         "stamp": recipe_stamp(recipe, versions=versions),
         "overrides": dict(overrides),
         "width": recipe.width,
@@ -278,7 +305,8 @@ def reset_condition_outputs(
     moved: list[Path] = []
     final = raw_dir_for(raw_root, slug) / f"{condition}.png"
     frames = frames_dir_for(raw_root, slug, condition)
-    for path, label in ((final, f"{slug}-{condition}-final"), (frames, f"{slug}-{condition}-frames")):
+    flat = slug.replace("/", "-")  # a quality probe's nested "<slug>/<name>" must stay one Trash entry
+    for path, label in ((final, f"{flat}-{condition}-final"), (frames, f"{flat}-{condition}-frames")):
         if path.exists():
             dest = trash / f"comparison-{label}-{tag}{path.suffix}"
             shutil.move(str(path), dest)
@@ -572,9 +600,10 @@ def _worker_main(args: argparse.Namespace) -> None:
 
 
 def _quality_probe_worker(args: argparse.Namespace) -> None:
-    """(internal, --worker --quality-probe) One condition-A generation with the given overrides; writes the
-    final PNG, preview frames and a JSON record under QUALITY_PROBE_ROOT/<slug>/<name>/. Touches no chunk,
-    no report, no _artifacts/."""
+    """(internal, --worker --quality-probe) One generation of --condition (A, or B with TeaCache on) with the
+    given overrides; writes that condition's final PNG, preview frames and JSON record under
+    QUALITY_PROBE_ROOT/<slug>/<name>/, leaving the other condition's files alone. Touches no chunk, no
+    report, no _artifacts/."""
     from _comparison_recipes import apply_overrides, recipe_for
 
     name = args.quality_probe
@@ -593,16 +622,18 @@ def _quality_probe_worker(args: argparse.Namespace) -> None:
         if v is not None
     }
     recipe = apply_overrides(recipe_for(args.only), **overrides)
-    reset_quality_probe_dir(
-        QUALITY_PROBE_ROOT, recipe.slug, name, trash=Path.home() / ".Trash", tag=_now_tag()
+    condition = args.condition
+    reset_quality_probe_outputs(
+        QUALITY_PROBE_ROOT, recipe.slug, name, condition, trash=Path.home() / ".Trash", tag=_now_tag()
     )
-    _install_guards(recipe, f"{recipe.slug}/quality-probe/{name}")
+    _install_guards(recipe, f"{recipe.slug}/quality-probe/{name}/{condition}")
     result = _run_generation(
-        recipe, "a", raw_root=QUALITY_PROBE_ROOT, steps=recipe.steps, path_slug=f"{recipe.slug}/{name}"
+        recipe, condition, raw_root=QUALITY_PROBE_ROOT, steps=recipe.steps, path_slug=f"{recipe.slug}/{name}"
     )
     record = quality_probe_record(name, recipe, overrides=overrides, result=result, versions=_versions())
-    out_dir = quality_probe_dir(QUALITY_PROBE_ROOT, recipe.slug, name)
-    (out_dir / "record.json").write_text(json.dumps(record, indent=2))
+    quality_probe_record_path(QUALITY_PROBE_ROOT, recipe.slug, name, condition).write_text(
+        json.dumps(record, indent=2)
+    )
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(record)}", flush=True)
 
 
@@ -660,14 +691,14 @@ def _quality_probe(
     args: argparse.Namespace, *, run_worker: Callable[[list[str], str], dict[str, Any]] | None = None
 ) -> int:
     """Top-level --quality-probe NAME --only <slug>: forward only the overrides the caller actually gave to
-    ONE condition-A worker (prompt/negative as file paths, so the worker re-reads them itself instead of
+    ONE worker of --condition (prompt/negative as file paths, so the worker re-reads them itself instead of
     round-tripping arbitrary text through argv). The worker applies them with apply_overrides.
 
     A watchdog abort is recorded the same way ``_orchestrate`` records a chunk abort: the payload is written
-    to ``quality_probe_dir(...)/record.aborted.json`` and exit code 4 is returned -- never a bare
+    to that condition's ``quality_probe_record_path(..., aborted=True)`` and exit code 4 is returned -- never a bare
     ``RuntimeError`` that throws the measurement away with no artifact."""
     worker_fn = run_worker or _run_worker
-    label = f"{args.only}/{args.quality_probe}"
+    label = f"{args.only}/{args.quality_probe}/{args.condition}"
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -676,6 +707,8 @@ def _quality_probe(
         args.quality_probe,
         "--only",
         args.only,
+        "--condition",
+        args.condition,
     ]
     for flag, value in (
         ("--width", args.width),
@@ -692,9 +725,11 @@ def _quality_probe(
     print(f"\n>> quality-probe {label}", flush=True)
     result = worker_fn(cmd, label)
     if "aborted" in result:
-        out_dir = quality_probe_dir(QUALITY_PROBE_ROOT, args.only, args.quality_probe)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "record.aborted.json").write_text(json.dumps(result, indent=2))
+        abort_path = quality_probe_record_path(
+            QUALITY_PROBE_ROOT, args.only, args.quality_probe, args.condition, aborted=True
+        )
+        abort_path.parent.mkdir(parents=True, exist_ok=True)
+        abort_path.write_text(json.dumps(result, indent=2))
         print(f"== ABORTED by the memory watchdog on quality-probe {label}; nothing persisted ==", flush=True)
         return 4
     return 0
@@ -986,8 +1021,8 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         type=quality_probe_name,
         default=None,
-        help="one-off generation to compare a candidate setting; writes tests/_artifacts/quality_probe/"
-        "<slug>/NAME/ only -- no chunk, no report, no _artifacts/",
+        help="one-off generation (condition A, or B with --condition b) to compare a candidate setting; writes "
+        "tests/_artifacts/quality_probe/<slug>/NAME/ only -- no chunk, no report, no _artifacts/",
     )
     ap.add_argument("--guidance", type=float, default=None, help="with --quality-probe: override guidance")
     ap.add_argument(

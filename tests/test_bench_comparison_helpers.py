@@ -300,21 +300,61 @@ def test_quality_probe_dir_matches_run_generations_path_slug_nesting(tmp_path: P
     assert bc.frames_dir_for(tmp_path, path_slug, "a") == out_dir / "frames" / "a"
 
 
-def test_reset_quality_probe_dir_moves_an_existing_name_dir_to_the_trash(tmp_path: Path) -> None:
-    """Bug: a stale NAME dir from a previous probe survives and its old record.json/frames get mixed with a
-    fresh run's outputs, or the dir is deleted outright instead of moved to the Trash (rule F)."""
+def test_quality_probe_record_path_keeps_a_at_record_json_and_gives_b_its_own_file(tmp_path: Path) -> None:
+    """Bug: condition B's record is written to record.json, overwriting condition A's record for the same
+    probe NAME (or A moves off record.json and the existing A-only probes stop being found)."""
+    out_dir = bc.quality_probe_dir(tmp_path, "z-image-base", "Z1")
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "a") == out_dir / "record.json"
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "b") == out_dir / "record.b.json"
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "a", aborted=True) == (
+        out_dir / "record.aborted.json"
+    )
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "b", aborted=True) == (
+        out_dir / "record.b.aborted.json"
+    )
+
+
+def _populate_probe(root: Path, slug: str, name: str) -> Path:
+    out_dir = bc.quality_probe_dir(root, slug, name)
+    for cond in ("a", "b"):
+        (out_dir / "frames" / cond).mkdir(parents=True)
+        (out_dir / "frames" / cond / "step_step00.png").write_bytes(b"x")
+        (out_dir / f"{cond}.png").write_bytes(cond.encode())
+        bc.quality_probe_record_path(root, slug, name, cond).write_text(cond)
+        bc.quality_probe_record_path(root, slug, name, cond, aborted=True).write_text(cond)
+    return out_dir
+
+
+def test_reset_quality_probe_outputs_retires_only_that_conditions_files(tmp_path: Path) -> None:
+    """Bug: a condition-B probe run moves condition A's image, frames or record out of the NAME dir (the
+    old whole-dir reset), so previewing TeaCache-on throws away the TeaCache-off image it is compared with;
+    or B's own stale files survive and mix with the fresh run's outputs."""
     root, trash = tmp_path / "root", tmp_path / "trash"
-    target = bc.quality_probe_dir(root, "flux1-dev", "tighter-guidance")
-    target.mkdir(parents=True)
-    (target / "record.json").write_text("{}")
-    (target / "a.png").write_bytes(b"x")
+    out_dir = _populate_probe(root, "z-image-base", "Z1")
 
-    dest = bc.reset_quality_probe_dir(root, "flux1-dev", "tighter-guidance", trash=trash, tag="t")
+    moved = bc.reset_quality_probe_outputs(root, "z-image-base", "Z1", "b", trash=trash, tag="t")
 
-    assert dest is not None and dest.exists() and dest.parent == trash
-    assert (dest / "record.json").exists()  # the whole dir moved, not just its contents
-    assert not target.exists()
-    assert bc.reset_quality_probe_dir(root, "flux1-dev", "tighter-guidance", trash=trash, tag="t2") is None
+    assert (out_dir / "a.png").read_bytes() == b"a"
+    assert (out_dir / "frames" / "a" / "step_step00.png").exists()
+    assert (out_dir / "record.json").read_text() == "a"
+    assert (out_dir / "record.aborted.json").read_text() == "a"
+    for gone in ("b.png", "frames/b", "record.b.json", "record.b.aborted.json"):
+        assert not (out_dir / gone).exists(), gone
+    assert len(moved) == 4 and all(p.parent == trash and p.exists() for p in moved)
+
+
+def test_reset_quality_probe_outputs_for_a_leaves_b_alone_and_is_a_no_op_when_empty(tmp_path: Path) -> None:
+    """Bug: the per-condition reset ignores its condition argument (always retires "a", or both), or it
+    fails on a probe NAME that has never run."""
+    root, trash = tmp_path / "root", tmp_path / "trash"
+    assert bc.reset_quality_probe_outputs(root, "z-image-base", "Z1", "a", trash=trash, tag="t0") == []
+    out_dir = _populate_probe(root, "z-image-base", "Z1")
+
+    bc.reset_quality_probe_outputs(root, "z-image-base", "Z1", "a", trash=trash, tag="t1")
+
+    assert not (out_dir / "a.png").exists() and not (out_dir / "record.json").exists()
+    assert (out_dir / "b.png").read_bytes() == b"b"
+    assert (out_dir / "record.b.json").read_text() == "b"
 
 
 def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks() -> None:
@@ -360,6 +400,40 @@ def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks()
         "peak_resident_bytes": 4 * GIB,
         "peak_footprint_bytes": 5 * GIB,
     }
+
+
+def test_quality_probe_record_carries_the_condition_and_b_skip_telemetry() -> None:
+    """Bug: a condition-B probe record doesn't say it is B, or drops the skip count / pattern / threshold,
+    so a TeaCache-on face can't be tied to how many steps were actually skipped."""
+    recipe = cr.recipe_for("z-image-base")
+    base = {
+        "generation_seconds": 1.0,
+        "mlx_peak_load_bytes": 0,
+        "mlx_peak_encode_bytes": 0,
+        "mlx_peak_generation_bytes": 0,
+        "memory": {"peak_resident_bytes": 0, "peak_footprint_bytes": 0, "min_host_free_pct": 50.0},
+    }
+    b_result = {
+        **base,
+        "condition": "b",
+        "rel_l1_thresh": 0.25,
+        "skipped": 14,
+        "computed": 36,
+        "max_consecutive_skips": 1,
+        "skip_pattern": "CCSC",
+    }
+    b = bc.quality_probe_record("Z1", recipe, overrides={}, result=b_result, versions=V)
+    assert b["condition"] == "b"
+    assert b["teacache"] == {
+        "rel_l1_thresh": 0.25,
+        "skipped": 14,
+        "computed": 36,
+        "max_consecutive_skips": 1,
+        "skip_pattern": "CCSC",
+    }
+    a = bc.quality_probe_record("Z1", recipe, overrides={}, result={**base, "condition": "a"}, versions=V)
+    assert a["condition"] == "a"
+    assert a["teacache"] is None
 
 
 def test_quality_probe_record_negative_used_true_for_a_real_negative_that_reaches_the_model() -> None:
@@ -679,6 +753,7 @@ def test_quality_probe_records_an_abort_and_returns_exit_4(
     args = argparse.Namespace(
         only="flux1-dev",
         quality_probe="tighter-guidance",
+        condition="a",
         width=None,
         height=None,
         guidance=None,
@@ -707,6 +782,7 @@ def test_quality_probe_returns_zero_and_writes_no_abort_file_on_a_normal_result(
     args = argparse.Namespace(
         only="flux1-dev",
         quality_probe="tighter-guidance",
+        condition="a",
         width=None,
         height=None,
         guidance=None,
@@ -737,6 +813,7 @@ def test_quality_probe_forwards_only_the_overrides_actually_given(
     args = argparse.Namespace(
         only="flux1-dev",
         quality_probe="n",
+        condition="a",
         width=512,
         height=None,
         guidance=7.0,
@@ -751,3 +828,55 @@ def test_quality_probe_forwards_only_the_overrides_actually_given(
     assert "--guidance" in cmd and "7.0" in cmd
     assert "--height" not in cmd
     assert "--quantize" not in cmd
+
+
+def _qp_args(**kw: object) -> argparse.Namespace:
+    base: dict[str, object] = dict(
+        only="z-image-base",
+        quality_probe="Z1",
+        condition="a",
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+    )
+    return argparse.Namespace(**{**base, **kw})
+
+
+def test_quality_probe_forwards_the_condition_to_the_worker() -> None:
+    """Bug: --quality-probe drops --condition, so asking for a TeaCache-on (B) preview silently renders
+    condition A again."""
+    seen: list[list[str]] = []
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen.append(cmd)
+        return {"name": "Z1"}
+
+    bc._quality_probe(_qp_args(condition="b"), run_worker=fake_run_worker)
+    bc._quality_probe(_qp_args(condition="a"), run_worker=fake_run_worker)
+
+    b_cmd, a_cmd = seen
+    assert b_cmd[b_cmd.index("--condition") + 1] == "b"
+    assert a_cmd[a_cmd.index("--condition") + 1] == "a"
+
+
+def test_quality_probe_b_abort_is_recorded_without_touching_as_abort_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a condition-B watchdog abort is written to record.aborted.json, which is condition A's file, so
+    a B abort reads as if A had aborted (or overwrites A's real abort record)."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"aborted": "active-memory watchdog"}
+
+    assert bc._quality_probe(_qp_args(condition="b"), run_worker=fake_run_worker) == 4
+
+    out_dir = bc.quality_probe_dir(root, "z-image-base", "Z1")
+    assert json.loads((out_dir / "record.b.aborted.json").read_text()) == {
+        "aborted": "active-memory watchdog"
+    }
+    assert not (out_dir / "record.aborted.json").exists()

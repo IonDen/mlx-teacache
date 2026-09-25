@@ -160,8 +160,8 @@ def with_resolution(recipe: Recipe, width: int, height: int) -> Recipe:
 
 
 def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, object]:
-    """Every field that changes what a chunk or probe measured. Git sha and mlx-teacache version are provenance only
-    (an editable hatch-vcs install changes both on every commit)."""
+    """Every field that changes what a chunk or probe measured, including memory budget fields.
+    Git sha and mlx-teacache version are provenance only (an editable hatch-vcs install changes both on every commit)."""
     return {
         "slug": recipe.slug,
         "checkpoint": recipe.checkpoint,
@@ -172,6 +172,8 @@ def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, objec
         "width": recipe.width,
         "height": recipe.height,
         "free_encoders": recipe.free_encoders,
+        "cache_gb": recipe.cache_gb,
+        "wired_cap_gb": recipe.wired_cap_gb,
         "seed": SEED,
         "prompt_sha256": prompt_sha256(prompt_for(recipe)),
         **{f"version_{k}": val for k, val in sorted(versions.items())},

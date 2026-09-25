@@ -64,6 +64,8 @@ def test_unknown_slug_raises() -> None:
         ("steps", 30),
         ("width", 512),
         ("height", 512),
+        ("cache_gb", 3.0),
+        ("wired_cap_gb", 20),
     ],
 )
 def test_recipe_stamp_changes_with_every_measured_field(field: str, value: object) -> None:

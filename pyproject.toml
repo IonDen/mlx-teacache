@@ -71,6 +71,7 @@ exclude = [
     "tests/reference_pngs/",     # nested PNGs from slow integration tests
     "tests/converted/",
     "notes/",
+    "docs/comparison/",          # links images under _artifacts/, which the sdist does not ship
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -67,3 +67,20 @@ def test_frame_paths_sort_numerically_and_ignore_other_files(tmp_path: Path) -> 
         Image.new("RGB", (4, 4)).save(tmp_path / f"step_step{i:02d}.png")
     Image.new("RGB", (4, 4)).save(tmp_path / "final.png")
     assert [p.name for p in sh.frame_paths(tmp_path)] == ["step_step00.png", "step_step02.png", "step_step10.png"]
+
+
+def test_a_frame_of_another_size_raises(tmp_path: Path) -> None:
+    """Bug: a frame with a different size is silently stretched instead of rejected."""
+    frames = _frames(tmp_path, 2)  # (96, 128)
+    wrong_size = tmp_path / "step_step02.png"
+    Image.new("RGB", (128, 96), COLORS[2]).save(wrong_size)  # different dimensions
+    frames.append(wrong_size)
+    with pytest.raises(ValueError, match="expected"):
+        sh.build_contact_sheet(frames, ["computed"] * 3, cols=3, thumb_width=48)
+
+
+def test_unknown_step_kind_raises(tmp_path: Path) -> None:
+    """Bug: an unknown step kind silently renders as computed instead of being rejected."""
+    frames = _frames(tmp_path, 2)
+    with pytest.raises(ValueError, match="skiped"):
+        sh.build_contact_sheet(frames, ["computed", "skiped"], cols=2, thumb_width=48)

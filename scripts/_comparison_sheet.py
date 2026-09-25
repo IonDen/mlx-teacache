@@ -32,8 +32,21 @@ def build_contact_sheet(
         raise ValueError("no frames to lay out")
     if len(frames) != len(kinds):
         raise ValueError(f"{len(frames)} frames but {len(kinds)} step kinds")
+    # Validate all kinds are known
+    valid_kinds = {"computed", "skipped"}
+    for kind in kinds:
+        if kind not in valid_kinds:
+            raise ValueError(f"unknown step kind: {kind}")
     with Image.open(frames[0]) as first:
+        first_size = (first.width, first.height)
         thumb_h = round(first.height * thumb_width / first.width)
+    # Validate all frame sizes match the first frame
+    for path in frames[1:]:
+        with Image.open(path) as frame:
+            if (frame.width, frame.height) != first_size:
+                w, h = frame.width, frame.height
+                fw, fh = first_size
+                raise ValueError(f"{path.name} is {w}x{h}, expected {fw}x{fh} like the first frame")
     tile_w, tile_h = thumb_width + 2 * TILE_PAD, thumb_h + LABEL_H + 2 * TILE_PAD
     rows = math.ceil(len(frames) / cols)
     sheet = Image.new("RGB", (cols * tile_w, rows * tile_h), BACKGROUND)

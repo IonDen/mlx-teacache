@@ -67,6 +67,7 @@ def _report() -> dict:
             "version_mlx_taef": "0.8.3",
             "mlx_teacache_version": "0.11.2",
         },
+        mflux_compiles_on_this_chip=True,
     )
     return {
         "schema_version": 2,
@@ -107,6 +108,16 @@ def test_details_rows_are_per_condition() -> None:
     assert "0.20.0" in d
 
 
+def test_details_peak_row_names_what_each_phase_boundary_actually_covers() -> None:
+    """Bug: the row is labelled "MLX peak: load / encode / generation", but the sampled "encode" boundary
+    sits after the transformer and VAE are evaluated too (_run_generation samples mlx_peak_encode_bytes
+    once the denoiser is evaluated, not right after prompt encoding), so a reader takes the middle number
+    as prompt-encoding-only memory when it also counts loading the model."""
+    d = gen.render_blocks(_report())["flux1-dev:details"]
+    assert "| MLX peak: encoders loaded / prompt encoded + model loaded / generation |" in d
+    assert "| MLX peak: load / encode / generation |" not in d
+
+
 def test_details_footer_has_a_blank_line_before_the_speedup_paragraph() -> None:
     """Bug: the footer starts with a single "\\n", so on GitHub the "Speedup on this run: ..." paragraph
     renders as an extra one-cell row of the table above it instead of its own paragraph."""
@@ -124,14 +135,28 @@ def test_library_line_bases_a_dev_version_on_the_previous_patch_release() -> Non
             "git_sha_b": "bbb1111",
         }
     )
-    assert line == "mlx-teacache 0.11.1 with this branch's changes (commit `bbb1111`)"
+    assert line == "mlx-teacache 0.11.1 (harness at commit `bbb1111`)"
 
 
 def test_library_line_keeps_a_release_version_and_falls_back_to_git_sha_a() -> None:
     """Bug: a non-dev recorded version gets decremented too (it shouldn't), or the sha falls back to
     git_sha_a only when git_sha_b is present rather than when it's genuinely missing."""
     line = gen.library_line({"mlx_teacache_version": "0.11.1", "git_sha_a": "ccc2222"})
-    assert line == "mlx-teacache 0.11.1 with this branch's changes (commit `ccc2222`)"
+    assert line == "mlx-teacache 0.11.1 (harness at commit `ccc2222`)"
+
+
+def test_library_line_names_the_target_release_when_a_dev_build_has_no_prior_patch() -> None:
+    """Bug: a dev version with patch 0 (e.g. "0.12.0.dev3", which has no prior 0.12.-1 to fall back to)
+    renders a nonsensical decremented patch instead of naming the release it precedes."""
+    line = gen.library_line({"mlx_teacache_version": "0.12.0.dev3+gabc1234", "git_sha_b": "ddd3333"})
+    assert line == "mlx-teacache a development build before 0.12.0 (harness at commit `ddd3333`)"
+
+
+def test_library_line_renders_an_unparsable_version_verbatim() -> None:
+    """Bug: a version string PEP 440 can't parse (a corrupted hatch-vcs tag, a hand-edited report) crashes
+    the generator instead of being shown as-is."""
+    line = gen.library_line({"mlx_teacache_version": "not-a-version", "git_sha_b": "eee4444"})
+    assert line == "mlx-teacache not-a-version (harness at commit `eee4444`)"
 
 
 def test_details_footer_never_renders_a_dev_version_string() -> None:
@@ -144,7 +169,8 @@ def test_details_footer_never_renders_a_dev_version_string() -> None:
     report["variants"]["flux1-dev"]["provenance"]["git_sha_b"] = "8c3fff5"
     d = gen.render_blocks(report)["flux1-dev:details"]
     assert ".dev" not in d
-    assert "mlx-teacache 0.11.1 with this branch's changes (commit `8c3fff5`)" in d
+    assert "this branch" not in d
+    assert "mlx-teacache 0.11.1 (harness at commit `8c3fff5`)" in d
 
 
 def test_details_footer_says_text_encoder_freed_singular() -> None:

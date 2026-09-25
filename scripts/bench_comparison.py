@@ -132,6 +132,9 @@ _SUMMARY_KEYS = (
     "mlx_teacache_version",
 )
 _B_KEYS = ("rel_l1_thresh", "skipped", "computed", "max_consecutive_skips", "skip_pattern", "decision_kinds")
+# mflux only wraps FLUX.2 Klein's and Z-Image's predict step in mx.compile; FLUX.1 and Qwen-Image have no
+# compiled predict step at all, so they can never be credited with compile avoidance regardless of chip.
+_COMPILED_PREDICT_LOADERS = frozenset({"klein-base-4b", "klein-base-9b", "z-image"})
 
 
 def condition_summary(result: dict[str, Any], *, is_b: bool) -> dict[str, Any]:
@@ -154,7 +157,13 @@ def condition_summary(result: dict[str, Any], *, is_b: bool) -> dict[str, Any]:
 
 
 def assemble_entry(
-    recipe: Recipe, a: dict[str, Any], b: dict[str, Any], *, ssim: float, provenance: dict[str, str]
+    recipe: Recipe,
+    a: dict[str, Any],
+    b: dict[str, Any],
+    *,
+    ssim: float,
+    provenance: dict[str, str],
+    mflux_compiles_on_this_chip: bool,
 ) -> dict[str, Any]:
     if len(a["compute_seconds"]) != len(b["compute_seconds"]):
         raise ValueError(f"{recipe.slug}: A and B recorded different step counts")
@@ -171,6 +180,7 @@ def assemble_entry(
         "width": a["width"],
         "height": a["height"],
         "free_encoders": recipe.free_encoders,
+        "a_compiled_predict": recipe.loader in _COMPILED_PREDICT_LOADERS and mflux_compiles_on_this_chip,
         "prompt_sha256": a["stamp"]["prompt_sha256"],
         "a": condition_summary(a, is_b=False),
         "b": condition_summary(b, is_b=True),
@@ -694,11 +704,20 @@ def _finalize(slug: str, *, export_jpg: bool = False) -> None:
         "mlx_teacache_version": a["mlx_teacache_version"],
         **{k: str(v) for k, v in a["stamp"].items() if k.startswith("version_")},
     }
-    entry = assemble_entry(recipe, a, b, ssim=ssim, provenance=provenance)
+    header = _report_header()
+    entry = assemble_entry(
+        recipe,
+        a,
+        b,
+        ssim=ssim,
+        provenance=provenance,
+        mflux_compiles_on_this_chip=header["mflux_compiles_on_this_chip"],
+    )
     report: dict[str, Any] = (
         json.loads(REPORT_PATH.read_text()) if REPORT_PATH.exists() else {"schema_version": 2, "variants": {}}
     )
-    report = {**merge_entry(report, slug, entry, generated_at=generated_at), **_report_header()}
+    report.pop("mflux_compiles_predict", None)  # pre-rename key; header below always supplies the new one
+    report = {**merge_entry(report, slug, entry, generated_at=generated_at), **header}
     sys.path.insert(0, str(REPO / "docs"))
     import _generate_comparison
 
@@ -730,7 +749,10 @@ def _report_header() -> dict[str, Any]:
         "seed": SEED,
         "protocol": "one cold generation per condition in its own process; weights and prompt embeddings evaluated "
         "before the clock; taef preview decoded every step",
-        "mflux_compiles_predict": not AppleSiliconUtil.is_m1_or_m2(),
+        # mflux mx.compiles the FLUX.2 Klein / Z-Image predict step on every chip except M1/M2 (which
+        # AppleSiliconUtil treats as eager). One flag for the whole run; assemble_entry AND-gates it with
+        # whether the model itself has a compiled predict step at all (per-entry ``a_compiled_predict``).
+        "mflux_compiles_on_this_chip": not AppleSiliconUtil.is_m1_or_m2(),
         "hardware": {
             "chip": sysctl("machdep.cpu.brand_string"),
             "ram_gb": round(int(sysctl("hw.memsize") or 0) / GIB),

@@ -65,21 +65,32 @@ def _sheets(slug: str, v: dict[str, Any]) -> str:
     )
 
 
-def _release_base(version: str) -> str:
-    """The release a rendered page should credit. An editable-install dev version such as
-    "0.11.2.dev14+gbcaac6f1c.d20260925" names the *next*, unreleased patch, so the base to show is the
-    previous one (0.11.2.devN -> 0.11.1). A plain release version is shown as recorded."""
-    base = version.split(".dev")[0]
-    if base == version:
+def _release_label(version: str) -> str:
+    """The release a rendered page should credit for a recorded mlx-teacache version string.
+
+    An editable-install dev version such as "0.11.2.dev14+gbcaac6f1c.d20260925" names the *next*,
+    unreleased patch (hatch-vcs bumps the patch the commit after a tag), so the label is the previous
+    patch release (0.11.2.devN -> 0.11.1). A dev version whose patch component is already 0 (e.g.
+    "0.12.0.dev3") has no prior patch to fall back to, so the label names the release it precedes instead
+    ("a development build before 0.12.0"). A plain release version is shown as its own public version, and
+    a string PEP 440 can't parse is shown exactly as recorded rather than crashing the generator."""
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
         return version
-    major, minor, patch = (int(part) for part in base.split("."))
-    return f"{major}.{minor}.{patch - 1}"
+    if not parsed.is_devrelease:
+        return parsed.public
+    if parsed.micro == 0:
+        return f"a development build before {parsed.major}.{parsed.minor}.0"
+    return f"{parsed.major}.{parsed.minor}.{parsed.micro - 1}"
 
 
 def library_line(provenance: dict[str, Any]) -> str:
-    version = _release_base(str(provenance.get("mlx_teacache_version", "")))
+    label = _release_label(str(provenance.get("mlx_teacache_version", "")))
     sha = provenance.get("git_sha_b") or provenance.get("git_sha_a")
-    return f"mlx-teacache {version} with this branch's changes (commit `{sha}`)"
+    return f"mlx-teacache {label} (harness at commit `{sha}`)"
 
 
 def _details(slug: str, v: dict[str, Any], seed: int) -> str:
@@ -100,7 +111,10 @@ def _details(slug: str, v: dict[str, Any], seed: int) -> str:
         ("Skip pattern (S = skipped)", "—", f"`{b['skip_pattern']}`"),
         ("Threshold (rel_l1)", "—", f"{b['rel_l1_thresh']:.2f}"),
         (
-            "MLX peak: load / encode / generation",
+            # The "encoders loaded" peak is sampled right after the text encoders load; the middle peak
+            # is sampled after the prompt is encoded AND the transformer and VAE are evaluated
+            # (_run_generation's encode phase covers both), so it is not prompt-encoding memory alone.
+            "MLX peak: encoders loaded / prompt encoded + model loaded / generation",
             f"{_g(a['mlx_peak_load_bytes'])} / {_g(a['mlx_peak_encode_bytes'])} / {_g(a['mlx_peak_generation_bytes'])}",
             f"{_g(b['mlx_peak_load_bytes'])} / {_g(b['mlx_peak_encode_bytes'])} / {_g(b['mlx_peak_generation_bytes'])}",
         ),

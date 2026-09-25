@@ -151,7 +151,9 @@ def test_assemble_entry_derives_the_three_speedups_and_kind_medians() -> None:
         max_consecutive_skips=1,
         skip_pattern="CCSC",
     )
-    e = bc.assemble_entry(r, a, b, ssim=0.97, provenance={"version_mflux": "0.20.0"})
+    e = bc.assemble_entry(
+        r, a, b, ssim=0.97, provenance={"version_mflux": "0.20.0"}, mflux_compiles_on_this_chip=True
+    )
     assert e["speedup_wall"] == pytest.approx(62.5 / 53.5)
     assert e["speedup_steady"] == pytest.approx(30.0 / 21.0)
     assert e["speedup_preview_subtracted"] == pytest.approx(60.5 / 51.5)
@@ -161,13 +163,56 @@ def test_assemble_entry_derives_the_three_speedups_and_kind_medians() -> None:
     assert e["bench_report"] == r.bench_report and e["prompt_sha256"] == "p"
 
 
+def test_assemble_entry_marks_a_compiled_predict_only_for_klein_and_z_image_on_a_compiling_chip() -> None:
+    """Bug: FLUX.1 (no mx.compile'd predict step at all) is credited with a compiled predict step, or a
+    Klein/Z-Image loader is marked compiled even on a chip where mflux doesn't compile it (M1/M2)."""
+    a = _result("a", [1.0, 1.0], [0.1, 0.1], gen=2.2)
+    b = _result(
+        "b",
+        [1.0, 1.0],
+        [0.1, 0.1],
+        gen=2.2,
+        rel_l1_thresh=0.2,
+        decision_kinds=["computed", "computed"],
+        skipped=0,
+        computed=2,
+        max_consecutive_skips=0,
+        skip_pattern="CC",
+    )
+
+    flux1 = bc.assemble_entry(
+        cr.recipe_for("flux1-dev"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert flux1["a_compiled_predict"] is False
+
+    klein = bc.assemble_entry(
+        cr.recipe_for("klein-base-4b"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert klein["a_compiled_predict"] is True
+
+    z_image = bc.assemble_entry(
+        cr.recipe_for("z-image-base"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert z_image["a_compiled_predict"] is True
+
+    klein_on_a_noncompiling_chip = bc.assemble_entry(
+        cr.recipe_for("klein-base-4b"), a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=False
+    )
+    assert klein_on_a_noncompiling_chip["a_compiled_predict"] is False
+
+
 def test_assemble_entry_refuses_mismatched_step_counts() -> None:
     """Bug: A and B step counts silently differ, misaligning the per-step tables."""
     r = cr.recipe_for("flux1-dev")
     a = _result("a", [1.0, 1.0], [0.1, 0.1], gen=2.2)
     with pytest.raises(ValueError, match="step counts"):
         bc.assemble_entry(
-            r, a, _result("b", [1.0], [0.1], gen=1.1, decision_kinds=["computed"]), ssim=1.0, provenance={}
+            r,
+            a,
+            _result("b", [1.0], [0.1], gen=1.1, decision_kinds=["computed"]),
+            ssim=1.0,
+            provenance={},
+            mflux_compiles_on_this_chip=True,
         )
 
 
@@ -179,7 +224,7 @@ def test_assemble_entry_refuses_b_missing_decision_kinds() -> None:
     present = {k: 0 for k in bc._B_KEYS if k != "decision_kinds"}
     b = _result("b", [1.0, 1.0], [0.1, 0.1], gen=2.2, **present)
     with pytest.raises(KeyError, match="decision_kinds"):
-        bc.assemble_entry(r, a, b, ssim=1.0, provenance={})
+        bc.assemble_entry(r, a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True)
 
 
 def test_merge_entry_replaces_one_slug_and_keeps_the_rest() -> None:

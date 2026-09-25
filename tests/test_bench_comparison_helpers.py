@@ -167,3 +167,25 @@ def test_merge_entry_replaces_one_slug_and_keeps_the_rest() -> None:
     out = bc.merge_entry(report, "flux1-dev", {"x": 3}, generated_at="2026-09-25T10:00Z")
     assert out["variants"] == {"flux1-dev": {"x": 3}, "z-image-base": {"y": 2}}
     assert out["generated_at"] == "2026-09-25T10:00Z" and report["variants"]["flux1-dev"] == {"x": 1}
+
+
+def test_reset_condition_outputs_moves_stale_frames_and_final_to_the_trash(tmp_path: Path) -> None:
+    """Bug: stale frames/final survive a retry (counted complete; mflux would write a_1.png beside a.png),
+    or they are deleted instead of trashed (rule F)."""
+    raw, trash = tmp_path / "raw", tmp_path / "trash"
+    trash.mkdir()
+    _write_chunk(tmp_path / "c", raw, "flux1-dev", "a", frames=3)
+    moved = bc.reset_condition_outputs(raw, "flux1-dev", "a", trash=trash, tag="t")
+    assert not (bc.raw_dir_for(raw, "flux1-dev") / "a.png").exists()
+    assert not bc.frames_dir_for(raw, "flux1-dev", "a").exists()
+    assert len(moved) == 2 and all(p.exists() and p.parent == trash for p in moved)
+    assert bc.reset_condition_outputs(raw, "flux1-dev", "a", trash=trash, tag="t2") == []
+
+
+def test_max_workers_must_be_positive() -> None:
+    """Bug: --max-workers 0 makes every invocation exit 3 and run-units re-invokes forever."""
+    import argparse
+
+    assert bc.positive_int("1") == 1
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.positive_int("0")

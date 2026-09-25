@@ -15,7 +15,15 @@ this writes _artifacts/comparison/report.json. The mlx-teacache version and git 
 recipe stamp (an editable install changes them on every commit).
 """
 
+import argparse
 import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -190,3 +198,468 @@ def merge_entry(
     out["generated_at"] = generated_at
     out["variants"] = {**report.get("variants", {}), slug: entry}
     return out
+
+
+def reset_condition_outputs(
+    raw_root: Path, slug: str, condition: str, *, trash: Path, tag: str
+) -> list[Path]:
+    """Move a previous attempt's frames and final PNG to the Trash (rule F) before a worker writes new ones."""
+    moved: list[Path] = []
+    final = raw_dir_for(raw_root, slug) / f"{condition}.png"
+    frames = frames_dir_for(raw_root, slug, condition)
+    for path, label in ((final, f"{slug}-{condition}-final"), (frames, f"{slug}-{condition}-frames")):
+        if path.exists():
+            dest = trash / f"comparison-{label}-{tag}{path.suffix}"
+            shutil.move(str(path), dest)
+            moved.append(dest)
+    return moved
+
+
+def positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {value}")
+    return value
+
+
+def _now_tag() -> str:
+    return datetime.now().strftime("%Y-%m-%d-%H%M%S")
+
+
+def _versions() -> dict[str, str]:
+    from importlib.metadata import version
+
+    return {"mflux": version("mflux"), "mlx": version("mlx"), "mlx_taef": version("mlx-taef")}
+
+
+def _git_sha() -> str:
+    out = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True, check=False
+    )
+    return out.stdout.strip() or "unknown"
+
+
+def _load_probes(slug: str) -> list[dict[str, Any]]:
+    return [
+        cast(dict[str, Any], json.loads(p.read_text())) for p in sorted(PROBE_DIR.glob(f"{slug}_*x*.json"))
+    ]
+
+
+def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: int) -> dict[str, Any]:
+    """One generation with every guard in place; staged load; per-phase memory. Returns the result dict."""
+    import mlx.core as mx
+    from _comparison_memory import PeakSampler, host_free_pct, mlx_resident_sampler, phys_footprint_bytes
+    from _comparison_models import (
+        DENOISER_ATTRS,
+        ENCODER_ATTRS,
+        assert_prompt_cache_hit,
+        evaluate_modules,
+        load_model,
+        precompute_prompt,
+        release_text_encoders,
+    )
+    from _comparison_recipes import SEED, prompt_for
+    from _comparison_steps import decision_kinds, register_stamped_preview, split_steps
+    from mlx_taef.integrations.mflux import LivePreviewCallback
+
+    import mlx_teacache
+
+    reset_condition_outputs(raw_root, recipe.slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
+    frames_dir = frames_dir_for(raw_root, recipe.slug, condition)
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    out_png = raw_dir_for(raw_root, recipe.slug) / f"{condition}.png"
+    prompt = prompt_for(recipe)
+
+    sampler = PeakSampler(
+        sample_resident=mlx_resident_sampler(),
+        sample_footprint=phys_footprint_bytes,
+        sample_host_free=host_free_pct,
+    )
+    sampler.start()
+    try:
+        # Load: encoders first; the denoiser waits until the encoders are gone where the recipe frees them.
+        t0 = time.perf_counter()
+        flux = load_model(recipe)
+        evaluate_modules(flux, ENCODER_ATTRS)
+        preview = LivePreviewCallback(
+            flux=flux,
+            variant=recipe.decoder,
+            every=1,
+            numbered_frames=True,
+            save_to=frames_dir / "step.png",
+            on_error="raise",
+        )
+        mx.eval(preview.model.parameters())
+        load_seconds = time.perf_counter() - t0
+        mlx_peak_load = int(mx.get_peak_memory())
+        sampler.end_phase("load")
+
+        # Encode, then free the encoders (where set), then evaluate the transformer and VAE.
+        mx.reset_peak_memory()
+        t1 = time.perf_counter()
+        precompute_prompt(flux, recipe, prompt)
+        released = release_text_encoders(flux) if recipe.free_encoders else []
+        evaluate_modules(flux, DENOISER_ATTRS)
+        encode_seconds = time.perf_counter() - t1
+        mlx_peak_encode = int(mx.get_peak_memory())
+        sampler.end_phase("encode")
+
+        pre, post = register_stamped_preview(flux.callbacks.register, preview)
+        handle = None
+        if condition == "b":
+            from mlx_teacache import apply_teacache
+            from mlx_teacache.errors import TeaCacheUncalibratedCheckpointWarning
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", TeaCacheUncalibratedCheckpointWarning)
+                handle = apply_teacache(flux)
+
+        mx.reset_peak_memory()
+        gen_start = time.perf_counter()
+        image = flux.generate_image(
+            prompt=prompt,
+            seed=SEED,
+            num_inference_steps=steps,
+            height=recipe.height,
+            width=recipe.width,
+            guidance=recipe.guidance,
+        )
+        mx.synchronize()
+        generation_seconds = time.perf_counter() - gen_start
+        mlx_peak_generation = int(mx.get_peak_memory())
+        sampler.end_phase("generation")
+    finally:
+        memory = sampler.stop()
+
+    assert_prompt_cache_hit(flux, recipe)
+    if len(preview.saved_paths) != steps:
+        raise RuntimeError(f"expected {steps} preview frames, got {len(preview.saved_paths)}")
+    compute, preview_cost = split_steps(gen_start, pre.stamps, post.stamps)
+    image.save(path=str(out_png), export_json_metadata=False, overwrite=True)
+
+    result: dict[str, Any] = {
+        "condition": condition,
+        "width": recipe.width,
+        "height": recipe.height,
+        "load_seconds": load_seconds,
+        "encode_seconds": encode_seconds,
+        "generation_seconds": generation_seconds,
+        "compute_seconds": compute,
+        "preview_seconds": preview_cost,
+        "mlx_peak_load_bytes": mlx_peak_load,
+        "mlx_peak_encode_bytes": mlx_peak_encode,
+        "mlx_peak_generation_bytes": mlx_peak_generation,
+        "memory": memory,
+        "frames": len(preview.saved_paths),
+        "released_encoders": released,
+        "mlx_teacache_version": mlx_teacache.__version__,
+    }
+    if handle is not None:
+        from _bench_telemetry import streak_telemetry
+
+        kinds = decision_kinds(handle.stats.last_generation.decisions, steps)
+        telemetry = streak_telemetry(handle.stats)
+        result.update(
+            rel_l1_thresh=handle.rel_l1_thresh,
+            decision_kinds=kinds,
+            skipped=kinds.count("skipped"),
+            computed=kinds.count("computed"),
+            max_consecutive_skips=telemetry["max_consecutive_skips"],
+            skip_pattern=telemetry["skip_pattern"],
+        )
+        handle.restore()
+    return result
+
+
+def _install_guards(recipe: Recipe, label: str) -> None:
+    from _mlx_caps import install_caps
+    from _mlx_watchdog import arm_mlx_watchdog
+
+    wired_b, soft_b, cache_b = install_caps(
+        wired_gb=recipe.wired_cap_gb, soft_gb=recipe.wired_cap_gb + 1, cache_gb=recipe.cache_gb
+    )
+    print(
+        f"  [worker] {label}: caps wired={wired_b / GIB:.2f} soft={soft_b / GIB:.2f} cache={cache_b / GIB:.2f} GiB",
+        flush=True,
+    )
+
+    def _on_abort(payload: dict[str, int]) -> None:
+        line = json.dumps({"aborted": "active-memory watchdog", "label": label, **payload})
+        print(f"{WORKER_RESULT_SENTINEL}{line}", flush=True)
+
+    arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=4.0)
+
+
+def _smoke_recipe(recipe: Recipe) -> Recipe:
+    from dataclasses import replace
+
+    return replace(recipe, steps=2, width=256, height=256, free_encoders=True)
+
+
+def _worker_main(args: argparse.Namespace) -> None:
+    from _comparison_recipes import recipe_for, recipe_stamp, with_resolution
+
+    recipe = with_resolution(recipe_for(args.only), args.width, args.height)
+    if args.smoke:
+        recipe = _smoke_recipe(recipe)
+    raw_root = SMOKE_ROOT if args.smoke else (PROBE_DIR / "raw" if args.probe else RAW_ROOT)
+    _install_guards(recipe, f"{recipe.slug}/{args.condition}")
+    steps = 3 if args.probe else recipe.steps
+    result = _run_generation(recipe, args.condition, raw_root=raw_root, steps=steps)
+    result["stamp"] = recipe_stamp(recipe, versions=_versions())
+    result["git_sha"] = _git_sha()
+    print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
+
+
+def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[str, Any]:
+    """Run one worker; stream its output live (heavy-runs monitoring) while collecting it for the result line."""
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--worker",
+        "--only",
+        recipe.slug,
+        "--condition",
+        condition,
+        "--width",
+        str(recipe.width),
+        "--height",
+        str(recipe.height),
+    ]
+    cmd += ["--probe"] if probe else []
+    cmd += ["--smoke"] if smoke else []
+    env = {**os.environ, "HF_HUB_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
+    print(
+        f"\n>> worker {recipe.slug}/{condition} {recipe.width}x{recipe.height}{' probe' if probe else ''}",
+        flush=True,
+    )
+    lines: list[str] = []
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=None, text=True, env=env) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+        returncode = proc.wait()
+    payload = parse_worker_line("".join(lines))
+    if payload is not None and "aborted" in payload:
+        return payload
+    if returncode != 0 or payload is None:
+        raise RuntimeError(f"worker {recipe.slug}/{condition} failed: exit {returncode}")
+    return payload
+
+
+def _probe(slug: str, *, fallback: bool) -> int:
+    import mlx.core as mx
+    from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, probe_record, recipe_for, with_resolution
+
+    base = recipe_for(slug)
+    if base.fallback is None:
+        raise SystemExit(f"{slug} has no fallback and needs no probe")
+    recipe = with_resolution(base, *base.fallback) if fallback else base
+    working_set = int(mx.device_info().get("max_recommended_working_set_size", WORKING_SET_BYTES_DEFAULT))
+    result = _spawn(recipe, "a", probe=True, smoke=False)
+    if "aborted" in result:
+        record = probe_record(
+            recipe,
+            phase_peaks={},
+            min_host_free_pct=None,
+            working_set_bytes=working_set,
+            versions=_versions(),
+            aborted=str(result["aborted"]),
+        )
+    else:
+        record = probe_record(
+            recipe,
+            phase_peaks={
+                "load": result["mlx_peak_load_bytes"],
+                "encode": result["mlx_peak_encode_bytes"],
+                "generation": result["mlx_peak_generation_bytes"],
+            },
+            min_host_free_pct=result["memory"]["min_host_free_pct"],
+            working_set_bytes=working_set,
+            versions=_versions(),
+        )
+        record["memory"] = result["memory"]
+    _write_probe(record)
+    print(f"probe {slug} {recipe.width}x{recipe.height}: pass={record['pass']}", flush=True)
+    return 0  # a failed probe is a measurement, not a failure; resolve_resolution acts on it
+
+
+def _write_probe(record: dict[str, Any]) -> None:
+    PROBE_DIR.mkdir(parents=True, exist_ok=True)
+    (PROBE_DIR / f"{record['slug']}_{record['width']}x{record['height']}.json").write_text(
+        json.dumps(record, indent=2)
+    )
+
+
+def _probe_failed(slug: str, *, fallback: bool, reason: str) -> None:
+    """Hand-record a probe killed from outside (mlx-guard kills the whole group, so no record was written)."""
+    from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, probe_record, recipe_for, with_resolution
+
+    base = recipe_for(slug)
+    recipe = with_resolution(base, *base.fallback) if fallback and base.fallback else base
+    _write_probe(
+        probe_record(
+            recipe,
+            phase_peaks={},
+            min_host_free_pct=None,
+            working_set_bytes=WORKING_SET_BYTES_DEFAULT,
+            versions=_versions(),
+            aborted=reason,
+        )
+    )
+
+
+def _resolved(slug: str, *, smoke: bool) -> Recipe:
+    from _comparison_recipes import recipe_for, resolve_resolution
+
+    if smoke:
+        return _smoke_recipe(recipe_for(slug))
+    return resolve_resolution(recipe_for(slug), _load_probes(slug), versions=_versions())
+
+
+def _orchestrate(slug: str, *, budget: int, smoke: bool) -> int:
+    from _comparison_recipes import recipe_stamp
+
+    recipe = _resolved(slug, smoke=smoke)
+    chunks = SMOKE_ROOT / "chunks" if smoke else CHUNKS_DIR
+    raw_root = SMOKE_ROOT if smoke else RAW_ROOT
+    expected = recipe_stamp(recipe, versions=_versions())
+    for condition in plan_conditions(chunks, raw_root, slug, recipe.steps, expected, budget):
+        path = chunk_path(chunks, slug, condition)
+        result = _spawn(recipe, condition, probe=False, smoke=smoke)
+        if "aborted" in result:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.with_suffix(".aborted.json").write_text(json.dumps(result, indent=2))
+            print(
+                f"== ABORTED by the memory watchdog on {slug}/{condition}; nothing persisted ==", flush=True
+            )
+            return 4
+        check_chunk_stamp(result, expected, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(result, indent=2))
+        tmp.replace(path)
+        print(f"  chunk persisted: {path}", flush=True)
+    remaining = plan_conditions(chunks, raw_root, slug, recipe.steps, expected, -1)
+    return 3 if remaining else 0
+
+
+def _finalize(slug: str) -> None:
+    """Both chunks done → SSIM on the raw PNGs, contact sheets, report entry, render check."""
+    import numpy as np
+    from _comparison_recipes import recipe_stamp
+    from _comparison_sheet import build_contact_sheet
+    from PIL import Image
+    from skimage.metrics import structural_similarity
+
+    recipe = _resolved(slug, smoke=False)
+    a, b = load_pair(CHUNKS_DIR, RAW_ROOT, slug, recipe.steps, recipe_stamp(recipe, versions=_versions()))
+    if a["git_sha"] != b["git_sha"]:
+        print(f"  warning: A ran at {a['git_sha']}, B at {b['git_sha']}", flush=True)
+    raw = raw_dir_for(RAW_ROOT, slug)
+    with Image.open(raw / "a.png") as ia, Image.open(raw / "b.png") as ib:
+        ssim = float(
+            structural_similarity(
+                np.asarray(ia.convert("RGB")), np.asarray(ib.convert("RGB")), channel_axis=2, data_range=255
+            )
+        )
+    for cond, kinds in (("a", ["computed"] * recipe.steps), ("b", b["decision_kinds"])):
+        build_contact_sheet(frame_paths(frames_dir_for(RAW_ROOT, slug, cond)), kinds).save(
+            raw / f"steps-{cond}.png"
+        )
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    provenance = {
+        "generated_at": generated_at,
+        "git_sha_a": a["git_sha"],
+        "git_sha_b": b["git_sha"],
+        "mlx_teacache_version": a["mlx_teacache_version"],
+        **{k: str(v) for k, v in a["stamp"].items() if k.startswith("version_")},
+    }
+    entry = assemble_entry(recipe, a, b, ssim=ssim, provenance=provenance)
+    report: dict[str, Any] = (
+        json.loads(REPORT_PATH.read_text()) if REPORT_PATH.exists() else {"schema_version": 2, "variants": {}}
+    )
+    report = {**merge_entry(report, slug, entry, generated_at=generated_at), **_report_header()}
+    sys.path.insert(0, str(REPO / "docs"))
+    import _generate_comparison
+
+    _generate_comparison.render_blocks(report)  # fails loudly if the page cannot render this entry
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REPORT_PATH.write_text(json.dumps(report, indent=2))
+    print(
+        f"{slug}: ssim={ssim:.4f} wall={entry['speedup_wall']:.2f}x steady={entry['speedup_steady']:.2f}x "
+        f"preview-subtracted={entry['speedup_preview_subtracted']:.2f}x -> {REPORT_PATH}",
+        flush=True,
+    )
+
+
+def _report_header() -> dict[str, Any]:
+    import platform
+
+    from _comparison_recipes import PROMPT, QWEN_PROMPT_SUFFIX, SEED
+
+    def sysctl(key: str) -> str:
+        return subprocess.run(
+            ["sysctl", "-n", key], capture_output=True, text=True, check=False
+        ).stdout.strip()
+
+    return {
+        "schema_version": 2,
+        "prompt": PROMPT,
+        "qwen_prompt_suffix": QWEN_PROMPT_SUFFIX,
+        "seed": SEED,
+        "protocol": "one cold generation per condition in its own process; weights and prompt embeddings evaluated "
+        "before the clock; taef preview decoded every step",
+        "hardware": {
+            "chip": sysctl("machdep.cpu.brand_string"),
+            "ram_gb": round(int(sysctl("hw.memsize") or 0) / GIB),
+            "os": f"{platform.system()} {platform.release()}",
+            "python": platform.python_version(),
+        },
+    }
+
+
+def main() -> None:
+    from _comparison_recipes import RECIPES
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--worker", action="store_true", help="(internal) run one condition in this process")
+    ap.add_argument("--only", required=True, choices=[r.slug for r in RECIPES])
+    ap.add_argument("--condition", choices=CONDITIONS, default="a")
+    ap.add_argument("--width", type=int)
+    ap.add_argument("--height", type=int)
+    ap.add_argument(
+        "--probe", action="store_true", help="3-step memory probe of condition A; writes no chunk"
+    )
+    ap.add_argument(
+        "--fallback", action="store_true", help="with --probe / --probe-failed: the fallback size"
+    )
+    ap.add_argument(
+        "--probe-failed", action="store_true", help="record a probe killed from outside as failed"
+    )
+    ap.add_argument("--reason", default="killed by mlx-guard")
+    ap.add_argument("--max-workers", type=positive_int, default=None)
+    ap.add_argument("--finalize", action="store_true", help="SSIM + contact sheets + report entry")
+    ap.add_argument(
+        "--smoke", action="store_true", help="2 steps at 256x256 into tests/_artifacts/comparison_smoke"
+    )
+    args = ap.parse_args()
+    if args.worker:
+        _worker_main(args)
+        return
+    if args.probe_failed:
+        _probe_failed(args.only, fallback=args.fallback, reason=args.reason)
+        return
+    if args.probe:
+        raise SystemExit(_probe(args.only, fallback=args.fallback))
+    if args.finalize:
+        _finalize(args.only)
+        return
+    budget = args.max_workers if args.max_workers is not None else -1
+    raise SystemExit(_orchestrate(args.only, budget=budget, smoke=args.smoke))
+
+
+if __name__ == "__main__":
+    main()

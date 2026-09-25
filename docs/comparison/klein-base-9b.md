@@ -30,13 +30,13 @@
 | Steps computed / skipped | 50 / 0 | 39 / 11 |
 | Skip pattern (S = skipped) | — | `CCCSCSCSCCCCSCCSCCSCSCCCCSCCSCCSCCSCCCCCCCCCCCCCCC` |
 | Threshold (rel_l1) | — | 0.17 |
-| MLX peak: load / encode / generation | 4.7 GiB / 5.7 GiB / 8.5 GiB | 4.7 GiB / 5.7 GiB / 8.7 GiB |
+| MLX peak: encoders loaded / prompt encoded + model loaded / generation | 4.7 GiB / 5.7 GiB / 8.5 GiB | 4.7 GiB / 5.7 GiB / 8.7 GiB |
 | MLX active + cache, peak | 9.7 GiB | 9.6 GiB |
 | Process footprint (macOS), peak | 11.1 GiB | 10.8 GiB |
 
 Speedup on this run: 1.27× wall clock, 1.27× with preview decoding left out, 1.28× per step after the first. SSIM of B against A: 0.860, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q4, 768×1024, seed 42, text encoder freed once the prompt is encoded. Checkpoint `black-forest-labs/FLUX.2-klein-base-9B`; preview decoder `taef2`. mlx-teacache 0.11.1 with this branch's changes (commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_klein_base_9b.json).
+Recipe: 50 steps, guidance 4.0, q4, 768×1024, seed 42, text encoder freed once the prompt is encoded. Checkpoint `black-forest-labs/FLUX.2-klein-base-9B`; preview decoder `taef2`. mlx-teacache 0.11.1 (harness at commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_klein_base_9b.json).
 <!-- COMPARISON:klein-base-9b:details END -->
 
 ### Notes

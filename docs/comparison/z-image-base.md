@@ -30,13 +30,13 @@
 | Steps computed / skipped | 50 / 0 | 34 / 16 |
 | Skip pattern (S = skipped) | — | `CCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCC` |
 | Threshold (rel_l1) | — | 0.12 |
-| MLX peak: load / encode / generation | 4.5 GiB / 10.4 GiB / 13.2 GiB | 4.5 GiB / 10.4 GiB / 13.5 GiB |
+| MLX peak: encoders loaded / prompt encoded + model loaded / generation | 4.5 GiB / 10.4 GiB / 13.2 GiB | 4.5 GiB / 10.4 GiB / 13.5 GiB |
 | MLX active + cache, peak | 14.1 GiB | 14.3 GiB |
 | Process footprint (macOS), peak | 15.8 GiB | 15.4 GiB |
 
 Speedup on this run: 1.39× wall clock, 1.40× with preview decoding left out, 1.41× per step after the first. SSIM of B against A: 0.934, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q8, 640×896, seed 42. Checkpoint `Tongyi-MAI/Z-Image`; preview decoder `zimage`. mlx-teacache 0.11.1 with this branch's changes (commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_z_image.json).
+Recipe: 50 steps, guidance 4.0, q8, 640×896, seed 42. Checkpoint `Tongyi-MAI/Z-Image`; preview decoder `zimage`. mlx-teacache 0.11.1 (harness at commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_z_image.json).
 <!-- COMPARISON:z-image-base:details END -->
 
 ### Notes

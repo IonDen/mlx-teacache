@@ -13,6 +13,7 @@
       "width": 768,
       "height": 1024,
       "free_encoders": false,
+      "a_compiled_predict": false,
       "prompt_sha256": "18b6b14a31c6808afb26f20b0c828c4262dccb78af8e28a1aa38bd696938284e",
       "a": {
         "load_seconds": 7.729345250001643,
@@ -233,7 +234,7 @@
       "speedup_preview_subtracted": 1.251039903578982,
       "ssim": 0.8426277130916394,
       "provenance": {
-        "generated_at": "2026-09-25T10:06Z",
+        "generated_at": "2026-09-25T13:47Z",
         "git_sha_a": "bcaac6f",
         "git_sha_b": "bcaac6f",
         "mlx_teacache_version": "0.11.1",
@@ -260,6 +261,7 @@
       "width": 768,
       "height": 1024,
       "free_encoders": false,
+      "a_compiled_predict": false,
       "prompt_sha256": "18b6b14a31c6808afb26f20b0c828c4262dccb78af8e28a1aa38bd696938284e",
       "a": {
         "load_seconds": 7.619504000002053,
@@ -495,7 +497,7 @@
       "speedup_preview_subtracted": 1.6393535729073248,
       "ssim": 0.8748948901916039,
       "provenance": {
-        "generated_at": "2026-09-25T10:06Z",
+        "generated_at": "2026-09-25T13:47Z",
         "git_sha_a": "bcaac6f",
         "git_sha_b": "bcaac6f",
         "mlx_teacache_version": "0.11.1",
@@ -522,6 +524,7 @@
       "width": 768,
       "height": 1024,
       "free_encoders": false,
+      "a_compiled_predict": true,
       "prompt_sha256": "18b6b14a31c6808afb26f20b0c828c4262dccb78af8e28a1aa38bd696938284e",
       "a": {
         "load_seconds": 5.030857374949846,
@@ -867,7 +870,7 @@
       "speedup_preview_subtracted": 1.2004613079344617,
       "ssim": 0.9449436291147624,
       "provenance": {
-        "generated_at": "2026-09-25T10:06Z",
+        "generated_at": "2026-09-25T13:47Z",
         "git_sha_a": "bcaac6f",
         "git_sha_b": "bcaac6f",
         "mlx_teacache_version": "0.11.1",
@@ -894,6 +897,7 @@
       "width": 640,
       "height": 896,
       "free_encoders": false,
+      "a_compiled_predict": true,
       "prompt_sha256": "18b6b14a31c6808afb26f20b0c828c4262dccb78af8e28a1aa38bd696938284e",
       "a": {
         "load_seconds": 7.031987834023312,
@@ -1239,7 +1243,7 @@
       "speedup_preview_subtracted": 1.3992863974211198,
       "ssim": 0.9341075531273857,
       "provenance": {
-        "generated_at": "2026-09-25T10:06Z",
+        "generated_at": "2026-09-25T13:47Z",
         "git_sha_a": "bcaac6f",
         "git_sha_b": "bcaac6f",
         "mlx_teacache_version": "0.11.1",
@@ -1266,6 +1270,7 @@
       "width": 768,
       "height": 1024,
       "free_encoders": true,
+      "a_compiled_predict": true,
       "prompt_sha256": "18b6b14a31c6808afb26f20b0c828c4262dccb78af8e28a1aa38bd696938284e",
       "a": {
         "load_seconds": 8.805733376007993,
@@ -1615,7 +1620,7 @@
       "speedup_preview_subtracted": 1.2673068495429118,
       "ssim": 0.860422898155563,
       "provenance": {
-        "generated_at": "2026-09-25T11:11Z",
+        "generated_at": "2026-09-25T13:47Z",
         "git_sha_a": "bcaac6f",
         "git_sha_b": "bcaac6f",
         "mlx_teacache_version": "0.11.1",
@@ -1642,6 +1647,7 @@
       "width": 672,
       "height": 896,
       "free_encoders": true,
+      "a_compiled_predict": false,
       "prompt_sha256": "8a34f963d5aecaa35b428137e9b33546f0864f0b9f6069ec074def5902f89db9",
       "a": {
         "load_seconds": 10.976350167009514,
@@ -1991,7 +1997,7 @@
       "speedup_preview_subtracted": 2.0983509586342333,
       "ssim": 0.9156558214117997,
       "provenance": {
-        "generated_at": "2026-09-25T12:39Z",
+        "generated_at": "2026-09-25T13:47Z",
         "git_sha_a": "8c3fff5",
         "git_sha_b": "8c3fff5",
         "mlx_teacache_version": "0.11.2.dev14+gbcaac6f1c.d20260925",
@@ -2007,16 +2013,16 @@
       }
     }
   },
-  "generated_at": "2026-09-25T12:39Z",
+  "generated_at": "2026-09-25T13:47Z",
   "prompt": "A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused, joyful determination: flushed cheeks, bright eyes, a light sheen of sweat on her forehead and temples. She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, natural skin texture, sharp focus on her face.",
   "qwen_prompt_suffix": ", Ultra HD, 4K, cinematic composition.",
   "seed": 42,
   "protocol": "one cold generation per condition in its own process; weights and prompt embeddings evaluated before the clock; taef preview decoded every step",
-  "mflux_compiles_predict": true,
   "hardware": {
     "chip": "Apple M1 Max",
     "ram_gb": 32,
     "os": "macOS 27.0",
     "python": "3.12.12"
-  }
+  },
+  "mflux_compiles_on_this_chip": true
 }

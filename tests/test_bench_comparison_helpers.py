@@ -216,6 +216,26 @@ def test_retire_chunk_moves_an_existing_chunk_and_returns_none_when_absent(tmp_p
     assert bc.retire_chunk(path, trash=trash, tag="t2") is None
 
 
+def test_now_tag_carries_microseconds_so_two_retires_in_one_second_never_collide() -> None:
+    """Bug: two chunks retired within the same wall-clock second (a fast retry loop, or the aborted-marker
+    retire landing in the same second as the chunk retire) get identical tags and one Trash destination
+    silently overwrites the other."""
+    import datetime
+
+    class _FrozenNow(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return cls(2026, 9, 25, 10, 0, 0, 123456)
+
+    real_datetime = bc.datetime
+    bc.datetime = _FrozenNow
+    try:
+        tag = bc._now_tag()
+    finally:
+        bc.datetime = real_datetime
+    assert tag == "2026-09-25-100000-123456"
+
+
 def test_max_workers_must_be_positive() -> None:
     """Bug: --max-workers 0 makes every invocation exit 3 and run-units re-invokes forever."""
     import argparse
@@ -263,7 +283,22 @@ def test_probe_record_from_worker_maps_phase_peaks_and_footprint(tmp_path: Path)
     rec = bc.probe_record_from_worker(r, result, working_set_bytes=24 * GIB, versions=V)
     assert rec["pass"] is False  # load-only overflow: 23 + 2 (cache_gb) >= 24 GiB working set
     assert rec["active_peak_bytes"] == 23 * GIB
+    assert rec["peak_footprint_bytes"] == 20 * GIB
     assert rec["memory"] == result["memory"]
+
+
+def test_probe_record_from_worker_passes_a_measurement_within_every_budget(tmp_path: Path) -> None:
+    """Bug: a genuinely-fitting measurement is still failed -- e.g. the footprint or phase-peak gate is
+    inverted, so nothing can ever pass."""
+    r = cr.recipe_for("klein-base-9b")  # cache_gb=2.0, working_set 24 GiB below
+    result = {
+        "mlx_peak_load_bytes": 15 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": 12 * GIB,
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB, "phases": {}},
+    }
+    rec = bc.probe_record_from_worker(r, result, working_set_bytes=24 * GIB, versions=V)
+    assert rec["pass"] is True
 
 
 def test_probe_record_from_worker_treats_an_aborted_payload_as_a_failing_measurement() -> None:
@@ -275,6 +310,62 @@ def test_probe_record_from_worker_treats_an_aborted_payload_as_a_failing_measure
     )
     assert rec["pass"] is False
     assert rec["aborted"] == "active-memory watchdog"
+
+
+def test_merge_probe_results_takes_the_worse_reading_per_phase_and_footprint() -> None:
+    """Bug: B holds cached TeaCache residuals on top of everything A holds, so a probe judged on A alone
+    misses the +0.5-0.8 GiB B actually measures; merging must keep the worse side per field."""
+    a = {
+        "mlx_peak_load_bytes": 23 * GIB,
+        "mlx_peak_encode_bytes": 5 * GIB,
+        "mlx_peak_generation_bytes": 6 * GIB,
+        "memory": {"min_host_free_pct": 45.0, "peak_footprint_bytes": 18 * GIB},
+    }
+    b = {
+        "mlx_peak_load_bytes": 10 * GIB,
+        "mlx_peak_encode_bytes": 5 * GIB,
+        "mlx_peak_generation_bytes": 20 * GIB,  # B's cached residual makes the generation peak worse
+        "memory": {"min_host_free_pct": 30.0, "peak_footprint_bytes": 22 * GIB},
+    }
+    merged = bc.merge_probe_results(a, b)
+    assert merged["mlx_peak_load_bytes"] == 23 * GIB  # A was worse here
+    assert merged["mlx_peak_generation_bytes"] == 20 * GIB  # B was worse here
+    assert merged["memory"]["peak_footprint_bytes"] == 22 * GIB
+    assert merged["memory"]["min_host_free_pct"] == 30.0  # the lower (worse) of the two
+
+
+def test_merge_probe_results_propagates_an_abort_from_either_side() -> None:
+    """Bug: B aborting mid-probe is swallowed because the merge only ever looks at A's payload."""
+    a_ok = {
+        "mlx_peak_load_bytes": 1,
+        "mlx_peak_encode_bytes": 1,
+        "mlx_peak_generation_bytes": 1,
+        "memory": {"min_host_free_pct": 50.0, "peak_footprint_bytes": 1},
+    }
+    b_aborted = {"aborted": "active-memory watchdog"}
+    assert bc.merge_probe_results(a_ok, b_aborted) == b_aborted
+    assert bc.merge_probe_results(b_aborted, a_ok) == b_aborted
+
+
+def test_merged_probe_result_can_fail_a_probe_that_condition_a_alone_would_pass() -> None:
+    """Bug: the probe wiring still judges on A alone even though a merge helper exists -- this pins the
+    end-to-end shape (merge_probe_results feeding probe_record_from_worker) the K ruling requires."""
+    r = cr.recipe_for("klein-base-9b")
+    a = {
+        "mlx_peak_load_bytes": 15 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": 12 * GIB,
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB},
+    }
+    b = {
+        "mlx_peak_load_bytes": 15 * GIB,
+        "mlx_peak_encode_bytes": 10 * GIB,
+        "mlx_peak_generation_bytes": 23 * GIB,  # B's residual tips this over the 24 GiB working set
+        "memory": {"min_host_free_pct": 40.0, "peak_footprint_bytes": 20 * GIB},
+    }
+    rec = bc.probe_record_from_worker(r, bc.merge_probe_results(a, b), working_set_bytes=24 * GIB, versions=V)
+    assert rec["pass"] is False
+    assert rec["active_peak_bytes"] == 23 * GIB
 
 
 def _fake_versions() -> dict[str, str]:
@@ -340,6 +431,27 @@ def test_orchestrate_records_an_abort_and_persists_no_chunk(
     assert result == 4
     assert bc.chunk_path(chunks, "flux1-dev", "a").with_suffix(".aborted.json").exists()
     assert not bc.chunk_path(chunks, "flux1-dev", "a").exists()
+
+
+def test_orchestrate_retires_a_stale_aborted_marker_before_respawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a stale <cond>.aborted.json from a previous killed run survives a successful retry, so anything
+    globbing for abort artifacts (the heavy-runs ABORT_GLOB) still sees this run as aborted."""
+    monkeypatch.setattr(bc, "_versions", _fake_versions)
+    chunks, raw, trash = tmp_path / "chunks", tmp_path / "raw", tmp_path / "trash"
+    stale = bc.chunk_path(chunks, "flux1-dev", "a").with_suffix(".aborted.json")
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}")
+    spawn = _fake_spawn_writes_chunk(raw)
+
+    result = bc._orchestrate(
+        "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+    )
+
+    assert result == 0
+    assert not stale.exists()
+    assert any(trash.iterdir())
 
 
 def test_orchestrate_refuses_a_mismatched_stamp_and_persists_nothing(

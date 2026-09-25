@@ -23,6 +23,26 @@ def frame_paths(frames_dir: Path) -> list[Path]:
     return [p for _, p in sorted(found)]
 
 
+_EXPORTED_STEMS: tuple[str, ...] = ("a", "b", "steps-a", "steps-b")
+
+
+def export_jpgs(raw_dir: Path, out_dir: Path, *, quality: int = 90) -> list[Path]:
+    """Convert the four lossless PNGs a finalized run leaves in ``raw_dir`` (the two final frames and the
+    two contact sheets) into JPGs at ``out_dir``, the tree COMPARISON.md and the per-model pages link. The
+    pipeline used to write no JPG at all, so every page image link 404'd until someone ran an image
+    optimiser by hand against raw PNGs it never regenerated from."""
+    from PIL import Image
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for stem in _EXPORTED_STEMS:
+        dest = out_dir / f"{stem}.jpg"
+        with Image.open(raw_dir / f"{stem}.png") as img:
+            img.convert("RGB").save(dest, "JPEG", quality=quality)
+        written.append(dest)
+    return written
+
+
 def build_contact_sheet(
     frames: Sequence[Path], kinds: Sequence[str], *, cols: int = 10, thumb_width: int = THUMB_WIDTH
 ) -> Any:

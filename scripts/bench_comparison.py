@@ -5,6 +5,7 @@ Run from the py3.12 scratch venv (mflux 0.20):
     python scripts/bench_comparison.py --probe --only klein-base-9b          # memory probe (writes no chunk)
     python scripts/bench_comparison.py --only flux1-dev --max-workers 1       # one worker = one condition
     python scripts/bench_comparison.py --only flux1-dev --finalize            # SSIM + contact sheets + report
+    python scripts/bench_comparison.py --only flux1-dev --finalize --export-jpg  # also writes the showcase JPGs
     python scripts/bench_comparison.py --only flux1-dev --smoke               # 4 steps at 256x256, throwaway
 
 One worker subprocess per (slug, condition), one generation each. Each worker loads the model in stages and evaluates
@@ -245,7 +246,9 @@ def positive_int(text: str) -> int:
 
 
 def _now_tag() -> str:
-    return datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    """Second resolution alone lets two retires in the same run (a chunk and its stale .aborted.json
+    marker, or two fast test retries) collide on one Trash destination; microseconds make every tag unique."""
+    return datetime.now().strftime("%Y-%m-%d-%H%M%S-%f")
 
 
 def _versions() -> dict[str, str]:
@@ -503,6 +506,30 @@ def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[
     return payload
 
 
+def merge_probe_results(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Merge condition A and B's raw probe measurements into one worst-case reading.
+
+    A 3-step probe of condition A alone never sees B's cached TeaCache residuals, which measurably add
+    0.5-0.8 GiB on top of everything A holds. So the probe records the worse side per field -- the higher
+    peak, the higher footprint, the lower host-free floor -- and an abort on either side fails the whole
+    probe, the same as an A-only abort always has."""
+    if "aborted" in a:
+        return a
+    if "aborted" in b:
+        return b
+    return {
+        "mlx_peak_load_bytes": max(a["mlx_peak_load_bytes"], b["mlx_peak_load_bytes"]),
+        "mlx_peak_encode_bytes": max(a["mlx_peak_encode_bytes"], b["mlx_peak_encode_bytes"]),
+        "mlx_peak_generation_bytes": max(a["mlx_peak_generation_bytes"], b["mlx_peak_generation_bytes"]),
+        "memory": {
+            "peak_footprint_bytes": max(
+                a["memory"]["peak_footprint_bytes"], b["memory"]["peak_footprint_bytes"]
+            ),
+            "min_host_free_pct": min(a["memory"]["min_host_free_pct"], b["memory"]["min_host_free_pct"]),
+        },
+    }
+
+
 def probe_record_from_worker(
     recipe: Recipe, result: dict[str, Any], *, working_set_bytes: int, versions: dict[str, str]
 ) -> dict[str, Any]:
@@ -537,6 +564,9 @@ def probe_record_from_worker(
 
 
 def _probe(slug: str, *, fallback: bool) -> int:
+    """3-step probe of BOTH conditions: B holds cached TeaCache residuals on top of everything A holds
+    (+0.5-0.8 GiB measured), so judging the probe on A alone misses B's worse memory. The record gates on
+    whichever condition peaked higher (``merge_probe_results``); an abort on either side fails it."""
     import mlx.core as mx
     from _comparison_recipes import WORKING_SET_BYTES_DEFAULT, recipe_for, with_resolution
 
@@ -545,8 +575,10 @@ def _probe(slug: str, *, fallback: bool) -> int:
         raise SystemExit(f"{slug} has no fallback and needs no probe")
     recipe = with_resolution(base, *base.fallback) if fallback else base
     working_set = int(mx.device_info().get("max_recommended_working_set_size", WORKING_SET_BYTES_DEFAULT))
-    result = _spawn(recipe, "a", probe=True, smoke=False)
-    record = probe_record_from_worker(recipe, result, working_set_bytes=working_set, versions=_versions())
+    result_a = _spawn(recipe, "a", probe=True, smoke=False)
+    result_b = _spawn(recipe, "b", probe=True, smoke=False)
+    merged = merge_probe_results(result_a, result_b)
+    record = probe_record_from_worker(recipe, merged, working_set_bytes=working_set, versions=_versions())
     _write_probe(record)
     print(f"probe {slug} {recipe.width}x{recipe.height}: pass={record['pass']}", flush=True)
     return 0  # a failed probe is a measurement, not a failure; resolve_resolution acts on it
@@ -606,6 +638,7 @@ def _orchestrate(
     for condition in plan_conditions(chunks, raw_root, slug, recipe.steps, expected, budget):
         path = chunk_path(chunks, slug, condition)
         retire_chunk(path, trash=trash_dir, tag=_now_tag())
+        retire_chunk(path.with_suffix(".aborted.json"), trash=trash_dir, tag=_now_tag())
         result = spawn_fn(recipe, condition, probe=False, smoke=smoke)
         if "aborted" in result:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -624,11 +657,15 @@ def _orchestrate(
     return 3 if remaining else 0
 
 
-def _finalize(slug: str) -> None:
-    """Both chunks done → SSIM on the raw PNGs, contact sheets, report entry, render check."""
+def _finalize(slug: str, *, export_jpg: bool = False) -> None:
+    """Both chunks done → SSIM on the raw PNGs, contact sheets, report entry, render check.
+
+    ``export_jpg`` additionally converts the four raw PNGs to the JPGs COMPARISON.md and the per-model
+    pages actually link — off by default so a routine re-finalize (step L) does not touch the committed,
+    already-optimised JPGs; pass it only when regenerating the showcase images themselves."""
     import numpy as np
     from _comparison_recipes import recipe_stamp
-    from _comparison_sheet import build_contact_sheet
+    from _comparison_sheet import build_contact_sheet, export_jpgs
     from PIL import Image
     from skimage.metrics import structural_similarity
 
@@ -647,6 +684,8 @@ def _finalize(slug: str) -> None:
         build_contact_sheet(frame_paths(frames_dir_for(RAW_ROOT, slug, cond)), kinds).save(
             raw / f"steps-{cond}.png"
         )
+    if export_jpg:
+        export_jpgs(raw, REPO / "_artifacts" / "comparison" / slug)
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     provenance = {
         "generated_at": generated_at,
@@ -723,6 +762,11 @@ def main() -> None:
     ap.add_argument("--max-workers", type=positive_int, default=None)
     ap.add_argument("--finalize", action="store_true", help="SSIM + contact sheets + report entry")
     ap.add_argument(
+        "--export-jpg",
+        action="store_true",
+        help="with --finalize: also write the showcase JPGs to _artifacts/comparison/<slug>/",
+    )
+    ap.add_argument(
         "--smoke", action="store_true", help="4 steps at 256x256 into tests/_artifacts/comparison_smoke"
     )
     args = ap.parse_args()
@@ -735,7 +779,7 @@ def main() -> None:
     if args.probe:
         raise SystemExit(_probe(args.only, fallback=args.fallback))
     if args.finalize:
-        _finalize(args.only)
+        _finalize(args.only, export_jpg=args.export_jpg)
         return
     budget = args.max_workers if args.max_workers is not None else -1
     raise SystemExit(_orchestrate(args.only, budget=budget, smoke=args.smoke))

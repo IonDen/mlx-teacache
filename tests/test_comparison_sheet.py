@@ -92,3 +92,25 @@ def test_unknown_step_kind_raises(tmp_path: Path) -> None:
     frames = _frames(tmp_path, 2)
     with pytest.raises(ValueError, match="skiped"):
         sh.build_contact_sheet(frames, ["computed", "skiped"], cols=2, thumb_width=48)
+
+
+def test_export_jpgs_converts_all_four_frames_into_a_fresh_out_dir(tmp_path: Path) -> None:
+    """Bug: a frame is skipped (COMPARISON.md links a JPG the pipeline never wrote), the wrong stem is
+    used, or out_dir isn't created for a first run."""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for stem in ("a", "b", "steps-a", "steps-b"):
+        Image.new("RGB", (16, 20), (10, 20, 30)).save(raw / f"{stem}.png")
+    out = tmp_path / "out" / "nested"  # does not exist yet
+
+    written = sh.export_jpgs(raw, out, quality=90)
+
+    assert out.is_dir()
+    assert {p.name for p in written} == {"a.jpg", "b.jpg", "steps-a.jpg", "steps-b.jpg"}
+    for path in written:
+        assert path.parent == out
+        with open(path, "rb") as f:
+            assert f.read(3) == b"\xff\xd8\xff"  # JPEG SOI + APP0/APP1 marker start
+        with Image.open(path) as jpg:
+            assert jpg.format == "JPEG"
+            assert jpg.size == (16, 20)  # same size as the source PNG

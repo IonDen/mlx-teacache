@@ -105,6 +105,8 @@ def test_probe_record_uses_the_largest_phase_peak() -> None:
         min_host_free_pct=40.0,
         working_set_bytes=24 * GIB,
         versions=V,
+        peak_footprint_bytes=20
+        * GIB,  # comfortably under the footprint gate: only the peak overflow fails this
     )
     assert rec["pass"] is False and rec["active_peak_bytes"] == 23 * GIB
     assert rec["width"] == 768 and rec["stamp"] == cr.recipe_stamp(r, versions=V)
@@ -114,6 +116,8 @@ def test_probe_record_fails_when_aborted_or_host_never_sampled() -> None:
     """Bug: an aborted probe or a dead sampler (None) counts as a pass."""
     r = cr.recipe_for("klein-base-9b")
     peaks = {"load": 5 * GIB, "encode": 5 * GIB, "generation": 5 * GIB}
+    # Same inputs pass with aborted=None, so the two assertions below are isolating the abort/host-free
+    # gates, not accidentally passing because the measurement itself would have failed anyway.
     assert (
         cr.probe_record(
             r,
@@ -121,14 +125,31 @@ def test_probe_record_fails_when_aborted_or_host_never_sampled() -> None:
             min_host_free_pct=60.0,
             working_set_bytes=24 * GIB,
             versions=V,
+            peak_footprint_bytes=20 * GIB,
+        )["pass"]
+        is True
+    )
+    assert (
+        cr.probe_record(
+            r,
+            phase_peaks=peaks,
+            min_host_free_pct=60.0,
+            working_set_bytes=24 * GIB,
+            versions=V,
+            peak_footprint_bytes=20 * GIB,
             aborted="watchdog",
         )["pass"]
         is False
     )
     assert (
-        cr.probe_record(r, phase_peaks=peaks, min_host_free_pct=None, working_set_bytes=24 * GIB, versions=V)[
-            "pass"
-        ]
+        cr.probe_record(
+            r,
+            phase_peaks=peaks,
+            min_host_free_pct=None,
+            working_set_bytes=24 * GIB,
+            versions=V,
+            peak_footprint_bytes=20 * GIB,
+        )["pass"]
         is False
     )
 

@@ -107,6 +107,67 @@ def test_details_rows_are_per_condition() -> None:
     assert "0.20.0" in d
 
 
+def test_details_footer_has_a_blank_line_before_the_speedup_paragraph() -> None:
+    """Bug: the footer starts with a single "\\n", so on GitHub the "Speedup on this run: ..." paragraph
+    renders as an extra one-cell row of the table above it instead of its own paragraph."""
+    d = gen.render_blocks(_report())["flux1-dev:details"]
+    assert "|\n\nSpeedup on this run" in d
+
+
+def test_library_line_bases_a_dev_version_on_the_previous_patch_release() -> None:
+    """Bug: a stale editable-install dev version string (e.g. "0.11.2.dev14+g...", which names the *next*,
+    unreleased patch) is rendered onto the page verbatim instead of being normalized to the last real release."""
+    line = gen.library_line(
+        {
+            "mlx_teacache_version": "0.11.2.dev14+gbcaac6f1c.d20260925",
+            "git_sha_a": "aaa0000",
+            "git_sha_b": "bbb1111",
+        }
+    )
+    assert line == "mlx-teacache 0.11.1 with this branch's changes (commit `bbb1111`)"
+
+
+def test_library_line_keeps_a_release_version_and_falls_back_to_git_sha_a() -> None:
+    """Bug: a non-dev recorded version gets decremented too (it shouldn't), or the sha falls back to
+    git_sha_a only when git_sha_b is present rather than when it's genuinely missing."""
+    line = gen.library_line({"mlx_teacache_version": "0.11.1", "git_sha_a": "ccc2222"})
+    assert line == "mlx-teacache 0.11.1 with this branch's changes (commit `ccc2222`)"
+
+
+def test_details_footer_never_renders_a_dev_version_string() -> None:
+    """Bug: the raw provenance mlx_teacache_version -- which can be a ".dev" editable-install string --
+    leaks straight onto the page instead of going through library_line()."""
+    report = _report()
+    report["variants"]["flux1-dev"]["provenance"]["mlx_teacache_version"] = (
+        "0.11.2.dev14+gbcaac6f1c.d20260925"
+    )
+    report["variants"]["flux1-dev"]["provenance"]["git_sha_b"] = "8c3fff5"
+    d = gen.render_blocks(report)["flux1-dev:details"]
+    assert ".dev" not in d
+    assert "mlx-teacache 0.11.1 with this branch's changes (commit `8c3fff5`)" in d
+
+
+def test_details_footer_says_text_encoder_freed_singular() -> None:
+    """Bug: the footer says "text encoders freed" (plural) even though every variant that frees one
+    frees exactly one (Klein 9B and Qwen each have a single `text_encoder` attribute, not separate
+    clip/t5 encoders)."""
+    report = _report()
+    report["variants"]["flux1-dev"]["free_encoders"] = True
+    d = gen.render_blocks(report)["flux1-dev:details"]
+    assert "text encoder freed once the prompt is encoded" in d
+    assert "text encoders freed" not in d
+
+
+def test_details_footer_reads_the_seed_from_the_report() -> None:
+    """Bug: the footer hard-codes "seed 42" instead of rendering report["seed"], so a page generated from
+    a report recorded under a different seed would still claim seed 42."""
+    report = _report()
+    report["seed"] = 7
+    d = gen.render_blocks(report)["flux1-dev:details"]
+    assert "seed 7" in d
+    assert "seed 42" not in d
+
+
 def test_subpage_images_are_relative_to_docs_comparison() -> None:
     """Bug: sub-page image links resolve from the repo root and break on GitHub."""
     assert (

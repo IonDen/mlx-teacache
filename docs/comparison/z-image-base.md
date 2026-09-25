@@ -33,16 +33,17 @@
 | MLX peak: load / encode / generation | 4.5 GiB / 10.4 GiB / 13.2 GiB | 4.5 GiB / 10.4 GiB / 13.5 GiB |
 | MLX active + cache, peak | 14.1 GiB | 14.3 GiB |
 | Process footprint (macOS), peak | 15.8 GiB | 15.4 GiB |
+
 Speedup on this run: 1.39× wall clock, 1.40× with preview decoding left out, 1.41× per step after the first. SSIM of B against A: 0.934, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q8, 640×896, seed 42. Checkpoint `Tongyi-MAI/Z-Image`; preview decoder `zimage`. mlx-teacache 0.11.1, mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_z_image.json).
+Recipe: 50 steps, guidance 4.0, q8, 640×896, seed 42. Checkpoint `Tongyi-MAI/Z-Image`; preview decoder `zimage`. mlx-teacache 0.11.1 with this branch's changes (commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_z_image.json).
 <!-- COMPARISON:z-image-base:details END -->
 
 ### Notes
 
-Footnote ⁶ measured this variant's 1.31× multi-run speedup as entirely step-skipping: the wrapper timed at vanilla speed with the gate turned off, so avoiding a compiled step buys nothing here on wall clock. The peak-memory drop below is a separate effect of running eagerly instead of compiled, and it shows up whether or not the gate is on.
+Footnote ⁶ measured this variant's 1.31× multi-run speedup as entirely step-skipping: the wrapper timed at vanilla speed with the gate turned off, so avoiding a compiled step buys nothing here on wall clock. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation, so A and B peak within about a gigabyte of each other in the table above (13.2 GiB vs 13.5 GiB).
 
-On this run the gate skips 16 of 50 steps, alternating through the middle of the schedule. The composition holds, but B adds a palm tree at the top left that isn't in A, and the net post shifts a little. Z-Image renders at 640×896 in 8-bit weights, its pinned recipe, so the images on this page are smaller than the other four models'.
+On this run the gate skips 16 of 50 steps, alternating through the middle of the schedule. The composition holds, but B adds a palm tree at the top left that isn't in A, and the net post shifts a little. Z-Image renders at 640×896 in 8-bit weights, its pinned recipe, so the images on this page are smaller than the other models'.
 
 ### Reproduce
 

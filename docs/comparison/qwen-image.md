@@ -35,9 +35,10 @@ This page loads the original `Qwen/Qwen-Image` checkpoint by its full name: from
 | MLX peak: load / encode / generation | 13.2 GiB / 13.4 GiB / 17.6 GiB | 13.2 GiB / 13.4 GiB / 17.6 GiB |
 | MLX active + cache, peak | 17.3 GiB | 17.9 GiB |
 | Process footprint (macOS), peak | 17.7 GiB | 18.2 GiB |
+
 Speedup on this run: 2.06× wall clock, 2.10× with preview decoding left out, 2.15× per step after the first. SSIM of B against A: 0.916, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q4, 672×896, seed 42, text encoders freed once the prompt is encoded. Checkpoint `Qwen/Qwen-Image`; preview decoder `qwen-image`. mlx-teacache 0.11.2.dev14+gbcaac6f1c.d20260925, mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_qwen_image.json).
+Recipe: 50 steps, guidance 4.0, q4, 672×896, seed 42, text encoder freed once the prompt is encoded. Checkpoint `Qwen/Qwen-Image`; preview decoder `qwen-image`. mlx-teacache 0.11.1 with this branch's changes (commit `8c3fff5`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_qwen_image.json).
 <!-- COMPARISON:qwen-image:details END -->
 
 ### Notes

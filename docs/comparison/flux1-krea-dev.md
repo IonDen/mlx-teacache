@@ -33,9 +33,10 @@
 | MLX peak: load / encode / generation | 3.3 GiB / 9.5 GiB / 15.4 GiB | 3.3 GiB / 9.5 GiB / 15.4 GiB |
 | MLX active + cache, peak | 16.5 GiB | 16.4 GiB |
 | Process footprint (macOS), peak | 17.1 GiB | 17.4 GiB |
+
 Speedup on this run: 1.62× wall clock, 1.64× with preview decoding left out, 1.68× per step after the first. SSIM of B against A: 0.875, measured on the lossless outputs.
 
-Recipe: 28 steps, guidance 4.5, q4, 768×1024, seed 42. Checkpoint `black-forest-labs/FLUX.1-Krea-dev`; preview decoder `taef1`. mlx-teacache 0.11.1, mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_krea_dev.json).
+Recipe: 28 steps, guidance 4.5, q4, 768×1024, seed 42. Checkpoint `black-forest-labs/FLUX.1-Krea-dev`; preview decoder `taef1`. mlx-teacache 0.11.1 with this branch's changes (commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_krea_dev.json).
 <!-- COMPARISON:flux1-krea-dev:details END -->
 
 ### Notes

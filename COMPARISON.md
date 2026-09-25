@@ -25,7 +25,7 @@ Seed 42 for every model. Qwen-Image appends its vendor's suggested suffix, `, Ul
 On this run: 1.25× faster (1.25× with preview decoding left out) · SSIM 0.84 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_flux1_dev.json) · [More details →](docs/comparison/flux1-dev.md)
 <!-- COMPARISON:flux1-dev:summary END -->
 
-The multi-run bench (footnote ¹) measured this variant's 1.57× speedup as all step-skipping. FLUX.1 has no compiled prediction step, so there's no compile effect to separate out.
+The multi-run bench ([footnote ¹](README.md#benchmarks)) measured this variant's 1.57× speedup as all step-skipping. FLUX.1 has no compiled prediction step, so there's no compile effect to separate out.
 
 ## FLUX.1 Krea [dev]
 
@@ -38,7 +38,7 @@ The multi-run bench (footnote ¹) measured this variant's 1.57× speedup as all 
 On this run: 1.62× faster (1.64× with preview decoding left out) · SSIM 0.87 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_krea_dev.json) · [More details →](docs/comparison/flux1-krea-dev.md)
 <!-- COMPARISON:flux1-krea-dev:summary END -->
 
-Footnote ⁸ credits nearly all of this variant's 1.62× multi-run speedup, about 1.57×, to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder is run-to-run noise.
+[Footnote ⁸](README.md#benchmarks) credits nearly all of this variant's 1.62× multi-run speedup, about 1.57×, to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder is run-to-run noise.
 
 ## FLUX.2 [klein] base 4B
 
@@ -51,7 +51,7 @@ Footnote ⁸ credits nearly all of this variant's 1.62× multi-run speedup, abou
 On this run: 1.20× faster (1.20× with preview decoding left out) · SSIM 0.94 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_4b.json) · [More details →](docs/comparison/klein-base-4b.md)
 <!-- COMPARISON:klein-base-4b:summary END -->
 
-At its matching 512² recipe, footnote ⁴ splits this variant's 1.22× multi-run speedup into 1.20× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead.
+At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this variant's 1.22× multi-run speedup into 1.20× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead.
 
 ## Z-Image
 
@@ -64,7 +64,7 @@ At its matching 512² recipe, footnote ⁴ splits this variant's 1.22× multi-ru
 On this run: 1.39× faster (1.40× with preview decoding left out) · SSIM 0.93 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_z_image.json) · [More details →](docs/comparison/z-image-base.md)
 <!-- COMPARISON:z-image-base:summary END -->
 
-Footnote ⁶ measured this variant's 1.31× multi-run speedup as entirely step-skipping: running with the gate off timed at vanilla speed. The peak-memory drop it also reports is a separate effect of running eagerly instead of compiled, not of the gate.
+[Footnote ⁶](README.md#benchmarks) measured this variant's 1.31× multi-run speedup as entirely step-skipping: running with the gate off timed at vanilla speed. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation starts, so A and B peak within about a gigabyte of each other here (13.2 GiB vs 13.5 GiB).
 
 ## FLUX.2 [klein] base 9B
 
@@ -77,7 +77,7 @@ Footnote ⁶ measured this variant's 1.31× multi-run speedup as entirely step-s
 On this run: 1.27× faster (1.27× with preview decoding left out) · SSIM 0.86 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_9b.json) · [More details →](docs/comparison/klein-base-9b.md)
 <!-- COMPARISON:klein-base-9b:summary END -->
 
-At its matching 512² recipe, footnote ⁵ splits this variant's 1.37× multi-run speedup into 1.34× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper's eager path is also behind the peak-memory drop from about 22 GB to 9.5 GB that footnote reports.
+At its matching 512² recipe, [footnote ⁵](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.34× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GB to 9.5 GB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (8.5 GiB vs 8.7 GiB).
 
 ## Qwen-Image
 
@@ -90,7 +90,7 @@ At its matching 512² recipe, footnote ⁵ splits this variant's 1.37× multi-ru
 On this run: 2.06× faster (2.10× with preview decoding left out) · SSIM 0.92 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_qwen_image.json) · [More details →](docs/comparison/qwen-image.md)
 <!-- COMPARISON:qwen-image:summary END -->
 
-Footnote ⁷ measured this variant's 2.68× multi-run speedup as step-skipping: mflux doesn't compile Qwen's prediction step, and the no-gate wrapper's 1.04× over vanilla sits inside the spread between vanilla reps, so there's no compile effect to separate out.
+[Footnote ⁷](README.md#benchmarks) measured this variant's 2.68× multi-run speedup as step-skipping: mflux doesn't compile Qwen's prediction step, and the no-gate wrapper's 1.04× over vanilla sits inside the spread between vanilla reps, so there's no compile effect to separate out.
 
 ## Distilled Klein vs Base Klein
 

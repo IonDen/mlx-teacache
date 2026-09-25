@@ -8,7 +8,7 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- COMPARISON.md is rebuilt: one tennis-at-sunset scene per non-distilled model, generated once with TeaCache off and once with it on, each pair backed by its own page of per-step previews and full generation details. The comparison report moves to `_artifacts/comparison/report.json` (schema 2); the earlier report stays where it was. The distilled-vs-base Klein study moves to its own page.
+- COMPARISON.md is rebuilt: one tennis-at-sunset scene per non-distilled model, generated once with TeaCache off and once with it on, each pair backed by its own page of per-step previews and full generation details. A new schema-2 report is written to `_artifacts/comparison/report.json`; the earlier report stays as it was. The old showcase images are removed, and `docs/comparison/` is left out of the sdist. The distilled-vs-base Klein study moves to its own page.
 - The Qwen-Image calibrated-checkpoint check is now a small shared function. No behavior change.
 
 ### Fixed

@@ -65,7 +65,24 @@ def _sheets(slug: str, v: dict[str, Any]) -> str:
     )
 
 
-def _details(slug: str, v: dict[str, Any]) -> str:
+def _release_base(version: str) -> str:
+    """The release a rendered page should credit. An editable-install dev version such as
+    "0.11.2.dev14+gbcaac6f1c.d20260925" names the *next*, unreleased patch, so the base to show is the
+    previous one (0.11.2.devN -> 0.11.1). A plain release version is shown as recorded."""
+    base = version.split(".dev")[0]
+    if base == version:
+        return version
+    major, minor, patch = (int(part) for part in base.split("."))
+    return f"{major}.{minor}.{patch - 1}"
+
+
+def library_line(provenance: dict[str, Any]) -> str:
+    version = _release_base(str(provenance.get("mlx_teacache_version", "")))
+    sha = provenance.get("git_sha_b") or provenance.get("git_sha_a")
+    return f"mlx-teacache {version} with this branch's changes (commit `{sha}`)"
+
+
+def _details(slug: str, v: dict[str, Any], seed: int) -> str:
     a, b, p = v["a"], v["b"], v["provenance"]
 
     def med(c: dict[str, Any], kind: str) -> str:
@@ -94,12 +111,12 @@ def _details(slug: str, v: dict[str, Any]) -> str:
         f"| {r} | {x} | {y} |" for r, x, y in rows
     ]
     footer = (
-        f"\nSpeedup on this run: {_x(v['speedup_wall'])} wall clock, {_x(v['speedup_preview_subtracted'])} with "
+        f"\n\nSpeedup on this run: {_x(v['speedup_wall'])} wall clock, {_x(v['speedup_preview_subtracted'])} with "
         f"preview decoding left out, {_x(v['speedup_steady'])} per step after the first. SSIM of B against A: "
         f"{v['ssim']:.3f}, measured on the lossless outputs.\n\nRecipe: {v['steps']} steps, guidance {v['guidance']}, "
-        f"q{v['quantize']}, {v['width']}×{v['height']}, seed 42"
-        f"{', text encoders freed once the prompt is encoded' if v['free_encoders'] else ''}. Checkpoint "
-        f"`{v['checkpoint']}`; preview decoder `{v['decoder']}`. mlx-teacache {p.get('mlx_teacache_version')}, "
+        f"q{v['quantize']}, {v['width']}×{v['height']}, seed {seed}"
+        f"{', text encoder freed once the prompt is encoded' if v['free_encoders'] else ''}. Checkpoint "
+        f"`{v['checkpoint']}`; preview decoder `{v['decoder']}`. {library_line(p)}, "
         f"mflux {p.get('version_mflux')}, MLX {p.get('version_mlx')}, mlx-taef {p.get('version_mlx_taef')}. "
         f"Multi-run measurement of this model: [bench report](../../{v['bench_report']})."
     )
@@ -113,10 +130,11 @@ def _machine(report: dict[str, Any]) -> str:
 
 def render_blocks(report: dict[str, Any]) -> dict[str, str]:
     blocks = {"machine": _machine(report)}
+    seed = report["seed"]
     for slug, v in report["variants"].items():
         blocks[f"{slug}:summary"] = _summary(slug, v)
         blocks[f"{slug}:sheets"] = _sheets(slug, v)
-        blocks[f"{slug}:details"] = _details(slug, v)
+        blocks[f"{slug}:details"] = _details(slug, v, seed)
     return blocks
 
 

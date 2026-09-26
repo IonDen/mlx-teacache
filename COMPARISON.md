@@ -12,7 +12,7 @@ Apple M1 Max, 32 GB unified memory, macOS 27.0, Python 3.12.12.
 
 Every model draws the same scene with seed 42. The exact prompt each one ran with, and its settings, are on that model's page. Qwen-Image adds its vendor's suggested suffix, `, Ultra HD, 4K, cinematic composition.`, to the prompt. Z-Image is the one model with its own wording: from the shared prompt it drew "flushed cheeks" and "a light sheen of sweat" as red patches and white specks on her face, and TeaCache made them worse. Its prompt asks for a soft warm glow instead, and a negative prompt names those defects.
 
-Four of the six models render at 768×1024: FLUX.1 [dev], FLUX.1 Krea [dev], FLUX.2 [klein] base 4B, and FLUX.2 [klein] base 9B. Z-Image renders at 864×1152 in 8-bit weights, about one megapixel. Qwen-Image renders at 672×896, the size its memory probe allowed.
+FLUX.1 [dev] and FLUX.1 Krea [dev] render at 768×1024. FLUX.2 [klein] base 4B and Z-Image render at 864×1152, about one megapixel, in 8-bit weights. FLUX.2 [klein] base 9B runs 8-bit too, but at 576×768: at 864×1152 its first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 the Mac's free memory fell below this page's 20 % safety floor. Qwen-Image renders at 672×896, the size its memory probe allowed.
 
 ## FLUX.1 [dev]
 
@@ -46,9 +46,9 @@ On this run: 1.62× faster (1.64× with preview decoding left out) · SSIM 0.87 
 |  | A: TeaCache off | B: TeaCache on |
 |---|---|---|
 | Image | ![A: TeaCache off](_artifacts/comparison/klein-base-4b/a.jpg) | ![B: TeaCache on](_artifacts/comparison/klein-base-4b/b.jpg) |
-| Generation | 477.5 s · peak 9.4 GiB | 398.8 s · peak 8.7 GiB · 9 of 50 steps skipped |
+| Generation | 612.6 s · peak 14.7 GiB | 483.9 s · peak 12.5 GiB · 11 of 50 steps skipped |
 
-On this run: 1.20× faster (1.20× with preview decoding left out) · SSIM 0.94 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_4b.json) · [More details →](docs/comparison/klein-base-4b.md)
+On this run: 1.27× faster (1.27× with preview decoding left out) · SSIM 0.94 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_4b.json) · [More details →](docs/comparison/klein-base-4b.md)
 <!-- COMPARISON:klein-base-4b:summary END -->
 
 At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this variant's 1.22× multi-run speedup into 1.20× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead.
@@ -72,12 +72,12 @@ On this run: 1.34× faster (1.34× with preview decoding left out) · SSIM 0.85 
 |  | A: TeaCache off | B: TeaCache on |
 |---|---|---|
 | Image | ![A: TeaCache off](_artifacts/comparison/klein-base-9b/a.jpg) | ![B: TeaCache on](_artifacts/comparison/klein-base-9b/b.jpg) |
-| Generation | 1025.6 s · peak 8.5 GiB | 810.5 s · peak 8.7 GiB · 11 of 50 steps skipped |
+| Generation | 612.9 s · peak 11.5 GiB | 461.3 s · peak 11.6 GiB · 13 of 50 steps skipped |
 
-On this run: 1.27× faster (1.27× with preview decoding left out) · SSIM 0.86 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_9b.json) · [More details →](docs/comparison/klein-base-9b.md)
+On this run: 1.33× faster (1.33× with preview decoding left out) · SSIM 0.95 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_9b.json) · [More details →](docs/comparison/klein-base-9b.md)
 <!-- COMPARISON:klein-base-9b:summary END -->
 
-At its matching 512² recipe, [footnote ⁵](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.34× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GB to 9.5 GB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (8.5 GiB vs 8.7 GiB).
+At its matching 512² recipe, [footnote ⁵](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.34× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GB to 9.5 GB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (11.5 GiB vs 11.6 GiB).
 
 ## Qwen-Image
 

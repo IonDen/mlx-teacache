@@ -760,6 +760,7 @@ def test_quality_probe_records_an_abort_and_returns_exit_4(
         quantize=None,
         prompt_file=None,
         negative_file=None,
+        rel_l1_thresh=None,
     )
     result = bc._quality_probe(args, run_worker=fake_run_worker)
 
@@ -789,6 +790,7 @@ def test_quality_probe_returns_zero_and_writes_no_abort_file_on_a_normal_result(
         quantize=None,
         prompt_file=None,
         negative_file=None,
+        rel_l1_thresh=None,
     )
     result = bc._quality_probe(args, run_worker=fake_run_worker)
 
@@ -820,6 +822,7 @@ def test_quality_probe_forwards_only_the_overrides_actually_given(
         quantize=None,
         prompt_file=None,
         negative_file=None,
+        rel_l1_thresh=None,
     )
     bc._quality_probe(args, run_worker=fake_run_worker)
 
@@ -841,6 +844,7 @@ def _qp_args(**kw: object) -> argparse.Namespace:
         quantize=None,
         prompt_file=None,
         negative_file=None,
+        rel_l1_thresh=None,
     )
     return argparse.Namespace(**{**base, **kw})
 
@@ -880,3 +884,28 @@ def test_quality_probe_b_abort_is_recorded_without_touching_as_abort_file(
         "aborted": "active-memory watchdog"
     }
     assert not (out_dir / "record.aborted.json").exists()
+
+
+def test_quality_probe_forwards_rel_l1_thresh_only_when_given() -> None:
+    """Bug: --rel-l1-thresh is dropped on the way to the worker (B runs at the default threshold while the
+    probe is named for a lower one), or a threshold the user never set is forwarded."""
+    seen: list[list[str]] = []
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen.append(cmd)
+        return {"name": "Z1"}
+
+    bc._quality_probe(_qp_args(condition="b", rel_l1_thresh=0.12), run_worker=fake_run_worker)
+    bc._quality_probe(_qp_args(condition="b", rel_l1_thresh=None), run_worker=fake_run_worker)
+
+    with_t, without_t = seen
+    assert with_t[with_t.index("--rel-l1-thresh") + 1] == "0.12"
+    assert "--rel-l1-thresh" not in without_t
+
+
+def test_rel_l1_thresh_flag_parses_as_a_float() -> None:
+    """Bug: --rel-l1-thresh is missing from the parser or parsed as a string."""
+    ns = bc._build_parser().parse_args(
+        ["--only", "klein-base-4b", "--quality-probe", "t", "--rel-l1-thresh", "0.1"]
+    )
+    assert ns.rel_l1_thresh == 0.1

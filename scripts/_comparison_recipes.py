@@ -64,6 +64,9 @@ class Recipe:
     cache_gb: float = 2.0
     prompt: str | None = None  # per-model override; replaces the shared PROMPT when set
     negative_prompt: str | None = None
+    rel_l1_thresh: float | None = (
+        None  # TeaCache threshold for B; None leaves the variant's default in charge
+    )
 
 
 RECIPES: tuple[Recipe, ...] = (
@@ -192,6 +195,7 @@ def apply_overrides(
     quantize: int | None = None,
     prompt: str | None = None,
     negative_prompt: str | None = None,
+    rel_l1_thresh: float | None = None,
 ) -> Recipe:
     """Replace only the given (non-None) fields; a quality probe's candidate settings over one recipe."""
     changes = {
@@ -201,6 +205,7 @@ def apply_overrides(
         "quantize": quantize,
         "prompt": prompt,
         "negative_prompt": negative_prompt,
+        "rel_l1_thresh": rel_l1_thresh,
     }
     given = {k: v for k, v in changes.items() if v is not None}
     return replace(recipe, **given) if given else recipe
@@ -230,7 +235,14 @@ def recipe_stamp(recipe: Recipe, *, versions: dict[str, str]) -> dict[str, objec
     }
     if recipe.negative_prompt:
         stamp["negative_prompt_sha256"] = prompt_sha256(recipe.negative_prompt)
+    if recipe.rel_l1_thresh is not None:
+        stamp["rel_l1_thresh"] = recipe.rel_l1_thresh
     return stamp
+
+
+def teacache_kwargs(recipe: Recipe) -> dict[str, float]:
+    """Keyword arguments for condition B's apply_teacache: the recipe's threshold override, if any."""
+    return {} if recipe.rel_l1_thresh is None else {"rel_l1_thresh": recipe.rel_l1_thresh}
 
 
 def probe_passes(

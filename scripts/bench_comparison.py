@@ -416,7 +416,7 @@ def _run_generation(
         precompute_prompt,
         release_text_encoders,
     )
-    from _comparison_recipes import SEED, prompt_for
+    from _comparison_recipes import SEED, prompt_for, teacache_kwargs
     from _comparison_steps import decision_kinds, register_stamped_preview, split_steps
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
@@ -477,7 +477,7 @@ def _run_generation(
 
             with warnings.catch_warnings():
                 warnings.simplefilter("error", TeaCacheUncalibratedCheckpointWarning)
-                handle = apply_teacache(flux)
+                handle = apply_teacache(flux, **teacache_kwargs(recipe))
 
         mx.clear_cache()  # so load leftovers do not sit in the generation window
         mx.reset_peak_memory()
@@ -616,6 +616,7 @@ def _quality_probe_worker(args: argparse.Namespace) -> None:
             "height": args.height,
             "guidance": args.guidance,
             "quantize": args.quantize,
+            "rel_l1_thresh": args.rel_l1_thresh,
             "prompt": _read_override_file(args.prompt_file, label="prompt") if args.prompt_file else None,
             "negative_prompt": (
                 _read_override_file(args.negative_file, label="negative") if args.negative_file else None
@@ -717,6 +718,7 @@ def _quality_probe(
         ("--height", args.height),
         ("--guidance", args.guidance),
         ("--quantize", args.quantize),
+        ("--rel-l1-thresh", args.rel_l1_thresh),
     ):
         if value is not None:
             cmd += [flag, str(value)]
@@ -1033,6 +1035,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=(3, 4, 5, 6, 8),
         default=None,
         help="with --quality-probe: override quantize bits",
+    )
+    ap.add_argument(
+        "--rel-l1-thresh",
+        type=float,
+        default=None,
+        help="with --quality-probe --condition b: TeaCache threshold instead of the variant default",
     )
     ap.add_argument("--prompt-file", type=Path, default=None, help="with --quality-probe: prompt text file")
     ap.add_argument(

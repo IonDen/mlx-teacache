@@ -329,3 +329,22 @@ def test_z_image_recipe_matches_the_approved_z1_quality_probe_exactly() -> None:
         "version_mlx_taef": "0.8.3",
         "negative_prompt_sha256": "e370ca56997ce475aa66d9063f56c40f1117019f68df51d02f9ac2e674e57343",
     }
+
+
+def test_rel_l1_thresh_override_is_stamped_only_when_set() -> None:
+    """Bug: a probe at a non-default TeaCache threshold stamps like a default-threshold run (so the two are
+    confused), or every existing chunk's stamp changes because the key is always emitted."""
+    r = cr.recipe_for("klein-base-4b")
+    assert r.rel_l1_thresh is None
+    assert "rel_l1_thresh" not in cr.recipe_stamp(r, versions=V)
+    lower = cr.apply_overrides(r, rel_l1_thresh=0.12)
+    assert lower.rel_l1_thresh == 0.12
+    assert cr.recipe_stamp(lower, versions=V)["rel_l1_thresh"] == 0.12
+
+
+def test_teacache_kwargs_pass_the_threshold_only_when_the_recipe_sets_one() -> None:
+    """Bug: B ignores a recipe's threshold override and runs at the variant default, or passes
+    rel_l1_thresh=None explicitly instead of leaving the library default in charge."""
+    r = cr.recipe_for("klein-base-4b")
+    assert cr.teacache_kwargs(r) == {}
+    assert cr.teacache_kwargs(cr.apply_overrides(r, rel_l1_thresh=0.1)) == {"rel_l1_thresh": 0.1}

@@ -10,9 +10,9 @@ Each pair comes from one cold generation per condition, run in its own process, 
 Apple M1 Max, 32 GB unified memory, macOS 27.0, Python 3.12.12.
 <!-- COMPARISON:machine END -->
 
-Every model draws the same scene with seed 42. The exact prompt each one ran with, and its settings, are on that model's page. Qwen-Image adds its vendor's suggested suffix, `, Ultra HD, 4K, cinematic composition.`, to the prompt.
+Every model draws the same scene with seed 42. The exact prompt each one ran with, and its settings, are on that model's page. Qwen-Image adds its vendor's suggested suffix, `, Ultra HD, 4K, cinematic composition.`, to the prompt. Z-Image is the one model with its own wording: from the shared prompt it drew "flushed cheeks" and "a light sheen of sweat" as red patches and white specks on her face, and TeaCache made them worse. Its prompt asks for a soft warm glow instead, and a negative prompt names those defects.
 
-Four of the six models render at 768×1024: FLUX.1 [dev], FLUX.1 Krea [dev], FLUX.2 [klein] base 4B, and FLUX.2 [klein] base 9B. Z-Image renders at 640×896, its pinned 8-bit recipe — 672×896 would pad the token sequence the gate reads. Qwen-Image renders at 672×896, the size its memory probe allowed.
+Four of the six models render at 768×1024: FLUX.1 [dev], FLUX.1 Krea [dev], FLUX.2 [klein] base 4B, and FLUX.2 [klein] base 9B. Z-Image renders at 864×1152 in 8-bit weights, about one megapixel. Qwen-Image renders at 672×896, the size its memory probe allowed.
 
 ## FLUX.1 [dev]
 
@@ -59,12 +59,12 @@ At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this v
 |  | A: TeaCache off | B: TeaCache on |
 |---|---|---|
 | Image | ![A: TeaCache off](_artifacts/comparison/z-image-base/a.jpg) | ![B: TeaCache on](_artifacts/comparison/z-image-base/b.jpg) |
-| Generation | 524.4 s · peak 13.2 GiB | 376.4 s · peak 13.5 GiB · 16 of 50 steps skipped |
+| Generation | 1024.5 s · peak 14.7 GiB | 767.3 s · peak 14.7 GiB · 14 of 50 steps skipped |
 
-On this run: 1.39× faster (1.40× with preview decoding left out) · SSIM 0.93 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_z_image.json) · [More details →](docs/comparison/z-image-base.md)
+On this run: 1.34× faster (1.34× with preview decoding left out) · SSIM 0.85 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_z_image.json) · [More details →](docs/comparison/z-image-base.md)
 <!-- COMPARISON:z-image-base:summary END -->
 
-[Footnote ⁶](README.md#benchmarks) measured this variant's 1.31× multi-run speedup as entirely step-skipping: running with the gate off timed at vanilla speed. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation starts, so A and B peak within about a gigabyte of each other here (13.2 GiB vs 13.5 GiB).
+[Footnote ⁶](README.md#benchmarks) measured this variant's 1.31× multi-run speedup as entirely step-skipping: running with the gate off timed at vanilla speed. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation starts, so A and B both peak at 14.7 GiB here.
 
 ## FLUX.2 [klein] base 9B
 

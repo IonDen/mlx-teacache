@@ -177,7 +177,7 @@ def test_probe_passes_is_strict_on_both_limits() -> None:
 
 def test_probe_record_uses_the_largest_phase_peak() -> None:
     """Bug: only the generation peak is judged, while the load/encode peak is the real maximum."""
-    r = cr.recipe_for("klein-base-9b")
+    r = cr.with_resolution(cr.recipe_for("klein-base-9b"), 768, 1024)
     rec = cr.probe_record(
         r,
         phase_peaks={"load": 23 * GIB, "encode": 10 * GIB, "generation": 18 * GIB},
@@ -348,3 +348,36 @@ def test_teacache_kwargs_pass_the_threshold_only_when_the_recipe_sets_one() -> N
     r = cr.recipe_for("klein-base-4b")
     assert cr.teacache_kwargs(r) == {}
     assert cr.teacache_kwargs(cr.apply_overrides(r, rel_l1_thresh=0.1)) == {"rel_l1_thresh": 0.1}
+
+
+def test_klein_base_4b_recipe_matches_the_approved_k1_quality_probe_exactly() -> None:
+    """Bug: the Klein 4B recipe drifts from the K1 probe Denis approved on 2026-09-26 (q8, 864x1152, shared
+    prompt, no negative, default threshold), so the page's Klein images are not the ones reviewed."""
+    versions = {"mflux": "0.20.0", "mlx": "0.32.2", "mlx_taef": "0.8.3"}
+    assert cr.recipe_stamp(cr.recipe_for("klein-base-4b"), versions=versions) == {
+        "slug": "klein-base-4b",
+        "checkpoint": "black-forest-labs/FLUX.2-klein-base-4B",
+        "decoder": "taef2",
+        "steps": 50,
+        "guidance": 4.0,
+        "quantize": 8,
+        "width": 864,
+        "height": 1152,
+        "free_encoders": False,
+        "cache_gb": 2.0,
+        "wired_cap_gb": 22,
+        "seed": 42,
+        "prompt_sha256": "18b6b14a31c6808afb26f20b0c828c4262dccb78af8e28a1aa38bd696938284e",
+        "version_mflux": "0.20.0",
+        "version_mlx": "0.32.2",
+        "version_mlx_taef": "0.8.3",
+    }
+
+
+def test_klein_base_9b_recipe_follows_the_4b_settings() -> None:
+    """Bug: Klein 9B keeps the old q4 768x1024 recipe (or a threshold/prompt override) while 4B moved to K1's
+    q8 864x1152, so the two Klein rows are no longer comparable; or 9B stops freeing its text encoder."""
+    r = cr.recipe_for("klein-base-9b")
+    assert (r.quantize, r.width, r.height, r.guidance, r.steps) == (8, 864, 1152, 4.0, 50)
+    assert r.prompt is None and r.negative_prompt is None and r.rel_l1_thresh is None
+    assert r.free_encoders is True

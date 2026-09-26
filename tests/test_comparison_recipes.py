@@ -374,10 +374,12 @@ def test_klein_base_4b_recipe_matches_the_approved_k1_quality_probe_exactly() ->
     }
 
 
-def test_klein_base_9b_recipe_follows_the_4b_settings() -> None:
-    """Bug: Klein 9B keeps the old q4 768x1024 recipe (or a threshold/prompt override) while 4B moved to K1's
-    q8 864x1152, so the two Klein rows are no longer comparable; or 9B stops freeing its text encoder."""
+def test_klein_base_9b_recipe_follows_the_4b_settings_at_768x1024() -> None:
+    """Bug: Klein 9B drops back to q4 (or gains a threshold/prompt override) while 4B runs K1's q8 recipe, so the two
+    Klein rows differ in more than size; or 9B goes back to 864x1152, where its first q8 step ran past macOS's ~5 s
+    GPU watchdog on this M1 Max (kIOGPUCommandBufferCallbackErrorImpactingInteractivity, 2026-09-26); or 9B stops
+    freeing its text encoder."""
     r = cr.recipe_for("klein-base-9b")
-    assert (r.quantize, r.width, r.height, r.guidance, r.steps) == (8, 864, 1152, 4.0, 50)
+    assert (r.quantize, r.width, r.height, r.guidance, r.steps) == (8, 768, 1024, 4.0, 50)
     assert r.prompt is None and r.negative_prompt is None and r.rel_l1_thresh is None
     assert r.free_encoders is True

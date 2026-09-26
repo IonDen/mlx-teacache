@@ -28,7 +28,10 @@ def test_six_non_distilled_recipes_in_run_order() -> None:
 def test_qwen_alone_gets_the_vendor_suffix() -> None:
     """Bug: the suffix leaks into every prompt, or never reaches Qwen."""
     assert cr.prompt_for(cr.recipe_for("qwen-image")) == cr.PROMPT + ", Ultra HD, 4K, cinematic composition."
-    assert all(cr.prompt_for(r) == cr.PROMPT for r in cr.RECIPES if r.slug != "qwen-image")
+    others = [r for r in cr.RECIPES if r.slug not in ("qwen-image", "z-image-base")]
+    assert others and all(cr.prompt_for(r) == cr.PROMPT for r in others)
+    # Z-Image carries its own prompt (approved Z1 wording); the Qwen suffix must not leak into it either.
+    assert cr.prompt_for(cr.recipe_for("z-image-base")) == cr.Z_IMAGE_PROMPT
 
 
 def test_prompt_override_replaces_the_shared_prompt() -> None:
@@ -299,3 +302,30 @@ def test_recipes_without_fallback_need_no_probe() -> None:
     """Bug: light rows demand a probe."""
     r = cr.recipe_for("flux1-dev")
     assert cr.resolve_resolution(r, [], versions=V) == r
+
+
+def test_z_image_recipe_matches_the_approved_z1_quality_probe_exactly() -> None:
+    """Bug: the Z-Image recipe drifts from the Z1 quality probe Denis approved on 2026-09-26 (the prompt,
+    negative, resolution, guidance or quantize differ by even a character or a pixel), so the page's
+    Z-Image images are not the ones that were reviewed. The literal is Z1's record.json stamp (softened
+    prompt that drops "flushed cheeks"/"sweat on her forehead", the blotchy-skin negative, 864x1152, g 4)."""
+    versions = {"mflux": "0.20.0", "mlx": "0.32.2", "mlx_taef": "0.8.3"}
+    assert cr.recipe_stamp(cr.recipe_for("z-image-base"), versions=versions) == {
+        "slug": "z-image-base",
+        "checkpoint": "Tongyi-MAI/Z-Image",
+        "decoder": "zimage",
+        "steps": 50,
+        "guidance": 4.0,
+        "quantize": 8,
+        "width": 864,
+        "height": 1152,
+        "free_encoders": False,
+        "cache_gb": 2.0,
+        "wired_cap_gb": 24,
+        "seed": 42,
+        "prompt_sha256": "6920d5f048458eed9425ff7a6d2a1d9eb7be307dff80c00cf8446e4acb51d044",
+        "version_mflux": "0.20.0",
+        "version_mlx": "0.32.2",
+        "version_mlx_taef": "0.8.3",
+        "negative_prompt_sha256": "e370ca56997ce475aa66d9063f56c40f1117019f68df51d02f9ac2e674e57343",
+    }

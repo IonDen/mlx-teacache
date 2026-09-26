@@ -19,6 +19,23 @@ PROMPT = (
     "The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, "
     "natural skin texture, sharp focus on her face."
 )
+# Z-Image renders "flushed cheeks" and "sweat on her forehead" as red blotches and white specks on the face;
+# this wording keeps the scene and asks for a softer glow, and the negative names the defects.
+Z_IMAGE_PROMPT = (
+    "A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, "
+    "racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused,"
+    " joyful determination, with bright eyes, a natural warm glow on her cheeks and a faint dewy sheen on her skin."
+    " She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud "
+    "earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-"
+    "link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the "
+    "court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air "
+    "just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm "
+    "lens, shallow depth of field, natural skin texture with fine pores, sharp focus on her face."
+)
+Z_IMAGE_NEGATIVE_PROMPT = (
+    "blotchy skin, red patches on the cheeks, white specks on the skin, distorted face, asymmetric eyes, blurry, "
+    "plastic skin, waxy skin, oversharpened, extra fingers, deformed hands, artifacts"
+)
 QWEN_PROMPT_SUFFIX = ", Ultra HD, 4K, cinematic composition."  # Alibaba's reference "positive magic"
 SEED = 42
 WORKING_SET_BYTES_DEFAULT = int(24.96 * 1024**3)  # M1 Max 32 GB max_recommended_working_set_size
@@ -103,9 +120,11 @@ RECIPES: tuple[Recipe, ...] = (
         steps=50,
         guidance=4.0,
         quantize=8,
-        width=640,
-        height=896,
+        width=864,
+        height=1152,
         wired_cap_gb=24,
+        prompt=Z_IMAGE_PROMPT,
+        negative_prompt=Z_IMAGE_NEGATIVE_PROMPT,
     ),
     Recipe(
         slug="klein-base-9b",

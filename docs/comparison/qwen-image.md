@@ -2,13 +2,15 @@
 
 [← Comparison](../../COMPARISON.md)
 
-50 steps, guidance 4.0, q4, 672×896, seed 42; text encoder freed once the prompt is encoded.
-
 This page loads the original `Qwen/Qwen-Image` checkpoint by its full name: from mflux 0.19 on, the `qwen-image` alias resolves to a newer checkpoint instead.
 
 ## Prompt
 
+<!-- COMPARISON:qwen-image:prompt START -->
 > A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused, joyful determination: flushed cheeks, bright eyes, a light sheen of sweat on her forehead and temples. She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, natural skin texture, sharp focus on her face., Ultra HD, 4K, cinematic composition.
+
+Seed 42, 50 steps, guidance 4.0, q4, 672×896, text encoder freed once the prompt is encoded.
+<!-- COMPARISON:qwen-image:prompt END -->
 
 <!-- COMPARISON:qwen-image:sheets START -->
 **A: TeaCache off**, every step in order

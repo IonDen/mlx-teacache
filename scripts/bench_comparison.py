@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
-from _comparison_recipes import Recipe
+from _comparison_recipes import Recipe, prompt_for
 from _comparison_sheet import frame_paths
 from _comparison_steps import medians_by_kind, preview_subtracted_speedup, steady_state_speedup
 
@@ -268,6 +268,8 @@ def assemble_entry(
         "free_encoders": recipe.free_encoders,
         "a_compiled_predict": recipe.loader in _COMPILED_PREDICT_LOADERS and mflux_compiles_on_this_chip,
         "prompt_sha256": a["stamp"]["prompt_sha256"],
+        "prompt": prompt_for(recipe),
+        "negative_prompt": recipe.negative_prompt,
         "a": condition_summary(a, is_b=False),
         "b": condition_summary(b, is_b=True),
         "speedup_wall": a["generation_seconds"] / b["generation_seconds"],

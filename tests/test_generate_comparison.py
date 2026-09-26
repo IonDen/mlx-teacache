@@ -37,7 +37,7 @@ def _result(cond: str, **over: object) -> dict:
         },
         "frames": 25,
         "released_encoders": [],
-        "stamp": {"prompt_sha256": "p"},
+        "stamp": {"prompt_sha256": cr.prompt_sha256(cr.PROMPT)},
         "git_sha": "abc1234",
         "mlx_teacache_version": "0.11.2.dev1",
     }
@@ -222,7 +222,11 @@ def test_splice_fails_on_missing_and_orphan_markers() -> None:
 def test_page_blocks_split_main_page_from_subpages() -> None:
     """Bug: a sub-page is required to carry the main page's blocks, or vice versa."""
     assert gen.page_blocks(None, ["flux1-dev"]) == {"machine", "flux1-dev:summary"}
-    assert gen.page_blocks("flux1-dev", ["flux1-dev"]) == {"flux1-dev:sheets", "flux1-dev:details"}
+    assert gen.page_blocks("flux1-dev", ["flux1-dev"]) == {
+        "flux1-dev:prompt",
+        "flux1-dev:sheets",
+        "flux1-dev:details",
+    }
 
 
 def test_committed_pages_match_the_committed_report() -> None:
@@ -247,3 +251,79 @@ def test_committed_report_image_and_bench_paths_all_exist() -> None:
         if not (gen.REPO / v["bench_report"]).exists():
             missing.append(f"{slug}.bench_report -> {v['bench_report']}")
     assert not missing, f"report paths do not exist on disk: {missing}"
+
+
+def _entry_with(prompt_text: str, **extra: object) -> dict:
+    return {
+        "steps": 50,
+        "guidance": 4.0,
+        "quantize": 8,
+        "width": 864,
+        "height": 1152,
+        "prompt_sha256": cr.prompt_sha256(prompt_text),
+        **extra,
+    }
+
+
+def test_prompt_block_shows_the_models_own_prompt_negative_and_settings() -> None:
+    """Bug: a model that ran with its own prompt and a negative (Z-Image) gets the shared prompt on its
+    page, the negative is left off, or the settings line shows another model's size."""
+    report = {"prompt": "SHARED", "qwen_prompt_suffix": ", S.", "seed": 42}
+    v = _entry_with(
+        "a tennis player, soft glow", prompt="a tennis player, soft glow", negative_prompt="blotchy skin"
+    )
+    assert gen._prompt("z-image-base", v, report) == (
+        "> a tennis player, soft glow\n\n"
+        "Negative prompt:\n\n"
+        "> blotchy skin\n\n"
+        "Seed 42, 50 steps, guidance 4.0, q8, 864×1152."
+    )
+
+
+def test_prompt_block_falls_back_to_the_shared_prompt_and_qwen_suffix_for_older_entries() -> None:
+    """Bug: an entry written before per-model prompts were recorded renders an empty or missing prompt, or
+    Qwen's page drops the vendor suffix it actually ran with (or another model's page gains it)."""
+    report = {"prompt": "SHARED", "qwen_prompt_suffix": ", S.", "seed": 42}
+    assert gen._prompt("flux1-dev", _entry_with("SHARED"), report).startswith("> SHARED\n\nSeed 42,")
+    assert gen._prompt("qwen-image", _entry_with("SHARED, S."), report).startswith("> SHARED, S.\n\nSeed 42,")
+
+
+def test_prompt_block_refuses_a_prompt_that_is_not_the_one_measured() -> None:
+    """Bug: the page shows a prompt whose hash differs from the prompt_sha256 the run recorded, so readers
+    see different wording from what produced the images."""
+    report = {"prompt": "SHARED", "qwen_prompt_suffix": ", S.", "seed": 42}
+    with pytest.raises(ValueError, match="flux1-dev"):
+        gen._prompt("flux1-dev", _entry_with("SOMETHING ELSE"), report)
+    with pytest.raises(ValueError, match="z-image-base"):
+        gen._prompt("z-image-base", _entry_with("measured", prompt="edited later"), report)
+
+
+def test_assemble_entry_records_the_prompt_and_negative_the_recipe_sent() -> None:
+    """Bug: the report entry drops the per-model prompt/negative, so a model page falls back to the shared
+    prompt even though that model ran with its own wording (Z-Image)."""
+    z = cr.recipe_for("z-image-base")
+    sha = {"stamp": {"prompt_sha256": cr.prompt_sha256(cr.prompt_for(z))}}
+    entry = bc.assemble_entry(
+        z, _result("a", **sha), _result("b", **sha), ssim=0.9, provenance={}, mflux_compiles_on_this_chip=True
+    )
+    assert entry["prompt"] == cr.Z_IMAGE_PROMPT
+    assert entry["negative_prompt"] == cr.Z_IMAGE_NEGATIVE_PROMPT
+    plain = bc.assemble_entry(
+        cr.recipe_for("flux1-dev"),
+        _result("a"),
+        _result("b"),
+        ssim=0.9,
+        provenance={},
+        mflux_compiles_on_this_chip=True,
+    )
+    assert plain["prompt"] == cr.PROMPT and plain["negative_prompt"] is None
+
+
+def test_prompt_block_settings_line_says_when_the_text_encoder_was_freed() -> None:
+    """Bug: the settings line under the prompt drops the freed-encoder note for the two recipes that free
+    it (Klein 9B, Qwen), or adds it to a recipe that keeps its encoder."""
+    report = {"prompt": "SHARED", "qwen_prompt_suffix": ", S.", "seed": 42}
+    freed = gen._prompt("klein-base-9b", _entry_with("SHARED", free_encoders=True), report)
+    kept = gen._prompt("flux1-dev", _entry_with("SHARED", free_encoders=False), report)
+    assert freed.endswith("864×1152, text encoder freed once the prompt is encoded.")
+    assert kept.endswith("864×1152.")

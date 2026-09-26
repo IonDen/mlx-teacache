@@ -2,11 +2,13 @@
 
 [← Comparison](../../COMPARISON.md)
 
-28 steps, guidance 4.5, q4, 768×1024, seed 42.
-
 ## Prompt
 
+<!-- COMPARISON:flux1-krea-dev:prompt START -->
 > A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused, joyful determination: flushed cheeks, bright eyes, a light sheen of sweat on her forehead and temples. She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, natural skin texture, sharp focus on her face.
+
+Seed 42, 28 steps, guidance 4.5, q4, 768×1024.
+<!-- COMPARISON:flux1-krea-dev:prompt END -->
 
 <!-- COMPARISON:flux1-krea-dev:sheets START -->
 **A: TeaCache off**, every step in order

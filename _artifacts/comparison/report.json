@@ -903,6 +903,7 @@
       "prompt_sha256": "6920d5f048458eed9425ff7a6d2a1d9eb7be307dff80c00cf8446e4acb51d044",
       "prompt": "A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused, joyful determination, with bright eyes, a natural warm glow on her cheeks and a faint dewy sheen on her skin. She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, natural skin texture with fine pores, sharp focus on her face.",
       "negative_prompt": "blotchy skin, red patches on the cheeks, white specks on the skin, distorted face, asymmetric eyes, blurry, plastic skin, waxy skin, oversharpened, extra fingers, deformed hands, artifacts",
+      "negative_prompt_sha256": "e370ca56997ce475aa66d9063f56c40f1117019f68df51d02f9ac2e674e57343",
       "a": {
         "load_seconds": 12.97410645900527,
         "encode_seconds": 1.407891666982323,
@@ -1247,7 +1248,7 @@
       "speedup_preview_subtracted": 1.338587563904087,
       "ssim": 0.8536245309033896,
       "provenance": {
-        "generated_at": "2026-09-26T11:17Z",
+        "generated_at": "2026-09-27T06:46Z",
         "git_sha_a": "964a1e1",
         "git_sha_b": "964a1e1",
         "mlx_teacache_version": "0.11.2.dev1+g992128837.d20260925",
@@ -2019,7 +2020,7 @@
       }
     }
   },
-  "generated_at": "2026-09-26T21:08Z",
+  "generated_at": "2026-09-27T06:46Z",
   "prompt": "A beautiful young woman plays tennis on an outdoor hard court at sunset. She is caught just after a forehand, racket following through across her body, ponytail swinging, weight on her front foot. Her face shows focused, joyful determination: flushed cheeks, bright eyes, a light sheen of sweat on her forehead and temples. She wears a fitted white tennis dress with navy trim, a white visor, a terry wristband, small gold stud earrings, and white tennis shoes with navy laces. The green court's painted white lines lead back to a chain-link fence, the net, and silhouetted trees against an orange-pink sky. Low, warm sunlight rakes across the court, casting long soft shadows and a golden rim light on her hair. A yellow tennis ball hangs in the air just off the racket strings. The mood is cozy, warm and nostalgic. Photorealistic, full-frame camera, 85mm lens, shallow depth of field, natural skin texture, sharp focus on her face.",
   "qwen_prompt_suffix": ", Ultra HD, 4K, cinematic composition.",
   "seed": 42,

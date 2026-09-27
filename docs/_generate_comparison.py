@@ -60,7 +60,9 @@ def _prompt(slug: str, v: dict[str, Any], report: dict[str, Any]) -> str:
 
     Entries written before per-model prompts were recorded fall back to the report's shared prompt (plus
     Qwen's vendor suffix). Either way the text must hash to the entry's recorded prompt_sha256, so a page
-    can never show wording other than the one that produced its images."""
+    can never show wording other than the one that produced its images. Same guarantee for the negative: a
+    truthy negative_prompt must hash to negative_prompt_sha256 (a missing hash counts as differing, since an
+    entry with no recorded hash gives no way to confirm the negative shown is the one measured)."""
     import hashlib
 
     text = v.get("prompt")
@@ -68,9 +70,14 @@ def _prompt(slug: str, v: dict[str, Any], report: dict[str, Any]) -> str:
         text = report["prompt"] + (report["qwen_prompt_suffix"] if slug == "qwen-image" else "")
     if hashlib.sha256(text.encode("utf-8")).hexdigest() != v["prompt_sha256"]:
         raise ValueError(f"{slug}: the prompt to render does not match the prompt_sha256 the run recorded")
+    negative = v.get("negative_prompt")
+    if negative and hashlib.sha256(negative.encode("utf-8")).hexdigest() != v.get("negative_prompt_sha256"):
+        raise ValueError(
+            f"{slug}: the negative prompt to render does not match the negative_prompt_sha256 the run recorded"
+        )
     parts = [f"> {text}"]
-    if v.get("negative_prompt"):
-        parts += ["Negative prompt:", f"> {v['negative_prompt']}"]
+    if negative:
+        parts += ["Negative prompt:", f"> {negative}"]
     parts.append(
         f"Seed {report['seed']}, {v['steps']} steps, guidance {v['guidance']}, q{v['quantize']}, "
         f"{v['width']}×{v['height']}"

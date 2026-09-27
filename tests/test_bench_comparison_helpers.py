@@ -164,6 +164,30 @@ def test_assemble_entry_derives_the_three_speedups_and_kind_medians() -> None:
     assert e["bench_report"] == r.bench_report and e["prompt_sha256"] == "p"
 
 
+def test_assemble_entry_carries_the_negative_prompt_sha256_from_the_chunk_stamp() -> None:
+    """Bug: assemble_entry drops negative_prompt_sha256 (or invents one instead of reading the literal value
+    the worker actually stamped), so the page generator can never verify a rendered negative prompt against
+    what was measured."""
+    r = cr.recipe_for("z-image-base")
+    a = _result(
+        "a", [1.0, 1.0], [0.1, 0.1], gen=2.2, stamp={"prompt_sha256": "p", "negative_prompt_sha256": "np"}
+    )
+    b = _result(
+        "b",
+        [1.0, 1.0],
+        [0.1, 0.1],
+        gen=2.2,
+        rel_l1_thresh=0.2,
+        decision_kinds=["computed", "computed"],
+        skipped=0,
+        computed=2,
+        max_consecutive_skips=0,
+        skip_pattern="CC",
+    )
+    e = bc.assemble_entry(r, a, b, ssim=1.0, provenance={}, mflux_compiles_on_this_chip=True)
+    assert e["negative_prompt_sha256"] == "np"
+
+
 def test_assemble_entry_marks_a_compiled_predict_only_for_klein_and_z_image_on_a_compiling_chip() -> None:
     """Bug: FLUX.1 (no mx.compile'd predict step at all) is credited with a compiled predict step, or a
     Klein/Z-Image loader is marked compiled even on a chip where mflux doesn't compile it (M1/M2)."""
@@ -283,7 +307,7 @@ def test_now_tag_carries_microseconds_so_two_retires_in_one_second_never_collide
 
 
 def test_quality_probe_dir_nests_by_slug_then_name(tmp_path: Path) -> None:
-    """Bug: the nesting order is reversed (name/slug), which breaks the brief's documented layout
+    """Bug: the nesting order is reversed (name/slug), which breaks the documented layout
     tests/_artifacts/quality_probe/<slug>/<NAME>/."""
     assert bc.quality_probe_dir(tmp_path, "flux1-dev", "tighter-guidance") == (
         tmp_path / "flux1-dev" / "tighter-guidance"
@@ -449,6 +473,21 @@ def test_quality_probe_record_negative_used_true_for_a_real_negative_that_reache
     record = bc.quality_probe_record("n", recipe, overrides={}, result=result, versions=V)
     assert record["negative_used"] is True
     assert record["memory_phases"] == {}  # absent "phases" key defaults to {}, not a KeyError
+
+
+def test_quality_probe_record_negative_used_false_at_guidance_one_even_with_a_real_negative() -> None:
+    """Bug: negative_used stays True at guidance 1.0, where mflux's own > 1.0 check (and Qwen's own neg +
+    guidance * (pos - neg) combine, a no-op at guidance 1.0) means the negative never reaches the image."""
+    recipe = cr.apply_overrides(cr.recipe_for("z-image-base"), negative_prompt="watermark", guidance=1.0)
+    result = {
+        "generation_seconds": 1.0,
+        "mlx_peak_load_bytes": 0,
+        "mlx_peak_encode_bytes": 0,
+        "mlx_peak_generation_bytes": 0,
+        "memory": {"peak_resident_bytes": 0, "peak_footprint_bytes": 0, "min_host_free_pct": 50.0},
+    }
+    record = bc.quality_probe_record("n", recipe, overrides={}, result=result, versions=V)
+    assert record["negative_used"] is False
 
 
 def test_max_workers_must_be_positive() -> None:
@@ -689,14 +728,25 @@ def test_orchestrate_refuses_a_mismatched_stamp_and_persists_nothing(
 
 
 def test_quality_probe_name_rejects_path_traversal_and_accepts_plain_names() -> None:
-    """Bug: an unvalidated NAME lets --quality-probe ../x (or a/b) escape QUALITY_PROBE_ROOT through
-    quality_probe_dir's plain path join, writing or Trash-moving outside tests/_artifacts/quality_probe/."""
+    """Bug: an unvalidated NAME lets --quality-probe ../x (or a/b, or a bare "." / ".." that resolves to the
+    current/parent directory through quality_probe_dir's plain path join) escape QUALITY_PROBE_ROOT, writing
+    or Trash-moving outside tests/_artifacts/quality_probe/."""
     with pytest.raises(argparse.ArgumentTypeError):
         bc.quality_probe_name("../x")
     with pytest.raises(argparse.ArgumentTypeError):
         bc.quality_probe_name("a/b")
     with pytest.raises(argparse.ArgumentTypeError):
         bc.quality_probe_name("")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name(".")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("..")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("...")
+    assert bc.quality_probe_name("Z1") == "Z1"
+    assert bc.quality_probe_name("K1t12") == "K1t12"
+    assert bc.quality_probe_name("tighter-guidance") == "tighter-guidance"
+    assert bc.quality_probe_name("a.b") == "a.b"
     assert bc.quality_probe_name("tighter-guidance_v2.1") == "tighter-guidance_v2.1"
 
 
@@ -711,6 +761,43 @@ def test_read_override_file_rejects_empty_and_strips_whitespace(tmp_path: Path) 
     real = tmp_path / "real.txt"
     real.write_text("  a bicycle in the rain  \n")
     assert bc._read_override_file(real, label="prompt") == "a bicycle in the rain"
+
+
+def _probe_overrides_ns(**over: object) -> argparse.Namespace:
+    base: dict[str, object] = dict(
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        rel_l1_thresh=None,
+        prompt_file=None,
+        negative_file=None,
+    )
+    return argparse.Namespace(**{**base, **over})
+
+
+def test_probe_overrides_reads_and_strips_prompt_and_negative_files_without_swapping_them(
+    tmp_path: Path,
+) -> None:
+    """Bug: prompt and negative_prompt get swapped while assembling the overrides dict, so a probe's real
+    prompt is silently rendered as its negative prompt (and vice versa)."""
+    p = tmp_path / "p.txt"
+    p.write_text("  a red bicycle \n")
+    n = tmp_path / "n.txt"
+    n.write_text("blurry\n")
+    args = _probe_overrides_ns(width=512, rel_l1_thresh=0.12, prompt_file=p, negative_file=n)
+    assert bc._probe_overrides(args) == {
+        "width": 512,
+        "rel_l1_thresh": 0.12,
+        "prompt": "a red bicycle",
+        "negative_prompt": "blurry",
+    }
+
+
+def test_probe_overrides_with_nothing_given_returns_an_empty_dict() -> None:
+    """Bug: an override the caller never set (e.g. width defaulting to something other than None) still ends
+    up in the dict handed to apply_overrides."""
+    assert bc._probe_overrides(_probe_overrides_ns()) == {}
 
 
 def test_quantize_choices_are_restricted_to_supported_bit_depths(capsys: pytest.CaptureFixture[str]) -> None:
@@ -827,8 +914,8 @@ def test_quality_probe_forwards_only_the_overrides_actually_given(
     bc._quality_probe(args, run_worker=fake_run_worker)
 
     cmd = seen["cmd"]
-    assert "--width" in cmd and "512" in cmd
-    assert "--guidance" in cmd and "7.0" in cmd
+    assert cmd[cmd.index("--width") + 1] == "512"
+    assert cmd[cmd.index("--guidance") + 1] == "7.0"
     assert "--height" not in cmd
     assert "--quantize" not in cmd
 
@@ -864,6 +951,27 @@ def test_quality_probe_forwards_the_condition_to_the_worker() -> None:
     b_cmd, a_cmd = seen
     assert b_cmd[b_cmd.index("--condition") + 1] == "b"
     assert a_cmd[a_cmd.index("--condition") + 1] == "a"
+
+
+def test_quality_probe_refuses_a_negative_file_for_flux1_before_spawning_the_worker(tmp_path: Path) -> None:
+    """Bug: FLUX.1/Krea's --negative-file reaches the worker (which then raises deep inside
+    precompute_prompt only after the whole model has loaded) instead of being refused up front, before any
+    worker subprocess is spawned."""
+    calls: list[list[str]] = []
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        calls.append(cmd)
+        return {"name": "n"}
+
+    neg = tmp_path / "n.txt"
+    neg.write_text("blurry")
+
+    with pytest.raises(SystemExit):
+        bc._quality_probe(_qp_args(only="flux1-dev", negative_file=neg), run_worker=fake_run_worker)
+    assert calls == []
+
+    bc._quality_probe(_qp_args(only="z-image-base", negative_file=neg), run_worker=fake_run_worker)
+    assert len(calls) == 1
 
 
 def test_quality_probe_b_abort_is_recorded_without_touching_as_abort_file(
@@ -909,3 +1017,152 @@ def test_rel_l1_thresh_flag_parses_as_a_float() -> None:
         ["--only", "klein-base-4b", "--quality-probe", "t", "--rel-l1-thresh", "0.1"]
     )
     assert ns.rel_l1_thresh == 0.1
+
+
+def _probe_only_ns(**over: object) -> argparse.Namespace:
+    base: dict[str, object] = dict(
+        quality_probe=None,
+        condition="a",
+        guidance=None,
+        quantize=None,
+        rel_l1_thresh=None,
+        prompt_file=None,
+        negative_file=None,
+    )
+    return argparse.Namespace(**{**base, **over})
+
+
+def test_probe_only_flags_misused_is_empty_when_nothing_is_set() -> None:
+    """Bug: the misuse check fires even when the caller set none of the probe-only flags."""
+    assert bc.probe_only_flags_misused(_probe_only_ns()) == []
+
+
+def test_probe_only_flags_misused_names_a_probe_only_flag_given_without_the_probe() -> None:
+    """Bug: --rel-l1-thresh (or another probe-only flag) silently does nothing when given without
+    --quality-probe, instead of being refused and named."""
+    assert bc.probe_only_flags_misused(_probe_only_ns(rel_l1_thresh=0.1)) == ["--rel-l1-thresh"]
+
+
+def test_probe_only_flags_misused_is_empty_when_the_probe_is_also_given() -> None:
+    """Bug: a legitimate --quality-probe X --rel-l1-thresh 0.1 combination is refused."""
+    assert bc.probe_only_flags_misused(_probe_only_ns(quality_probe="X", rel_l1_thresh=0.1)) == []
+
+
+def test_parse_and_validate_refuses_a_probe_only_flag_given_without_quality_probe(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bug: --rel-l1-thresh 0.1 without --quality-probe parses fine and silently does nothing (there is no
+    condition-B apply_teacache call to feed it to) instead of being refused up front."""
+    with pytest.raises(SystemExit):
+        bc._parse_and_validate(["--only", "z-image-base", "--rel-l1-thresh", "0.1"])
+    capsys.readouterr()
+
+
+def test_parse_and_validate_refuses_rel_l1_thresh_on_condition_a(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bug: --quality-probe X --rel-l1-thresh 0.1 on condition A (the default) is accepted even though
+    condition A never applies TeaCache, so the threshold could never take effect."""
+    with pytest.raises(SystemExit):
+        bc._parse_and_validate(["--only", "z-image-base", "--quality-probe", "X", "--rel-l1-thresh", "0.1"])
+    capsys.readouterr()
+
+
+def test_parse_and_validate_allows_rel_l1_thresh_on_condition_b() -> None:
+    """Bug: the condition-A refusal is too broad and also rejects the legitimate condition-B case."""
+    ns = bc._parse_and_validate(
+        ["--only", "z-image-base", "--quality-probe", "X", "--rel-l1-thresh", "0.1", "--condition", "b"]
+    )
+    assert ns.condition == "b" and ns.rel_l1_thresh == 0.1
+
+
+def test_quality_probe_forwards_prompt_and_negative_files_and_the_command_round_trips(
+    tmp_path: Path,
+) -> None:
+    """Bug: --prompt-file/--negative-file are dropped on the way to the worker, or the forwarded command line
+    doesn't actually parse back to the same values (a quoting/ordering bug that would only surface once a
+    real subprocess re-parses argv)."""
+    p, n = tmp_path / "p.txt", tmp_path / "n.txt"
+    p.write_text("a red bicycle")
+    n.write_text("blurry")
+    seen: list[list[str]] = []
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen.append(cmd)
+        return {"name": "Z1"}
+
+    args = _qp_args(condition="b", prompt_file=p, negative_file=n, rel_l1_thresh=0.12, width=512)
+    bc._quality_probe(args, run_worker=fake_run_worker)
+
+    cmd = seen[0]
+    assert cmd[cmd.index("--prompt-file") + 1] == str(p)
+    assert cmd[cmd.index("--negative-file") + 1] == str(n)
+
+    ns = bc._build_parser().parse_args(
+        cmd[2:]
+    )  # cmd[2:]: skip the interpreter and script path, keep --worker
+    assert ns.prompt_file == p
+    assert ns.negative_file == n
+    assert ns.condition == "b"
+    assert ns.rel_l1_thresh == 0.12
+    assert ns.width == 512
+    assert ns.quality_probe == "Z1"
+    assert ns.only == "z-image-base"
+
+
+def test_run_worker_treats_a_sigabrt_exit_with_no_result_line_as_an_abort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug: a worker killed by macOS's GPU watchdog (SIGABRT, no parseable result line) is thrown away as a
+    bare RuntimeError instead of being recorded as an abort, the way a real memory-watchdog abort already
+    is."""
+    monkeypatch.setattr(bc, "_stream_worker", lambda cmd: (-6, "no result line\n"))
+    result = bc._run_worker(["x"], "flux1-dev/a")
+    assert "aborted" in result
+    assert result["returncode"] == -6
+
+
+def test_run_worker_still_raises_on_a_plain_non_zero_exit_with_no_result_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug: the new SIGABRT handling swallows an ordinary crash too, hiding a real failure behind a fake
+    "aborted" record instead of raising."""
+    monkeypatch.setattr(bc, "_stream_worker", lambda cmd: (1, ""))
+    with pytest.raises(RuntimeError):
+        bc._run_worker(["x"], "flux1-dev/a")
+
+
+_SIGABRT_REASON = "SIGABRT (likely the macOS GPU time limit: Impacting Interactivity)"
+
+
+def test_orchestrate_prints_the_aborted_payloads_own_reason_not_a_hardcoded_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bug: the printed abort message always says "the memory watchdog" even when the payload's own
+    ``aborted`` reason is something else (a SIGABRT from the macOS GPU time limit), misleading whoever reads
+    the log about why the run stopped."""
+    monkeypatch.setattr(bc, "_versions", _fake_versions)
+    chunks, raw, trash = tmp_path / "chunks", tmp_path / "raw", tmp_path / "trash"
+
+    def spawn(recipe: cr.Recipe, condition: str, *, probe: bool, smoke: bool) -> dict:
+        return {"aborted": _SIGABRT_REASON}
+
+    bc._orchestrate(
+        "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
+    )
+    assert _SIGABRT_REASON in capsys.readouterr().out
+
+
+def test_quality_probe_prints_the_aborted_payloads_own_reason_not_a_hardcoded_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bug: the printed abort message on a quality-probe abort always says "the memory watchdog" even when
+    the payload's own reason is a SIGABRT."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"aborted": _SIGABRT_REASON}
+
+    bc._quality_probe(_qp_args(condition="a"), run_worker=fake_run_worker)
+    assert _SIGABRT_REASON in capsys.readouterr().out

@@ -128,12 +128,17 @@ _NO_NEGATIVE_ROUTE_LOADERS: tuple[str, ...] = ("flux1-dev", "flux1-krea-dev")
 def negative_used_for(recipe: Recipe) -> bool:
     """Whether the recipe's negative prompt, if any, actually reaches the model.
 
-    False when unset, when ``guidance <= 1.0`` (mflux drops a CFG-only negative below that threshold --
-    Klein's own ``_encode_prompt_pair`` gates on exactly this), or when the loader's ``generate_image`` has
-    no route for a negative at all (FLUX.1/Krea; ``precompute_prompt`` already raises before generation if
-    such a recipe sets one, so this loader branch is otherwise unreachable in a real run)."""
+    False when unset. Qwen-Image's own combine (``neg + guidance * (pos - neg)``) always runs both
+    branches, so its negative matters whenever ``guidance != 1.0`` (including below 1.0), unlike the CFG-
+    gated loaders below. For every other loader, false when ``guidance <= 1.0`` (mflux drops a CFG-only
+    negative below that threshold -- Klein's own ``_encode_prompt_pair`` gates on exactly this), or when the
+    loader's ``generate_image`` has no route for a negative at all (FLUX.1/Krea; ``precompute_prompt``
+    already raises before generation if such a recipe sets one, so this loader branch is otherwise
+    unreachable in a real run)."""
     if not recipe.negative_prompt:
         return False
+    if recipe.loader == "qwen-image-original":
+        return recipe.guidance != 1.0
     if recipe.guidance <= 1.0:
         return False
     return recipe.loader not in _NO_NEGATIVE_ROUTE_LOADERS

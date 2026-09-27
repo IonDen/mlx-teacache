@@ -270,7 +270,10 @@ def test_prompt_block_shows_the_models_own_prompt_negative_and_settings() -> Non
     page, the negative is left off, or the settings line shows another model's size."""
     report = {"prompt": "SHARED", "qwen_prompt_suffix": ", S.", "seed": 42}
     v = _entry_with(
-        "a tennis player, soft glow", prompt="a tennis player, soft glow", negative_prompt="blotchy skin"
+        "a tennis player, soft glow",
+        prompt="a tennis player, soft glow",
+        negative_prompt="blotchy skin",
+        negative_prompt_sha256=cr.prompt_sha256("blotchy skin"),
     )
     assert gen._prompt("z-image-base", v, report) == (
         "> a tennis player, soft glow\n\n"
@@ -296,6 +299,33 @@ def test_prompt_block_refuses_a_prompt_that_is_not_the_one_measured() -> None:
         gen._prompt("flux1-dev", _entry_with("SOMETHING ELSE"), report)
     with pytest.raises(ValueError, match="z-image-base"):
         gen._prompt("z-image-base", _entry_with("measured", prompt="edited later"), report)
+
+
+def test_prompt_block_refuses_a_negative_prompt_that_is_not_the_one_measured() -> None:
+    """Bug: the page shows a negative prompt whose hash differs from negative_prompt_sha256 (or the field is
+    missing entirely), so readers see negative wording that was not actually the one used to produce the
+    images."""
+    report = {"prompt": "SHARED", "qwen_prompt_suffix": ", S.", "seed": 42}
+    edited = _entry_with(
+        "measured",
+        prompt="measured",
+        negative_prompt="edited later",
+        negative_prompt_sha256=cr.prompt_sha256("the real negative"),
+    )
+    with pytest.raises(ValueError, match="z-image-base"):
+        gen._prompt("z-image-base", edited, report)
+
+    missing_hash = _entry_with("measured", prompt="measured", negative_prompt="blotchy skin")
+    with pytest.raises(ValueError, match="z-image-base"):
+        gen._prompt("z-image-base", missing_hash, report)
+
+    matching = _entry_with(
+        "measured",
+        prompt="measured",
+        negative_prompt="blotchy skin",
+        negative_prompt_sha256=cr.prompt_sha256("blotchy skin"),
+    )
+    assert "blotchy skin" in gen._prompt("z-image-base", matching, report)
 
 
 def test_assemble_entry_records_the_prompt_and_negative_the_recipe_sent() -> None:

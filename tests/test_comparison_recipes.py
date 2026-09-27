@@ -1,6 +1,7 @@
 """Recipe data and the probe decision for the comparison page (pure-core lane)."""
 
 import dataclasses
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import _comparison_recipes as cr  # noqa: E402
 
 GIB = 1024**3
 V = {"mflux": "0.20.0", "mlx": "0.32.2", "mlx_taef": "0.8.3"}
+REPORT_PATH = Path(__file__).resolve().parents[1] / "_artifacts" / "comparison" / "report.json"
 
 
 def test_six_non_distilled_recipes_in_run_order() -> None:
@@ -383,3 +385,24 @@ def test_klein_base_9b_recipe_follows_the_4b_settings_at_768x1024() -> None:
     assert (r.quantize, r.width, r.height, r.guidance, r.steps) == (8, 768, 1024, 4.0, 50)
     assert r.prompt is None and r.negative_prompt is None and r.rel_l1_thresh is None
     assert r.free_encoders is True
+    assert r.fallback == (576, 768)
+
+
+def test_every_recipe_matches_the_settings_the_committed_report_recorded() -> None:
+    """Bug: a recipe field (prompt, steps, guidance, quantize, resolution, negative) drifts from the value
+    that actually produced the committed comparison images, so a live recipe silently describes different
+    settings from the ones the report and pages show."""
+    report = json.loads(REPORT_PATH.read_text())
+    variants = report["variants"]
+    checked = 0
+    for rec in cr.RECIPES:
+        v = variants.get(rec.slug)
+        if v is None:
+            continue
+        checked += 1
+        assert v["prompt_sha256"] == cr.prompt_sha256(cr.prompt_for(rec)), rec.slug
+        assert (v["steps"], v["guidance"], v["quantize"]) == (rec.steps, rec.guidance, rec.quantize), rec.slug
+        assert (v["width"], v["height"]) in {(rec.width, rec.height), rec.fallback}, rec.slug
+        if "negative_prompt" in v:
+            assert v["negative_prompt"] == rec.negative_prompt, rec.slug
+    assert checked == 6

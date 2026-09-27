@@ -45,7 +45,7 @@ Recipe: 50 steps, guidance 4.0, q8, 576×768, seed 42, text encoder freed once t
 
 At its matching 512² recipe, footnote ⁵ splits this variant's 1.37× multi-run speedup into 1.34× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GB to 9.5 GB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other in the table above (11.5 GiB vs 11.6 GiB).
 
-On this run the gate skips 13 of 50 steps, spread through the schedule. Same player, same pose, same light between A and B. At 576×768 this is the smallest image on the page: at 864×1152 the model's first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 the Mac's free memory fell below the 20 % safety floor the comparison runs keep.
+On this run the gate skips 13 of 50 steps, spread through the schedule. Same player, same pose, same light between A and B. At 576×768 this is the smallest image on the page: at 864×1152 the model's first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 its three-step memory probe failed the harness's 20 % host-free check, with other apps open on the Mac at the time.
 
 ### Reproduce
 

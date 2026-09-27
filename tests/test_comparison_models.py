@@ -153,6 +153,23 @@ def test_negative_used_for_is_false_when_unset_low_guidance_or_unsupported_loade
     assert models.negative_used_for(flux1_with_neg) is False  # FLUX.1 has no negative route regardless
 
 
+def test_negative_used_for_qwen_runs_the_negative_branch_at_any_guidance_other_than_one() -> None:
+    """Bug: Qwen is judged by the guidance > 1.0 threshold the CFG-gated loaders (Klein/Z-Image) use, when
+    Qwen's own generate_image always combines neg + guidance * (pos - neg), so its negative reaches the
+    model at any guidance except exactly 1.0 (where the combine is a no-op), including below 1.0."""
+    qwen = cr.recipe_for("qwen-image")
+    below_one = dataclasses.replace(qwen, negative_prompt="blurry", guidance=0.8)
+    assert models.negative_used_for(below_one) is True
+
+    at_one = dataclasses.replace(qwen, negative_prompt="blurry", guidance=1.0)
+    assert models.negative_used_for(at_one) is False
+
+    z_image_at_one = dataclasses.replace(
+        cr.recipe_for("z-image-base"), negative_prompt="watermark", guidance=1.0
+    )
+    assert models.negative_used_for(z_image_at_one) is False
+
+
 def test_release_text_encoders_clears_only_encoders() -> None:
     """Bug: the transformer or VAE is released (black image), or an encoder survives (memory), or only one of
     the three encoder attrs (clip/t5/text) actually gets released."""

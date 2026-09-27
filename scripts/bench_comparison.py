@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -270,6 +271,7 @@ def assemble_entry(
         "prompt_sha256": a["stamp"]["prompt_sha256"],
         "prompt": prompt_for(recipe),
         "negative_prompt": recipe.negative_prompt,
+        "negative_prompt_sha256": a["stamp"].get("negative_prompt_sha256"),
         "a": condition_summary(a, is_b=False),
         "b": condition_summary(b, is_b=True),
         "speedup_wall": a["generation_seconds"] / b["generation_seconds"],
@@ -344,12 +346,13 @@ def positive_int(text: str) -> int:
     return value
 
 
-_QUALITY_PROBE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_QUALITY_PROBE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def quality_probe_name(text: str) -> str:
-    """Argparse ``type=`` for --quality-probe NAME: a plain path segment, never a traversal (``../x``) or a
-    nested path (``a/b``) that could escape QUALITY_PROBE_ROOT through quality_probe_dir's plain path join."""
+    """Argparse ``type=`` for --quality-probe NAME: a plain path segment, never a traversal (``../x``), a
+    nested path (``a/b``), or a bare ``.``/``..``/``...`` (a dot-only name still resolves to the current or
+    parent directory) that could escape QUALITY_PROBE_ROOT through quality_probe_dir's plain path join."""
     if not _QUALITY_PROBE_NAME_RE.fullmatch(text):
         raise argparse.ArgumentTypeError(
             f"--quality-probe NAME must match {_QUALITY_PROBE_NAME_RE.pattern!r}, got {text!r}"
@@ -601,15 +604,10 @@ def _worker_main(args: argparse.Namespace) -> None:
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
 
 
-def _quality_probe_worker(args: argparse.Namespace) -> None:
-    """(internal, --worker --quality-probe) One generation of --condition (A, or B with TeaCache on) with the
-    given overrides; writes that condition's final PNG, preview frames and JSON record under
-    QUALITY_PROBE_ROOT/<slug>/<name>/, leaving the other condition's files alone. Touches no chunk, no
-    report, no _artifacts/."""
-    from _comparison_recipes import apply_overrides, recipe_for
-
-    name = args.quality_probe
-    overrides: dict[str, object] = {
+def _probe_overrides(args: argparse.Namespace) -> dict[str, object]:
+    """Only the overrides the caller actually gave, keyed the way ``apply_overrides`` expects. Prompt and
+    negative prompt are read (and stripped) from their files here rather than round-tripped through argv."""
+    return {
         k: v
         for k, v in {
             "width": args.width,
@@ -624,6 +622,17 @@ def _quality_probe_worker(args: argparse.Namespace) -> None:
         }.items()
         if v is not None
     }
+
+
+def _quality_probe_worker(args: argparse.Namespace) -> None:
+    """(internal, --worker --quality-probe) One generation of --condition (A, or B with TeaCache on) with the
+    given overrides; writes that condition's final PNG, preview frames and JSON record under
+    QUALITY_PROBE_ROOT/<slug>/<name>/, leaving the other condition's files alone. Touches no chunk, no
+    report, no _artifacts/."""
+    from _comparison_recipes import apply_overrides, recipe_for
+
+    name = args.quality_probe
+    overrides = _probe_overrides(args)
     recipe = apply_overrides(recipe_for(args.only), **overrides)
     condition = args.condition
     reset_quality_probe_outputs(
@@ -656,12 +665,21 @@ def _stream_worker(cmd: list[str]) -> tuple[int, str]:
 
 def _run_worker(cmd: list[str], label: str) -> dict[str, Any]:
     """Spawn one worker subprocess, stream its output, and return its parsed result -- the ``aborted``
-    payload if the memory watchdog fired, otherwise the worker's own result dict. Raises on any other
-    failure (non-zero exit with no parseable result line)."""
+    payload if the memory watchdog fired, otherwise the worker's own result dict. A worker killed by macOS's
+    GPU watchdog (kIOGPUCommandBufferCallbackErrorImpactingInteractivity) exits by SIGABRT with no parseable
+    result line -- ``-signal.SIGABRT`` direct from ``subprocess``, or ``128 + signal.SIGABRT`` if a shell
+    reported it -- and that is recorded as an abort too, not thrown away as a bare RuntimeError. Raises on
+    any other failure (non-zero exit with no parseable result line)."""
     returncode, out = _stream_worker(cmd)
     payload = parse_worker_line(out)
     if payload is not None and "aborted" in payload:
         return payload
+    if payload is None and returncode in (-signal.SIGABRT, 128 + signal.SIGABRT):
+        return {
+            "aborted": "SIGABRT (likely the macOS GPU time limit: Impacting Interactivity)",
+            "label": label,
+            "returncode": returncode,
+        }
     if returncode != 0 or payload is None:
         raise RuntimeError(f"worker {label} failed: exit {returncode}")
     return payload
@@ -700,8 +718,13 @@ def _quality_probe(
     A watchdog abort is recorded the same way ``_orchestrate`` records a chunk abort: the payload is written
     to that condition's ``quality_probe_record_path(..., aborted=True)`` and exit code 4 is returned -- never a bare
     ``RuntimeError`` that throws the measurement away with no artifact."""
+    from _comparison_models import _NO_NEGATIVE_ROUTE_LOADERS
+    from _comparison_recipes import recipe_for
+
     worker_fn = run_worker or _run_worker
     label = f"{args.only}/{args.quality_probe}/{args.condition}"
+    if args.negative_file is not None and recipe_for(args.only).loader in _NO_NEGATIVE_ROUTE_LOADERS:
+        raise SystemExit(f"{label}: {args.only} has no negative-prompt route (FLUX.1/Krea)")
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -734,7 +757,7 @@ def _quality_probe(
         )
         abort_path.parent.mkdir(parents=True, exist_ok=True)
         abort_path.write_text(json.dumps(result, indent=2))
-        print(f"== ABORTED by the memory watchdog on quality-probe {label}; nothing persisted ==", flush=True)
+        print(f"== ABORTED ({result['aborted']}) on quality-probe {label}; nothing persisted ==", flush=True)
         return 4
     return 0
 
@@ -876,9 +899,7 @@ def _orchestrate(
         if "aborted" in result:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.with_suffix(".aborted.json").write_text(json.dumps(result, indent=2))
-            print(
-                f"== ABORTED by the memory watchdog on {slug}/{condition}; nothing persisted ==", flush=True
-            )
+            print(f"== ABORTED ({result['aborted']}) on {slug}/{condition}; nothing persisted ==", flush=True)
             return 4
         check_chunk_stamp(result, expected, path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1049,8 +1070,43 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+_PROBE_ONLY_FLAGS: tuple[tuple[str, str], ...] = (
+    ("guidance", "--guidance"),
+    ("quantize", "--quantize"),
+    ("rel_l1_thresh", "--rel-l1-thresh"),
+    ("prompt_file", "--prompt-file"),
+    ("negative_file", "--negative-file"),
+)
+
+
+def probe_only_flags_misused(args: argparse.Namespace) -> list[str]:
+    """Flags that only make sense with --quality-probe (a candidate-setting override), given without it --
+    they silently do nothing, since there is no condition-B apply_teacache call outside a quality probe to
+    feed them to."""
+    if args.quality_probe is not None:
+        return []
+    return [flag for attr, flag in _PROBE_ONLY_FLAGS if getattr(args, attr) is not None]
+
+
+def rel_l1_thresh_needs_condition_b(args: argparse.Namespace) -> bool:
+    """True when --rel-l1-thresh is given for condition A, which never applies TeaCache, so the threshold
+    could never take effect there."""
+    return args.rel_l1_thresh is not None and args.condition == "a"
+
+
+def _parse_and_validate(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    misused = probe_only_flags_misused(args)
+    if misused:
+        parser.error(f"{', '.join(misused)} requires --quality-probe")
+    if rel_l1_thresh_needs_condition_b(args):
+        parser.error("--rel-l1-thresh requires --condition b (condition A never applies TeaCache)")
+    return args
+
+
 def main() -> None:
-    args = _build_parser().parse_args()
+    args = _parse_and_validate()
     if args.worker:
         _worker_main(args)
         return

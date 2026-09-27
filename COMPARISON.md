@@ -12,7 +12,7 @@ Apple M1 Max, 32 GB unified memory, macOS 27.0, Python 3.12.12.
 
 Every model draws the same scene with seed 42. The exact prompt each one ran with, and its settings, are on that model's page. Qwen-Image adds its vendor's suggested suffix, `, Ultra HD, 4K, cinematic composition.`, to the prompt. Z-Image is the one model with its own wording: from the shared prompt it drew "flushed cheeks" and "a light sheen of sweat" as red patches and white specks on her face, and TeaCache made them worse. Its prompt asks for a soft warm glow instead, and a negative prompt names those defects.
 
-FLUX.1 [dev] and FLUX.1 Krea [dev] render at 768×1024. FLUX.2 [klein] base 4B and Z-Image render at 864×1152, about one megapixel, in 8-bit weights. FLUX.2 [klein] base 9B runs 8-bit too, but at 576×768: at 864×1152 its first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 the Mac's free memory fell below this page's 20 % safety floor. Qwen-Image renders at 672×896, the size its memory probe allowed.
+FLUX.1 [dev] and FLUX.1 Krea [dev] render at 768×1024. FLUX.2 [klein] base 4B and Z-Image render at 864×1152, about one megapixel, in 8-bit weights. FLUX.2 [klein] base 9B runs 8-bit too, but at 576×768: at 864×1152 its first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 its three-step memory probe failed the harness's 20 % host-free check, with other apps open on the Mac at the time. Qwen-Image renders at 672×896, the size its memory probe allowed.
 
 ## FLUX.1 [dev]
 

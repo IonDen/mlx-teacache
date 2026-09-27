@@ -74,12 +74,31 @@ def split_steps(
     return compute, preview
 
 
-def decision_kinds(decisions: Sequence[Any], steps: int) -> list[str]:
+def _in_step_order(decisions: Sequence[Any], steps: int) -> list[Any]:
     ordered = sorted(decisions, key=lambda d: d.step_idx)
     indices = [d.step_idx for d in ordered]
     if indices != list(range(steps)):
         raise ValueError(f"expected decisions for steps 0..{steps - 1}, got {indices}")
-    return ["skipped" if d.decision == "skipped" else "computed" for d in ordered]
+    return ordered
+
+
+def decision_kinds(decisions: Sequence[Any], steps: int) -> list[str]:
+    return ["skipped" if d.decision == "skipped" else "computed" for d in _in_step_order(decisions, steps)]
+
+
+def gate_trace(decisions: Sequence[Any], steps: int) -> list[dict[str, Any]]:
+    """Per-step gate telemetry in step order: the raw decision kind, the rel_l1 the gate measured (None on
+    steps it did not measure) and the accumulator after the step."""
+    return [
+        {
+            "step": d.step_idx,
+            "timestep": d.timestep,
+            "kind": d.decision,
+            "rel_l1": d.rel_l1,
+            "accumulated_distance": d.accumulated_distance,
+        }
+        for d in _in_step_order(decisions, steps)
+    ]
 
 
 def steady_state_speedup(a_compute: Sequence[float], b_compute: Sequence[float]) -> float:

@@ -113,6 +113,38 @@ def test_decision_kinds_rejects_gaps_and_wrong_counts() -> None:
         cs.decision_kinds([_d(0, "computed")], 2)
 
 
+def _full(i: int, kind: str, rel_l1: float | None, acc: float, timestep: float) -> SimpleNamespace:
+    return SimpleNamespace(
+        step_idx=i, decision=kind, rel_l1=rel_l1, accumulated_distance=acc, timestep=timestep
+    )
+
+
+def test_gate_trace_keeps_raw_kind_rel_l1_and_accumulator_in_step_order() -> None:
+    """Bug: the per-step gate trace comes out in arrival order, folds forced / numerical-miss into
+    computed, or drops rel_l1 -- and a threshold-independent skip can no longer be traced to the delta
+    the gate measured on that step."""
+    decisions = [
+        _full(2, "skipped", 0.0093, 0.061, 980.0),
+        _full(0, "forced", None, 0.0, 1000.0),
+        _full(1, "computed", None, 0.0, 990.0),
+        _full(3, "numerical-miss", None, 0.0, 970.0),
+    ]
+    assert cs.gate_trace(decisions, 4) == [
+        {"step": 0, "timestep": 1000.0, "kind": "forced", "rel_l1": None, "accumulated_distance": 0.0},
+        {"step": 1, "timestep": 990.0, "kind": "computed", "rel_l1": None, "accumulated_distance": 0.0},
+        {"step": 2, "timestep": 980.0, "kind": "skipped", "rel_l1": 0.0093, "accumulated_distance": 0.061},
+        {"step": 3, "timestep": 970.0, "kind": "numerical-miss", "rel_l1": None, "accumulated_distance": 0.0},
+    ]
+
+
+def test_gate_trace_rejects_gaps_and_wrong_counts() -> None:
+    """Bug: a missing step silently shifts every rel_l1 onto the wrong step."""
+    with pytest.raises(ValueError):
+        cs.gate_trace([_full(0, "forced", None, 0.0, 1.0), _full(2, "computed", None, 0.0, 1.0)], 2)
+    with pytest.raises(ValueError):
+        cs.gate_trace([_full(0, "forced", None, 0.0, 1.0)], 2)
+
+
 def test_steady_state_speedup_excludes_step_zero() -> None:
     """Bug: A's compile trace in step 0 is counted as TeaCache speedup."""
     assert cs.steady_state_speedup([35.0, 4.0, 4.0], [5.0, 4.0, 2.0]) == pytest.approx(8.0 / 6.0)

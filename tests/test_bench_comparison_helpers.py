@@ -1,5 +1,6 @@
 """Pure helpers of the schema-2 comparison harness (pure-core lane: bench_comparison imports mflux lazily)."""
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -281,6 +282,175 @@ def test_now_tag_carries_microseconds_so_two_retires_in_one_second_never_collide
     assert tag == "2026-09-25-100000-123456"
 
 
+def test_quality_probe_dir_nests_by_slug_then_name(tmp_path: Path) -> None:
+    """Bug: the nesting order is reversed (name/slug), which breaks the brief's documented layout
+    tests/_artifacts/quality_probe/<slug>/<NAME>/."""
+    assert bc.quality_probe_dir(tmp_path, "flux1-dev", "tighter-guidance") == (
+        tmp_path / "flux1-dev" / "tighter-guidance"
+    )
+
+
+def test_quality_probe_dir_matches_run_generations_path_slug_nesting(tmp_path: Path) -> None:
+    """Bug: quality_probe_dir and _run_generation's path_slug="<slug>/<name>" trick (raw_dir_for /
+    frames_dir_for joined on a slug containing "/") stop agreeing on where the final PNG and frames land,
+    so the worker's record.json ends up in a directory the image and frames are not actually written to."""
+    out_dir = bc.quality_probe_dir(tmp_path, "flux1-dev", "tighter-guidance")
+    path_slug = "flux1-dev/tighter-guidance"
+    assert bc.raw_dir_for(tmp_path, path_slug) == out_dir
+    assert bc.frames_dir_for(tmp_path, path_slug, "a") == out_dir / "frames" / "a"
+
+
+def test_quality_probe_record_path_keeps_a_at_record_json_and_gives_b_its_own_file(tmp_path: Path) -> None:
+    """Bug: condition B's record is written to record.json, overwriting condition A's record for the same
+    probe NAME (or A moves off record.json and the existing A-only probes stop being found)."""
+    out_dir = bc.quality_probe_dir(tmp_path, "z-image-base", "Z1")
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "a") == out_dir / "record.json"
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "b") == out_dir / "record.b.json"
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "a", aborted=True) == (
+        out_dir / "record.aborted.json"
+    )
+    assert bc.quality_probe_record_path(tmp_path, "z-image-base", "Z1", "b", aborted=True) == (
+        out_dir / "record.b.aborted.json"
+    )
+
+
+def _populate_probe(root: Path, slug: str, name: str) -> Path:
+    out_dir = bc.quality_probe_dir(root, slug, name)
+    for cond in ("a", "b"):
+        (out_dir / "frames" / cond).mkdir(parents=True)
+        (out_dir / "frames" / cond / "step_step00.png").write_bytes(b"x")
+        (out_dir / f"{cond}.png").write_bytes(cond.encode())
+        bc.quality_probe_record_path(root, slug, name, cond).write_text(cond)
+        bc.quality_probe_record_path(root, slug, name, cond, aborted=True).write_text(cond)
+    return out_dir
+
+
+def test_reset_quality_probe_outputs_retires_only_that_conditions_files(tmp_path: Path) -> None:
+    """Bug: a condition-B probe run moves condition A's image, frames or record out of the NAME dir (the
+    old whole-dir reset), so previewing TeaCache-on throws away the TeaCache-off image it is compared with;
+    or B's own stale files survive and mix with the fresh run's outputs."""
+    root, trash = tmp_path / "root", tmp_path / "trash"
+    out_dir = _populate_probe(root, "z-image-base", "Z1")
+
+    moved = bc.reset_quality_probe_outputs(root, "z-image-base", "Z1", "b", trash=trash, tag="t")
+
+    assert (out_dir / "a.png").read_bytes() == b"a"
+    assert (out_dir / "frames" / "a" / "step_step00.png").exists()
+    assert (out_dir / "record.json").read_text() == "a"
+    assert (out_dir / "record.aborted.json").read_text() == "a"
+    for gone in ("b.png", "frames/b", "record.b.json", "record.b.aborted.json"):
+        assert not (out_dir / gone).exists(), gone
+    assert len(moved) == 4 and all(p.parent == trash and p.exists() for p in moved)
+
+
+def test_reset_quality_probe_outputs_for_a_leaves_b_alone_and_is_a_no_op_when_empty(tmp_path: Path) -> None:
+    """Bug: the per-condition reset ignores its condition argument (always retires "a", or both), or it
+    fails on a probe NAME that has never run."""
+    root, trash = tmp_path / "root", tmp_path / "trash"
+    assert bc.reset_quality_probe_outputs(root, "z-image-base", "Z1", "a", trash=trash, tag="t0") == []
+    out_dir = _populate_probe(root, "z-image-base", "Z1")
+
+    bc.reset_quality_probe_outputs(root, "z-image-base", "Z1", "a", trash=trash, tag="t1")
+
+    assert not (out_dir / "a.png").exists() and not (out_dir / "record.json").exists()
+    assert (out_dir / "b.png").read_bytes() == b"b"
+    assert (out_dir / "record.b.json").read_text() == "b"
+
+
+def test_quality_probe_record_carries_name_overrides_prompt_negative_and_peaks() -> None:
+    """Bug: the record drops one of the required fields (name, the resolved-recipe stamp, overrides, prompt,
+    negative_prompt, negative_used, width/height/steps/guidance/quantize, generation seconds, peaks, memory
+    phases, min host free), so a candidate setting can't actually be judged from it."""
+    recipe = cr.apply_overrides(cr.recipe_for("flux1-dev"), guidance=7.0, prompt="a red bicycle")
+    result = {
+        "generation_seconds": 12.5,
+        "mlx_peak_load_bytes": 1 * GIB,
+        "mlx_peak_encode_bytes": 2 * GIB,
+        "mlx_peak_generation_bytes": 3 * GIB,
+        "memory": {
+            "peak_resident_bytes": 4 * GIB,
+            "peak_footprint_bytes": 5 * GIB,
+            "min_host_free_pct": 42.0,
+            "phases": {"load": {"peak_resident_bytes": 1}},
+        },
+    }
+    record = bc.quality_probe_record(
+        "tighter-guidance",
+        recipe,
+        overrides={"guidance": 7.0, "prompt": "a red bicycle"},
+        result=result,
+        versions=V,
+    )
+    assert record["name"] == "tighter-guidance"
+    assert record["slug"] == "flux1-dev"
+    assert record["stamp"] == cr.recipe_stamp(recipe, versions=V)
+    assert record["overrides"] == {"guidance": 7.0, "prompt": "a red bicycle"}
+    assert (record["width"], record["height"], record["steps"]) == (recipe.width, recipe.height, recipe.steps)
+    assert (record["guidance"], record["quantize"]) == (7.0, recipe.quantize)
+    assert record["prompt"] == "a red bicycle"
+    assert record["negative_prompt"] is None
+    assert record["negative_used"] is False
+    assert record["generation_seconds"] == 12.5
+    assert record["min_host_free_pct"] == 42.0
+    assert record["memory_phases"] == {"load": {"peak_resident_bytes": 1}}
+    assert record["peaks"] == {
+        "mlx_peak_load_bytes": 1 * GIB,
+        "mlx_peak_encode_bytes": 2 * GIB,
+        "mlx_peak_generation_bytes": 3 * GIB,
+        "peak_resident_bytes": 4 * GIB,
+        "peak_footprint_bytes": 5 * GIB,
+    }
+
+
+def test_quality_probe_record_carries_the_condition_and_b_skip_telemetry() -> None:
+    """Bug: a condition-B probe record doesn't say it is B, or drops the skip count / pattern / threshold,
+    so a TeaCache-on face can't be tied to how many steps were actually skipped."""
+    recipe = cr.recipe_for("z-image-base")
+    base = {
+        "generation_seconds": 1.0,
+        "mlx_peak_load_bytes": 0,
+        "mlx_peak_encode_bytes": 0,
+        "mlx_peak_generation_bytes": 0,
+        "memory": {"peak_resident_bytes": 0, "peak_footprint_bytes": 0, "min_host_free_pct": 50.0},
+    }
+    b_result = {
+        **base,
+        "condition": "b",
+        "rel_l1_thresh": 0.25,
+        "skipped": 14,
+        "computed": 36,
+        "max_consecutive_skips": 1,
+        "skip_pattern": "CCSC",
+    }
+    b = bc.quality_probe_record("Z1", recipe, overrides={}, result=b_result, versions=V)
+    assert b["condition"] == "b"
+    assert b["teacache"] == {
+        "rel_l1_thresh": 0.25,
+        "skipped": 14,
+        "computed": 36,
+        "max_consecutive_skips": 1,
+        "skip_pattern": "CCSC",
+    }
+    a = bc.quality_probe_record("Z1", recipe, overrides={}, result={**base, "condition": "a"}, versions=V)
+    assert a["condition"] == "a"
+    assert a["teacache"] is None
+
+
+def test_quality_probe_record_negative_used_true_for_a_real_negative_that_reaches_the_model() -> None:
+    """Bug: negative_used is hardcoded False, or true even when mflux would drop the negative."""
+    recipe = cr.apply_overrides(cr.recipe_for("z-image-base"), negative_prompt="watermark")
+    result = {
+        "generation_seconds": 1.0,
+        "mlx_peak_load_bytes": 0,
+        "mlx_peak_encode_bytes": 0,
+        "mlx_peak_generation_bytes": 0,
+        "memory": {"peak_resident_bytes": 0, "peak_footprint_bytes": 0, "min_host_free_pct": 50.0},
+    }
+    record = bc.quality_probe_record("n", recipe, overrides={}, result=result, versions=V)
+    assert record["negative_used"] is True
+    assert record["memory_phases"] == {}  # absent "phases" key defaults to {}, not a KeyError
+
+
 def test_max_workers_must_be_positive() -> None:
     """Bug: --max-workers 0 makes every invocation exit 3 and run-units re-invokes forever."""
     import argparse
@@ -516,3 +686,226 @@ def test_orchestrate_refuses_a_mismatched_stamp_and_persists_nothing(
             "flux1-dev", budget=-1, smoke=False, spawn=spawn, trash=trash, chunks_dir=chunks, raw_dir=raw
         )
     assert not bc.chunk_path(chunks, "flux1-dev", "a").exists()
+
+
+def test_quality_probe_name_rejects_path_traversal_and_accepts_plain_names() -> None:
+    """Bug: an unvalidated NAME lets --quality-probe ../x (or a/b) escape QUALITY_PROBE_ROOT through
+    quality_probe_dir's plain path join, writing or Trash-moving outside tests/_artifacts/quality_probe/."""
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("../x")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("a/b")
+    with pytest.raises(argparse.ArgumentTypeError):
+        bc.quality_probe_name("")
+    assert bc.quality_probe_name("tighter-guidance_v2.1") == "tighter-guidance_v2.1"
+
+
+def test_read_override_file_rejects_empty_and_strips_whitespace(tmp_path: Path) -> None:
+    """Bug: a prompt/negative file that is empty (or all whitespace) after stripping is silently applied as
+    an empty-string override instead of being rejected with a clear message."""
+    empty = tmp_path / "empty.txt"
+    empty.write_text("   \n\t")
+    with pytest.raises(SystemExit, match="empty"):
+        bc._read_override_file(empty, label="prompt")
+
+    real = tmp_path / "real.txt"
+    real.write_text("  a bicycle in the rain  \n")
+    assert bc._read_override_file(real, label="prompt") == "a bicycle in the rain"
+
+
+def test_quantize_choices_are_restricted_to_supported_bit_depths(capsys: pytest.CaptureFixture[str]) -> None:
+    """Bug: --quantize accepts any int (e.g. 7), which mlx-lm/mflux quantization doesn't support."""
+    parser = bc._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--only", "flux1-dev", "--quantize", "7"])
+    capsys.readouterr()
+    ns = parser.parse_args(["--only", "flux1-dev", "--quantize", "4"])
+    assert ns.quantize == 4
+
+
+def test_quality_probe_is_mutually_exclusive_with_probe_smoke_and_finalize(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bug: --quality-probe can be combined with --probe/--smoke/--finalize on one command line, silently
+    running the wrong mode instead of refusing the ambiguous combination."""
+    parser = bc._build_parser()
+    for other in ("--probe", "--smoke", "--finalize"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--only", "flux1-dev", "--quality-probe", "n", other])
+        capsys.readouterr()
+    # sanity: --quality-probe alone parses fine
+    ns = parser.parse_args(["--only", "flux1-dev", "--quality-probe", "n"])
+    assert ns.quality_probe == "n"
+
+
+def test_quality_probe_records_an_abort_and_returns_exit_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a watchdog abort during --quality-probe is thrown away as a bare RuntimeError (and the process
+    exits non-zero with no artifact) instead of being recorded like a regular worker's chunk abort, with the
+    same exit-4 convention _orchestrate uses."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"aborted": "active-memory watchdog"}
+
+    args = argparse.Namespace(
+        only="flux1-dev",
+        quality_probe="tighter-guidance",
+        condition="a",
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+        rel_l1_thresh=None,
+    )
+    result = bc._quality_probe(args, run_worker=fake_run_worker)
+
+    assert result == 4
+    record = bc.quality_probe_dir(root, "flux1-dev", "tighter-guidance") / "record.aborted.json"
+    assert json.loads(record.read_text()) == {"aborted": "active-memory watchdog"}
+
+
+def test_quality_probe_returns_zero_and_writes_no_abort_file_on_a_normal_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a normal (non-aborted) worker result is mistaken for a failure, or a spurious abort file is
+    written even though nothing aborted."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"name": "tighter-guidance"}
+
+    args = argparse.Namespace(
+        only="flux1-dev",
+        quality_probe="tighter-guidance",
+        condition="a",
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+        rel_l1_thresh=None,
+    )
+    result = bc._quality_probe(args, run_worker=fake_run_worker)
+
+    assert result == 0
+    assert not (bc.quality_probe_dir(root, "flux1-dev", "tighter-guidance") / "record.aborted.json").exists()
+
+
+def test_quality_probe_forwards_only_the_overrides_actually_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: an override the user never set on the command line (e.g. width) is still forwarded to the worker
+    with some default/None-derived value, making the worker's record look like the user asked for something
+    they didn't."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+    seen: dict[str, list[str]] = {}
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen["cmd"] = cmd
+        return {"name": "n"}
+
+    args = argparse.Namespace(
+        only="flux1-dev",
+        quality_probe="n",
+        condition="a",
+        width=512,
+        height=None,
+        guidance=7.0,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+        rel_l1_thresh=None,
+    )
+    bc._quality_probe(args, run_worker=fake_run_worker)
+
+    cmd = seen["cmd"]
+    assert "--width" in cmd and "512" in cmd
+    assert "--guidance" in cmd and "7.0" in cmd
+    assert "--height" not in cmd
+    assert "--quantize" not in cmd
+
+
+def _qp_args(**kw: object) -> argparse.Namespace:
+    base: dict[str, object] = dict(
+        only="z-image-base",
+        quality_probe="Z1",
+        condition="a",
+        width=None,
+        height=None,
+        guidance=None,
+        quantize=None,
+        prompt_file=None,
+        negative_file=None,
+        rel_l1_thresh=None,
+    )
+    return argparse.Namespace(**{**base, **kw})
+
+
+def test_quality_probe_forwards_the_condition_to_the_worker() -> None:
+    """Bug: --quality-probe drops --condition, so asking for a TeaCache-on (B) preview silently renders
+    condition A again."""
+    seen: list[list[str]] = []
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen.append(cmd)
+        return {"name": "Z1"}
+
+    bc._quality_probe(_qp_args(condition="b"), run_worker=fake_run_worker)
+    bc._quality_probe(_qp_args(condition="a"), run_worker=fake_run_worker)
+
+    b_cmd, a_cmd = seen
+    assert b_cmd[b_cmd.index("--condition") + 1] == "b"
+    assert a_cmd[a_cmd.index("--condition") + 1] == "a"
+
+
+def test_quality_probe_b_abort_is_recorded_without_touching_as_abort_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug: a condition-B watchdog abort is written to record.aborted.json, which is condition A's file, so
+    a B abort reads as if A had aborted (or overwrites A's real abort record)."""
+    root = tmp_path / "qp"
+    monkeypatch.setattr(bc, "QUALITY_PROBE_ROOT", root)
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        return {"aborted": "active-memory watchdog"}
+
+    assert bc._quality_probe(_qp_args(condition="b"), run_worker=fake_run_worker) == 4
+
+    out_dir = bc.quality_probe_dir(root, "z-image-base", "Z1")
+    assert json.loads((out_dir / "record.b.aborted.json").read_text()) == {
+        "aborted": "active-memory watchdog"
+    }
+    assert not (out_dir / "record.aborted.json").exists()
+
+
+def test_quality_probe_forwards_rel_l1_thresh_only_when_given() -> None:
+    """Bug: --rel-l1-thresh is dropped on the way to the worker (B runs at the default threshold while the
+    probe is named for a lower one), or a threshold the user never set is forwarded."""
+    seen: list[list[str]] = []
+
+    def fake_run_worker(cmd: list[str], label: str) -> dict:
+        seen.append(cmd)
+        return {"name": "Z1"}
+
+    bc._quality_probe(_qp_args(condition="b", rel_l1_thresh=0.12), run_worker=fake_run_worker)
+    bc._quality_probe(_qp_args(condition="b", rel_l1_thresh=None), run_worker=fake_run_worker)
+
+    with_t, without_t = seen
+    assert with_t[with_t.index("--rel-l1-thresh") + 1] == "0.12"
+    assert "--rel-l1-thresh" not in without_t
+
+
+def test_rel_l1_thresh_flag_parses_as_a_float() -> None:
+    """Bug: --rel-l1-thresh is missing from the parser or parsed as a string."""
+    ns = bc._build_parser().parse_args(
+        ["--only", "klein-base-4b", "--quality-probe", "t", "--rel-l1-thresh", "0.1"]
+    )
+    assert ns.rel_l1_thresh == 0.1

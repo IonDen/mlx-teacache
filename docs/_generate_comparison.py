@@ -55,6 +55,30 @@ def _summary(slug: str, v: dict[str, Any]) -> str:
     )
 
 
+def _prompt(slug: str, v: dict[str, Any], report: dict[str, Any]) -> str:
+    """The prompt this model actually ran with, its negative when one was set, and its settings line.
+
+    Entries written before per-model prompts were recorded fall back to the report's shared prompt (plus
+    Qwen's vendor suffix). Either way the text must hash to the entry's recorded prompt_sha256, so a page
+    can never show wording other than the one that produced its images."""
+    import hashlib
+
+    text = v.get("prompt")
+    if text is None:
+        text = report["prompt"] + (report["qwen_prompt_suffix"] if slug == "qwen-image" else "")
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != v["prompt_sha256"]:
+        raise ValueError(f"{slug}: the prompt to render does not match the prompt_sha256 the run recorded")
+    parts = [f"> {text}"]
+    if v.get("negative_prompt"):
+        parts += ["Negative prompt:", f"> {v['negative_prompt']}"]
+    parts.append(
+        f"Seed {report['seed']}, {v['steps']} steps, guidance {v['guidance']}, q{v['quantize']}, "
+        f"{v['width']}×{v['height']}"
+        f"{', text encoder freed once the prompt is encoded' if v.get('free_encoders') else ''}."
+    )
+    return "\n\n".join(parts)
+
+
 def _sheets(slug: str, v: dict[str, Any]) -> str:
     return "\n".join(
         [
@@ -147,6 +171,7 @@ def render_blocks(report: dict[str, Any]) -> dict[str, str]:
     seed = report["seed"]
     for slug, v in report["variants"].items():
         blocks[f"{slug}:summary"] = _summary(slug, v)
+        blocks[f"{slug}:prompt"] = _prompt(slug, v, report)
         blocks[f"{slug}:sheets"] = _sheets(slug, v)
         blocks[f"{slug}:details"] = _details(slug, v, seed)
     return blocks
@@ -155,7 +180,7 @@ def render_blocks(report: dict[str, Any]) -> dict[str, str]:
 def page_blocks(slug: str | None, slugs: Sequence[str]) -> set[str]:
     if slug is None:
         return {"machine"} | {f"{s}:summary" for s in slugs}
-    return {f"{slug}:sheets", f"{slug}:details"}
+    return {f"{slug}:prompt", f"{slug}:sheets", f"{slug}:details"}
 
 
 def splice(text: str, blocks: dict[str, str], *, required: set[str]) -> str:

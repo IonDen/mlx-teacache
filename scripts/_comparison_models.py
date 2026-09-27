@@ -107,10 +107,44 @@ def _cached_call(result: Any, key: dict[str, Any], label: str) -> Callable[..., 
     return _call
 
 
+_NEGATIVE_PROMPT_GENERATE_LOADERS: tuple[str, ...] = ("z-image", "qwen-image-original")
+
+
+def generate_kwargs_for(recipe: Recipe) -> dict[str, Any]:
+    """``generate_image`` kwargs carrying the recipe's negative prompt.
+
+    Only Z-Image's and Qwen's ``generate_image`` accept ``negative_prompt``. FLUX.1/Krea's signature accepts
+    the parameter too but never wires it to anything (``precompute_prompt`` below already raises before this
+    is reached if such a recipe sets one, so a silently-ignored negative can never leave this harness). Klein's
+    ``generate_image`` has no such parameter at all -- passing one would raise a TypeError at call time."""
+    if recipe.loader in _NEGATIVE_PROMPT_GENERATE_LOADERS:
+        return {"negative_prompt": recipe.negative_prompt}
+    return {}
+
+
+_NO_NEGATIVE_ROUTE_LOADERS: tuple[str, ...] = ("flux1-dev", "flux1-krea-dev")
+
+
+def negative_used_for(recipe: Recipe) -> bool:
+    """Whether the recipe's negative prompt, if any, actually reaches the model.
+
+    False when unset, when ``guidance <= 1.0`` (mflux drops a CFG-only negative below that threshold --
+    Klein's own ``_encode_prompt_pair`` gates on exactly this), or when the loader's ``generate_image`` has
+    no route for a negative at all (FLUX.1/Krea; ``precompute_prompt`` already raises before generation if
+    such a recipe sets one, so this loader branch is otherwise unreachable in a real run)."""
+    if not recipe.negative_prompt:
+        return False
+    if recipe.guidance <= 1.0:
+        return False
+    return recipe.loader not in _NO_NEGATIVE_ROUTE_LOADERS
+
+
 def precompute_prompt(flux: Any, recipe: Recipe, prompt: str) -> None:
     import mlx.core as mx
 
     if recipe.loader in ("flux1-dev", "flux1-krea-dev"):
+        if recipe.negative_prompt is not None:
+            raise ValueError(f"{recipe.slug}: a negative prompt is not supported for FLUX.1/Krea")
         from mflux.models.flux.model.flux_text_encoder.prompt_encoder import PromptEncoder
 
         embeds = PromptEncoder.encode_prompt(
@@ -123,12 +157,24 @@ def precompute_prompt(flux: Any, recipe: Recipe, prompt: str) -> None:
         )
         mx.eval(embeds)
     elif recipe.loader in ("klein-base-4b", "klein-base-9b"):
-        key = {"prompt": prompt, "negative_prompt": " ", "guidance": recipe.guidance}  # flux2_klein.py:76-80
-        result = flux._encode_prompt_pair(**key)
+        # mflux always calls _encode_prompt_pair(negative_prompt=" ") (flux2_klein.py:76-80; hard-coded). We
+        # encode with the recipe's real negative but key the override on what mflux will actually call with,
+        # so the real negative's embeddings are served under that call.
+        encode_key = {
+            "prompt": prompt,
+            "negative_prompt": recipe.negative_prompt or " ",
+            "guidance": recipe.guidance,
+        }
+        result = flux._encode_prompt_pair(**encode_key)
         mx.eval([x for x in result if x is not None])
-        flux._encode_prompt_pair = _cached_call(result, key, recipe.slug)
+        override_key = {"prompt": prompt, "negative_prompt": " ", "guidance": recipe.guidance}
+        flux._encode_prompt_pair = _cached_call(result, override_key, recipe.slug)
     elif recipe.loader == "z-image":
-        key = {"prompt": prompt, "negative_prompt": None, "guidance": recipe.guidance}  # z_image.py:97-101
+        key = {
+            "prompt": prompt,
+            "negative_prompt": recipe.negative_prompt,
+            "guidance": recipe.guidance,
+        }  # z_image.py:97-101
         result = flux._encode_prompts(**key)
         mx.eval([x for x in result if x is not None])
         flux._encode_prompts = _cached_call(result, key, recipe.slug)
@@ -137,7 +183,7 @@ def precompute_prompt(flux: Any, recipe: Recipe, prompt: str) -> None:
 
         embeds = QwenPromptEncoder.encode_prompt(
             prompt=prompt,
-            negative_prompt=" ",
+            negative_prompt=recipe.negative_prompt or " ",
             prompt_cache=flux.prompt_cache,
             qwen_tokenizer=flux.tokenizers["qwen"],
             qwen_text_encoder=flux.text_encoder,

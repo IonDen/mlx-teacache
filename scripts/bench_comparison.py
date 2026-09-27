@@ -19,6 +19,7 @@ recipe stamp (an editable install changes them on every commit).
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
-from _comparison_recipes import Recipe
+from _comparison_recipes import Recipe, prompt_for
 from _comparison_sheet import frame_paths
 from _comparison_steps import medians_by_kind, preview_subtracted_speedup, steady_state_speedup
 
@@ -39,6 +40,7 @@ CHUNKS_DIR = REPO / "tests" / "_artifacts" / "comparison_chunks_v2"
 RAW_ROOT = REPO / "tests" / "_artifacts" / "comparison_raw"
 PROBE_DIR = REPO / "tests" / "_artifacts" / "comparison_probe"
 SMOKE_ROOT = REPO / "tests" / "_artifacts" / "comparison_smoke"
+QUALITY_PROBE_ROOT = REPO / "tests" / "_artifacts" / "quality_probe"
 CONDITIONS: tuple[str, ...] = ("a", "b")
 WORKER_RESULT_SENTINEL = "::BENCH_RESULT::"
 GIB = 1024**3
@@ -54,6 +56,90 @@ def raw_dir_for(raw_root: Path, slug: str) -> Path:
 
 def frames_dir_for(raw_root: Path, slug: str, condition: str) -> Path:
     return raw_root / slug / "frames" / condition
+
+
+def quality_probe_dir(root: Path, slug: str, name: str) -> Path:
+    return root / slug / name
+
+
+def quality_probe_record_path(
+    root: Path, slug: str, name: str, condition: str, *, aborted: bool = False
+) -> Path:
+    """Condition A keeps ``record.json`` (the name the A-only probes already use); B gets ``record.b.json``,
+    so a TeaCache-on probe sits next to the TeaCache-off one under the same NAME without overwriting it."""
+    stem = "record" if condition == "a" else f"record.{condition}"
+    return quality_probe_dir(root, slug, name) / f"{stem}{'.aborted' if aborted else ''}.json"
+
+
+def reset_quality_probe_outputs(
+    root: Path, slug: str, name: str, condition: str, *, trash: Path, tag: str
+) -> list[Path]:
+    """Move one condition's previous probe outputs (final PNG, frames, record, abort record) to the Trash
+    (rule F) before a fresh run of that condition; the other condition's files stay where they are."""
+    moved: list[Path] = []
+    for aborted in (False, True):
+        record = quality_probe_record_path(root, slug, name, condition, aborted=aborted)
+        if record.exists():
+            trash.mkdir(parents=True, exist_ok=True)
+            dest = trash / f"quality-probe-{slug}-{name}-{record.stem}-{tag}{record.suffix}"
+            shutil.move(str(record), dest)
+            moved.append(dest)
+    if quality_probe_dir(root, slug, name).exists():
+        trash.mkdir(parents=True, exist_ok=True)
+        moved += reset_condition_outputs(root, f"{slug}/{name}", condition, trash=trash, tag=tag)
+    return moved
+
+
+def quality_probe_record(
+    name: str,
+    recipe: Recipe,
+    *,
+    overrides: dict[str, object],
+    result: dict[str, Any],
+    versions: dict[str, str],
+) -> dict[str, Any]:
+    """The JSON record for one quality-probe generation: the resolved recipe (as a stamp, for
+    reproducibility), what was overridden, the resolved prompt/negative and whether the negative actually
+    reached the model, generation time, and the memory peaks/phases -- everything needed to judge a
+    candidate setting without touching chunks, the report, or _artifacts/."""
+    from _comparison_models import negative_used_for
+    from _comparison_recipes import prompt_for, recipe_stamp
+
+    memory = result["memory"]
+    teacache = (
+        {
+            key: result[key]
+            for key in ("rel_l1_thresh", "skipped", "computed", "max_consecutive_skips", "skip_pattern")
+        }
+        if "rel_l1_thresh" in result
+        else None
+    )
+    return {
+        "name": name,
+        "slug": recipe.slug,
+        "condition": result.get("condition", "a"),
+        "teacache": teacache,
+        "stamp": recipe_stamp(recipe, versions=versions),
+        "overrides": dict(overrides),
+        "width": recipe.width,
+        "height": recipe.height,
+        "steps": recipe.steps,
+        "guidance": recipe.guidance,
+        "quantize": recipe.quantize,
+        "prompt": prompt_for(recipe),
+        "negative_prompt": recipe.negative_prompt,
+        "negative_used": negative_used_for(recipe),
+        "generation_seconds": result["generation_seconds"],
+        "peaks": {
+            "mlx_peak_load_bytes": result["mlx_peak_load_bytes"],
+            "mlx_peak_encode_bytes": result["mlx_peak_encode_bytes"],
+            "mlx_peak_generation_bytes": result["mlx_peak_generation_bytes"],
+            "peak_resident_bytes": memory["peak_resident_bytes"],
+            "peak_footprint_bytes": memory["peak_footprint_bytes"],
+        },
+        "min_host_free_pct": memory["min_host_free_pct"],
+        "memory_phases": memory.get("phases", {}),
+    }
 
 
 def chunk_is_complete(chunks_dir: Path, raw_root: Path, slug: str, condition: str, steps: int) -> bool:
@@ -182,6 +268,8 @@ def assemble_entry(
         "free_encoders": recipe.free_encoders,
         "a_compiled_predict": recipe.loader in _COMPILED_PREDICT_LOADERS and mflux_compiles_on_this_chip,
         "prompt_sha256": a["stamp"]["prompt_sha256"],
+        "prompt": prompt_for(recipe),
+        "negative_prompt": recipe.negative_prompt,
         "a": condition_summary(a, is_b=False),
         "b": condition_summary(b, is_b=True),
         "speedup_wall": a["generation_seconds"] / b["generation_seconds"],
@@ -219,7 +307,8 @@ def reset_condition_outputs(
     moved: list[Path] = []
     final = raw_dir_for(raw_root, slug) / f"{condition}.png"
     frames = frames_dir_for(raw_root, slug, condition)
-    for path, label in ((final, f"{slug}-{condition}-final"), (frames, f"{slug}-{condition}-frames")):
+    flat = slug.replace("/", "-")  # a quality probe's nested "<slug>/<name>" must stay one Trash entry
+    for path, label in ((final, f"{flat}-{condition}-final"), (frames, f"{flat}-{condition}-frames")):
         if path.exists():
             dest = trash / f"comparison-{label}-{tag}{path.suffix}"
             shutil.move(str(path), dest)
@@ -255,6 +344,28 @@ def positive_int(text: str) -> int:
     return value
 
 
+_QUALITY_PROBE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def quality_probe_name(text: str) -> str:
+    """Argparse ``type=`` for --quality-probe NAME: a plain path segment, never a traversal (``../x``) or a
+    nested path (``a/b``) that could escape QUALITY_PROBE_ROOT through quality_probe_dir's plain path join."""
+    if not _QUALITY_PROBE_NAME_RE.fullmatch(text):
+        raise argparse.ArgumentTypeError(
+            f"--quality-probe NAME must match {_QUALITY_PROBE_NAME_RE.pattern!r}, got {text!r}"
+        )
+    return text
+
+
+def _read_override_file(path: Path, *, label: str) -> str:
+    """Read and strip a --prompt-file/--negative-file; refuses one that is empty (or all whitespace) after
+    stripping instead of silently applying it as an empty-string override."""
+    text = path.read_text().strip()
+    if not text:
+        raise SystemExit(f"--{label}-file {path}: file is empty")
+    return text
+
+
 def _now_tag() -> str:
     """Second resolution alone lets two retires in the same run (a chunk and its stale .aborted.json
     marker, or two fast test retries) collide on one Trash destination; microseconds make every tag unique."""
@@ -280,8 +391,13 @@ def _load_probes(slug: str) -> list[dict[str, Any]]:
     ]
 
 
-def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: int) -> dict[str, Any]:
-    """One generation with every guard in place; staged load; per-phase memory. Returns the result dict."""
+def _run_generation(
+    recipe: Recipe, condition: str, *, raw_root: Path, steps: int, path_slug: str | None = None
+) -> dict[str, Any]:
+    """One generation with every guard in place; staged load; per-phase memory. Returns the result dict.
+
+    ``path_slug`` overrides ``recipe.slug`` for output-path nesting only (the quality-probe worker nests by
+    ``<slug>/<name>`` instead of ``<slug>``); every other use of the recipe is unaffected."""
     import mlx.core as mx
     from _comparison_memory import (
         PeakSampler,
@@ -295,20 +411,22 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
         ENCODER_ATTRS,
         assert_prompt_cache_hit,
         evaluate_modules,
+        generate_kwargs_for,
         load_model,
         precompute_prompt,
         release_text_encoders,
     )
-    from _comparison_recipes import SEED, prompt_for
+    from _comparison_recipes import SEED, prompt_for, teacache_kwargs
     from _comparison_steps import decision_kinds, register_stamped_preview, split_steps
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     import mlx_teacache
 
-    reset_condition_outputs(raw_root, recipe.slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
-    frames_dir = frames_dir_for(raw_root, recipe.slug, condition)
+    slug = path_slug or recipe.slug
+    reset_condition_outputs(raw_root, slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
+    frames_dir = frames_dir_for(raw_root, slug, condition)
     frames_dir.mkdir(parents=True, exist_ok=True)
-    out_png = raw_dir_for(raw_root, recipe.slug) / f"{condition}.png"
+    out_png = raw_dir_for(raw_root, slug) / f"{condition}.png"
     prompt = prompt_for(recipe)
 
     sampler = PeakSampler(
@@ -359,7 +477,7 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
 
             with warnings.catch_warnings():
                 warnings.simplefilter("error", TeaCacheUncalibratedCheckpointWarning)
-                handle = apply_teacache(flux)
+                handle = apply_teacache(flux, **teacache_kwargs(recipe))
 
         mx.clear_cache()  # so load leftovers do not sit in the generation window
         mx.reset_peak_memory()
@@ -371,6 +489,7 @@ def _run_generation(recipe: Recipe, condition: str, *, raw_root: Path, steps: in
             height=recipe.height,
             width=recipe.width,
             guidance=recipe.guidance,
+            **generate_kwargs_for(recipe),
         )
         mx.synchronize()
         generation_seconds = time.perf_counter() - gen_start
@@ -466,6 +585,10 @@ def _smoke_recipe(recipe: Recipe) -> Recipe:
 def _worker_main(args: argparse.Namespace) -> None:
     from _comparison_recipes import recipe_for, recipe_stamp, with_resolution
 
+    if args.quality_probe:
+        _quality_probe_worker(args)
+        return
+
     recipe = with_resolution(recipe_for(args.only), args.width, args.height)
     if args.smoke:
         recipe = _smoke_recipe(recipe)
@@ -478,8 +601,73 @@ def _worker_main(args: argparse.Namespace) -> None:
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
 
 
+def _quality_probe_worker(args: argparse.Namespace) -> None:
+    """(internal, --worker --quality-probe) One generation of --condition (A, or B with TeaCache on) with the
+    given overrides; writes that condition's final PNG, preview frames and JSON record under
+    QUALITY_PROBE_ROOT/<slug>/<name>/, leaving the other condition's files alone. Touches no chunk, no
+    report, no _artifacts/."""
+    from _comparison_recipes import apply_overrides, recipe_for
+
+    name = args.quality_probe
+    overrides: dict[str, object] = {
+        k: v
+        for k, v in {
+            "width": args.width,
+            "height": args.height,
+            "guidance": args.guidance,
+            "quantize": args.quantize,
+            "rel_l1_thresh": args.rel_l1_thresh,
+            "prompt": _read_override_file(args.prompt_file, label="prompt") if args.prompt_file else None,
+            "negative_prompt": (
+                _read_override_file(args.negative_file, label="negative") if args.negative_file else None
+            ),
+        }.items()
+        if v is not None
+    }
+    recipe = apply_overrides(recipe_for(args.only), **overrides)
+    condition = args.condition
+    reset_quality_probe_outputs(
+        QUALITY_PROBE_ROOT, recipe.slug, name, condition, trash=Path.home() / ".Trash", tag=_now_tag()
+    )
+    _install_guards(recipe, f"{recipe.slug}/quality-probe/{name}/{condition}")
+    result = _run_generation(
+        recipe, condition, raw_root=QUALITY_PROBE_ROOT, steps=recipe.steps, path_slug=f"{recipe.slug}/{name}"
+    )
+    record = quality_probe_record(name, recipe, overrides=overrides, result=result, versions=_versions())
+    quality_probe_record_path(QUALITY_PROBE_ROOT, recipe.slug, name, condition).write_text(
+        json.dumps(record, indent=2)
+    )
+    print(f"{WORKER_RESULT_SENTINEL}{json.dumps(record)}", flush=True)
+
+
+def _stream_worker(cmd: list[str]) -> tuple[int, str]:
+    """Run a worker subprocess; stream its output live (heavy-runs monitoring) while collecting it."""
+    env = {**os.environ, "HF_HUB_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
+    lines: list[str] = []
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=None, text=True, env=env) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+        returncode = proc.wait()
+    return returncode, "".join(lines)
+
+
+def _run_worker(cmd: list[str], label: str) -> dict[str, Any]:
+    """Spawn one worker subprocess, stream its output, and return its parsed result -- the ``aborted``
+    payload if the memory watchdog fired, otherwise the worker's own result dict. Raises on any other
+    failure (non-zero exit with no parseable result line)."""
+    returncode, out = _stream_worker(cmd)
+    payload = parse_worker_line(out)
+    if payload is not None and "aborted" in payload:
+        return payload
+    if returncode != 0 or payload is None:
+        raise RuntimeError(f"worker {label} failed: exit {returncode}")
+    return payload
+
+
 def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[str, Any]:
-    """Run one worker; stream its output live (heavy-runs monitoring) while collecting it for the result line."""
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -495,25 +683,60 @@ def _spawn(recipe: Recipe, condition: str, *, probe: bool, smoke: bool) -> dict[
     ]
     cmd += ["--probe"] if probe else []
     cmd += ["--smoke"] if smoke else []
-    env = {**os.environ, "HF_HUB_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
     print(
         f"\n>> worker {recipe.slug}/{condition} {recipe.width}x{recipe.height}{' probe' if probe else ''}",
         flush=True,
     )
-    lines: list[str] = []
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=None, text=True, env=env) as proc:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            lines.append(line)
-        returncode = proc.wait()
-    payload = parse_worker_line("".join(lines))
-    if payload is not None and "aborted" in payload:
-        return payload
-    if returncode != 0 or payload is None:
-        raise RuntimeError(f"worker {recipe.slug}/{condition} failed: exit {returncode}")
-    return payload
+    return _run_worker(cmd, f"{recipe.slug}/{condition}")
+
+
+def _quality_probe(
+    args: argparse.Namespace, *, run_worker: Callable[[list[str], str], dict[str, Any]] | None = None
+) -> int:
+    """Top-level --quality-probe NAME --only <slug>: forward only the overrides the caller actually gave to
+    ONE worker of --condition (prompt/negative as file paths, so the worker re-reads them itself instead of
+    round-tripping arbitrary text through argv). The worker applies them with apply_overrides.
+
+    A watchdog abort is recorded the same way ``_orchestrate`` records a chunk abort: the payload is written
+    to that condition's ``quality_probe_record_path(..., aborted=True)`` and exit code 4 is returned -- never a bare
+    ``RuntimeError`` that throws the measurement away with no artifact."""
+    worker_fn = run_worker or _run_worker
+    label = f"{args.only}/{args.quality_probe}/{args.condition}"
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--worker",
+        "--quality-probe",
+        args.quality_probe,
+        "--only",
+        args.only,
+        "--condition",
+        args.condition,
+    ]
+    for flag, value in (
+        ("--width", args.width),
+        ("--height", args.height),
+        ("--guidance", args.guidance),
+        ("--quantize", args.quantize),
+        ("--rel-l1-thresh", args.rel_l1_thresh),
+    ):
+        if value is not None:
+            cmd += [flag, str(value)]
+    if args.prompt_file is not None:
+        cmd += ["--prompt-file", str(args.prompt_file)]
+    if args.negative_file is not None:
+        cmd += ["--negative-file", str(args.negative_file)]
+    print(f"\n>> quality-probe {label}", flush=True)
+    result = worker_fn(cmd, label)
+    if "aborted" in result:
+        abort_path = quality_probe_record_path(
+            QUALITY_PROBE_ROOT, args.only, args.quality_probe, args.condition, aborted=True
+        )
+        abort_path.parent.mkdir(parents=True, exist_ok=True)
+        abort_path.write_text(json.dumps(result, indent=2))
+        print(f"== ABORTED by the memory watchdog on quality-probe {label}; nothing persisted ==", flush=True)
+        return 4
+    return 0
 
 
 def merge_probe_results(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
@@ -762,7 +985,7 @@ def _report_header() -> dict[str, Any]:
     }
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
     from _comparison_recipes import RECIPES
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -771,7 +994,11 @@ def main() -> None:
     ap.add_argument("--condition", choices=CONDITIONS, default="a")
     ap.add_argument("--width", type=int)
     ap.add_argument("--height", type=int)
-    ap.add_argument(
+    # --probe / --smoke / --finalize / --quality-probe are different run modes for the same --only slug and
+    # never make sense combined; mutually exclusive so a typo'd command line is refused instead of running
+    # whichever mode happens to be checked first.
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
         "--probe",
         action="store_true",
         help="3-step memory probe of conditions A and B, gated on the worse; writes no chunk",
@@ -784,16 +1011,46 @@ def main() -> None:
     )
     ap.add_argument("--reason", default="killed by mlx-guard")
     ap.add_argument("--max-workers", type=positive_int, default=None)
-    ap.add_argument("--finalize", action="store_true", help="SSIM + contact sheets + report entry")
+    mode.add_argument("--finalize", action="store_true", help="SSIM + contact sheets + report entry")
     ap.add_argument(
         "--export-jpg",
         action="store_true",
         help="with --finalize: also write the showcase JPGs to _artifacts/comparison/<slug>/",
     )
-    ap.add_argument(
+    mode.add_argument(
         "--smoke", action="store_true", help="4 steps at 256x256 into tests/_artifacts/comparison_smoke"
     )
-    args = ap.parse_args()
+    mode.add_argument(
+        "--quality-probe",
+        metavar="NAME",
+        type=quality_probe_name,
+        default=None,
+        help="one-off generation (condition A, or B with --condition b) to compare a candidate setting; writes "
+        "tests/_artifacts/quality_probe/<slug>/NAME/ only -- no chunk, no report, no _artifacts/",
+    )
+    ap.add_argument("--guidance", type=float, default=None, help="with --quality-probe: override guidance")
+    ap.add_argument(
+        "--quantize",
+        type=int,
+        choices=(3, 4, 5, 6, 8),
+        default=None,
+        help="with --quality-probe: override quantize bits",
+    )
+    ap.add_argument(
+        "--rel-l1-thresh",
+        type=float,
+        default=None,
+        help="with --quality-probe --condition b: TeaCache threshold instead of the variant default",
+    )
+    ap.add_argument("--prompt-file", type=Path, default=None, help="with --quality-probe: prompt text file")
+    ap.add_argument(
+        "--negative-file", type=Path, default=None, help="with --quality-probe: negative-prompt text file"
+    )
+    return ap
+
+
+def main() -> None:
+    args = _build_parser().parse_args()
     if args.worker:
         _worker_main(args)
         return
@@ -805,6 +1062,8 @@ def main() -> None:
     if args.finalize:
         _finalize(args.only, export_jpg=args.export_jpg)
         return
+    if args.quality_probe:
+        raise SystemExit(_quality_probe(args))
     budget = args.max_workers if args.max_workers is not None else -1
     raise SystemExit(_orchestrate(args.only, budget=budget, smoke=args.smoke))
 

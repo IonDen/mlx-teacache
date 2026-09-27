@@ -10,6 +10,8 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - COMPARISON.md is rebuilt: one tennis-at-sunset scene per non-distilled model, generated once with TeaCache off and once with it on, each pair backed by its own page of per-step previews and full generation details. A new schema-2 report is written to `_artifacts/comparison/report.json`; the earlier report stays as it was. The old showcase images are removed, and `docs/comparison/` is left out of the sdist. The distilled-vs-base Klein study moves to its own page.
 - The Qwen-Image calibrated-checkpoint check is now a small shared function. No behavior change.
+- The Z-Image and FLUX.2 [klein] base pairs on COMPARISON.md are rendered again, in 8-bit weights. Z-Image runs at 864×1152 with its own wording of the scene and a negative prompt, which clears the red cheek patches and white specks the shared prompt produced. Klein base 4B runs at 864×1152 and Klein base 9B at 576×768. Each model page now shows the prompt it ran with, and the negative prompt where one was set; the main page no longer quotes it.
+- `scripts/bench_comparison.py --quality-probe NAME` renders one candidate setting without touching the comparison chunks or report, for condition A or B, with optional overrides for size, guidance, quantization, prompt, negative prompt and TeaCache threshold.
 
 ### Fixed
 - README footnote ¹ no longer credits part of FLUX.1-dev's speedup to `mx.compile`-path avoidance. mflux does not compile the FLUX.1 predict step, and the gap the footnote described was run-to-run spread, not a second speedup mechanism.

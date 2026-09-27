@@ -26,3 +26,10 @@ def test_quality_probe_worker_nests_output_by_slug_and_name_exactly_once() -> No
     # nesting, so record.json and the images it points at end up in different directories.
     text = SCRIPT.read_text()
     assert text.count('path_slug=f"{recipe.slug}/{name}"') == 1
+
+
+def test_main_parses_through_the_validating_helper_exactly_once() -> None:
+    # bug caught: main() goes back to a bare _build_parser().parse_args(), which switches off both probe-flag
+    # refusals in real use while their helper tests stay green.
+    text = SCRIPT.read_text()
+    assert text.count("args = _parse_and_validate()") == 1

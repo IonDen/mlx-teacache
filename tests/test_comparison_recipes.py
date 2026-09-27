@@ -405,4 +405,6 @@ def test_every_recipe_matches_the_settings_the_committed_report_recorded() -> No
         assert (v["width"], v["height"]) in {(rec.width, rec.height), rec.fallback}, rec.slug
         if "negative_prompt" in v:
             assert v["negative_prompt"] == rec.negative_prompt, rec.slug
+        else:  # entries written before negatives were recorded ran without one
+            assert rec.negative_prompt is None, rec.slug
     assert checked == 6

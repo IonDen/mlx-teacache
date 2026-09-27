@@ -1043,6 +1043,21 @@ def test_probe_only_flags_misused_names_a_probe_only_flag_given_without_the_prob
     assert bc.probe_only_flags_misused(_probe_only_ns(rel_l1_thresh=0.1)) == ["--rel-l1-thresh"]
 
 
+def test_probe_only_flags_misused_names_every_probe_only_flag() -> None:
+    """Bug: one of the five probe-only flags is missing from the list, so it silently does nothing again
+    outside --quality-probe."""
+    ns = _probe_only_ns(
+        guidance=7.0, quantize=4, rel_l1_thresh=0.1, prompt_file="p.txt", negative_file="n.txt"
+    )
+    assert bc.probe_only_flags_misused(ns) == [
+        "--guidance",
+        "--quantize",
+        "--rel-l1-thresh",
+        "--prompt-file",
+        "--negative-file",
+    ]
+
+
 def test_probe_only_flags_misused_is_empty_when_the_probe_is_also_given() -> None:
     """Bug: a legitimate --quality-probe X --rel-l1-thresh 0.1 combination is refused."""
     assert bc.probe_only_flags_misused(_probe_only_ns(quality_probe="X", rel_l1_thresh=0.1)) == []
@@ -1051,11 +1066,12 @@ def test_probe_only_flags_misused_is_empty_when_the_probe_is_also_given() -> Non
 def test_parse_and_validate_refuses_a_probe_only_flag_given_without_quality_probe(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Bug: --rel-l1-thresh 0.1 without --quality-probe parses fine and silently does nothing (there is no
-    condition-B apply_teacache call to feed it to) instead of being refused up front."""
+    """Bug: a probe-only flag without --quality-probe parses fine and silently does nothing (the orchestrator
+    runs the recipe's defaults) instead of being refused up front. --guidance is used because the separate
+    condition-A rule never looks at it, so only the misuse check can refuse this command."""
     with pytest.raises(SystemExit):
-        bc._parse_and_validate(["--only", "z-image-base", "--rel-l1-thresh", "0.1"])
-    capsys.readouterr()
+        bc._parse_and_validate(["--only", "z-image-base", "--guidance", "7"])
+    assert "requires --quality-probe" in capsys.readouterr().err
 
 
 def test_parse_and_validate_refuses_rel_l1_thresh_on_condition_a(
@@ -1130,6 +1146,24 @@ def test_run_worker_still_raises_on_a_plain_non_zero_exit_with_no_result_line(
     monkeypatch.setattr(bc, "_stream_worker", lambda cmd: (1, ""))
     with pytest.raises(RuntimeError):
         bc._run_worker(["x"], "flux1-dev/a")
+
+
+def test_run_worker_raises_for_a_sigkill_rather_than_calling_it_the_gpu_time_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug: the SIGABRT check widens to any signal death, so a jetsam SIGKILL (-9) is recorded as "likely the
+    macOS GPU time limit" instead of raising."""
+    monkeypatch.setattr(bc, "_stream_worker", lambda cmd: (-9, ""))
+    with pytest.raises(RuntimeError):
+        bc._run_worker(["x"], "flux1-dev/a")
+
+
+def test_run_worker_treats_the_shell_form_of_sigabrt_as_an_abort(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug: only -6 is recognised, so a worker whose SIGABRT reaches us through a shell (exit 134) raises
+    instead of recording the abort."""
+    monkeypatch.setattr(bc, "_stream_worker", lambda cmd: (134, "no result line\n"))
+    payload = bc._run_worker(["x"], "flux1-dev/a")
+    assert payload["returncode"] == 134 and "SIGABRT" in payload["aborted"]
 
 
 _SIGABRT_REASON = "SIGABRT (likely the macOS GPU time limit: Impacting Interactivity)"

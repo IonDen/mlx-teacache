@@ -125,6 +125,7 @@ def _make_handle(
     return SimpleNamespace(
         rel_l1_thresh=rel_l1_thresh,
         coefficients=coefficients,
+        calibrated_range=None,  # the real bridge's default: no clamp
         skip_first_n_steps=skip_first,
         skip_last_n_steps=skip_last,
         _state=state,
@@ -268,6 +269,7 @@ def test_skip_step_reconstructs_body_out_from_cached_residual():
     handle = SimpleNamespace(
         rel_l1_thresh=0.5,
         coefficients=zero_coeffs,
+        calibrated_range=None,  # the real bridge's default: no clamp
         skip_first_n_steps=0,
         skip_last_n_steps=0,
         _state=SimpleNamespace(

@@ -43,9 +43,11 @@ Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `black-forest
 
 ### Notes
 
-At its matching 512² recipe, footnote ⁴ splits this variant's 1.22× multi-run speedup into 1.20× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein base 4B's prediction step compiled; the wrapper runs it eagerly instead. This run didn't include a no-gate condition, so the MLX peak-generation difference below (14.7 GiB vs 12.5 GiB) can't be pinned on the eager path versus the gate.
+At its matching 512² recipe, footnote ⁴ splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein base 4B's prediction step compiled; the wrapper runs it eagerly instead. This run didn't include a no-gate condition, so the MLX peak-generation difference below (14.7 GiB vs 12.5 GiB) can't be pinned on the eager path versus the gate.
 
 On this run the gate skips 11 of 50 steps, most of them in the first half of the schedule. The scene holds, down to the shoes and laces, but two things change in B: she squints with her eyes nearly closed, and a second ball appears beside the racket. Both come from steps skipped at the library's default threshold (0.17), which is what this page shows.
+
+This run used mlx-teacache 0.11.1. From 0.12.0 the gate no longer skips a step whose input change is smaller than anything in its calibration. A replay of this run's gate predicts one fewer skip (10 of 50) with 0.12.0, and several of the early skips land a step later, so B would come out slightly different.
 
 ### Reproduce
 

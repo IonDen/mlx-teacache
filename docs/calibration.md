@@ -14,6 +14,41 @@ on every gated step. This matches how the calibration script measures its
 training pairs: `rel_l1(mod_in_t, mod_in_{t-1})` between consecutive steps,
 never against an older, non-adjacent step.
 
+## Calibrated range
+
+The FLUX.2 Klein base, Z-Image and Qwen-Image fits are origin-constrained: the
+polynomial is forced through zero. Below the smallest delta the calibration
+produced, that constraint decides the prediction, not the data. The base-4b
+polynomial gives 0.027 at a delta of 0.0035, while the smallest output change
+its calibration measured anywhere was 0.107. On an 864×1152, 50-step
+klein-base-4b run the gate skipped three steps with deltas that small at every
+threshold down to 0.08.
+
+Since 0.12.0 each of these variants records the range its fit was made on as
+`CALIBRATED_RANGE` in its `config.py`, copied from `x_min` / `x_max` of the
+calibration JSON (signal B for Z-Image, signal A for Qwen-Image; klein-base-9b
+takes base-4b's along with its coefficients). The gate clamps the measured
+delta into that range before evaluating the polynomial, so a delta below it is
+priced like the smallest calibrated one and a delta above it like the largest.
+The step's recorded `rel_l1` is still the measured delta, so the stats show
+when a run went outside the range. FLUX.1 dev and schnell (upstream tuples with
+no recorded range), Krea (a free-intercept fit, which predicts more change
+below its data rather than less), the distilled Klein variants and
+user-supplied coefficients are evaluated unclamped.
+
+Every clamped polynomial stays positive over its range, and its lowest value is
+at the lower end: 0.144 for Klein base, 0.082 for Z-Image, 0.067 for Qwen-Image.
+Each skip therefore adds at least that much to the accumulator, which caps the
+longest possible run of skips at the shipped thresholds at 1 for Klein base and
+Z-Image and 4 for Qwen-Image, the same streaks the benches show.
+
+At the committed bench recipes this changed one decision: klein-base-4b at
+50 steps / g=4.0 now computes step 6 (8 skips instead of 9, 1.20× instead of
+1.22×). klein-base-9b, Z-Image and Qwen-Image skip the same steps as before. If
+you re-calibrate one of these variants, update `CALIBRATED_RANGE` together with
+the coefficients; `tests/test_calibration_artifacts.py` fails when they drift
+apart.
+
 ## Runaway guard
 
 The gate accumulates the polynomial's predicted change across consecutive
@@ -21,9 +56,12 @@ skips and resets it to zero on every real compute. The
 origin-constrained in-repo fits are positive for small deltas but cross zero
 at large ones (base-4b at x≈0.24, z-image at x≈0.29, qwen at x≈0.78), beyond
 the range they were fit on; there the clamp turns a large, real change into
-a predicted change of zero, so the accumulator stops advancing — without a
+a predicted change of zero, so the accumulator stops advancing. Without a
 guard, that would let the wrapper reuse the same cached residual for an
-unbounded number of steps. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
+unbounded number of steps. The calibrated range (above) now keeps those three
+variants' deltas inside the fitted range, where their polynomials are positive,
+so for them the guard is a backstop; it still matters for user-supplied
+coefficients. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
 forces a recompute after 8 consecutive skips regardless of the accumulated
 total. This is an intentional divergence from upstream ali-vilab TeaCache,
 which has no such cap — the same kind of deliberate departure as the gate's
@@ -33,8 +71,9 @@ monotonic instead of matching upstream's raw polynomial exactly.
 ### Observed max consecutive-skip streaks
 
 Measured at each variant's default threshold on the committed bench recipes
-(M1 Max 32 GB, mflux 0.18.0, three cold reps per condition; the first four on
-2026-08-15, qwen-image on 2026-09-06, flux1-krea-dev on 2026-09-05). Every row but qwen-image renders at
+(M1 Max 32 GB, mflux 0.18.0, three cold reps per condition; flux1-dev and
+z-image-base on 2026-08-15, the two Klein base rows on 2026-09-28 with the
+0.12.0 gate, qwen-image on 2026-09-06, flux1-krea-dev on 2026-09-05). Every row but qwen-image renders at
 512×512; qwen-image uses its pinned 768×768. The bench reports carry a per-rep
 `skip_patterns` string (`S` = skipped, `C` = computed) and
 `max_consecutive_skips`; the streak below is the maximum across reps, and in
@@ -43,14 +82,14 @@ every case each rep produced the same pattern.
 | Variant | Default threshold | Skips (active steps) | Max observed streak | Source |
 |---|---|---|---|---|
 | `flux1-dev` | 0.20 | 6 / 23 | 1 | `_artifacts/v0.10.0_bench_flux1_dev.json` (25 steps, g=3.5) |
-| `flux2-klein-base-4b` | 0.17 | 9 / 48 | 2 | `_artifacts/v0.10.0_bench_klein_base_4b.json` (50 steps, g=4.0) |
-| `flux2-klein-base-9b` | 0.17 | 13 / 48 | 1 | `_artifacts/v0.10.0_bench_klein_base_9b.json` (50 steps, g=4.0) |
+| `flux2-klein-base-4b` | 0.17 | 8 / 48 | 1 | `_artifacts/v0.12.0_bench_klein_base_4b.json` (50 steps, g=4.0) |
+| `flux2-klein-base-9b` | 0.17 | 13 / 48 | 1 | `_artifacts/v0.12.0_bench_klein_base_9b.json` (50 steps, g=4.0) |
 | `z-image-base` | 0.12 | 15 / 48 | 1 | `_artifacts/v0.10.0_bench_z_image.json` (50 steps, g=4.0, q8) |
 | `qwen-image` | 0.30 | 33 / 48 | 4 | `_artifacts/v0.11.0_bench_qwen_image.json` (50 steps, g=4.0, 768×768) |
 | `flux1-krea-dev` | 0.30 | 10 / 26 | 1 | `_artifacts/v0.11.0_bench_krea_dev.json` (28 steps, g=4.5) |
 
-Four of the five stay at 1 or 2: the gate mostly alternates compute / skip and
-reuses a residual at most twice in a row. `qwen-image` runs longer, reaching 4,
+Every row but qwen-image stays at 1: the gate alternates compute / skip and
+never reuses a residual twice in a row. `qwen-image` runs longer, reaching 4,
 because at its 0.30 default it skips roughly two-thirds of its active steps —
 much the largest share in the table. Even there the `MAX_CONSECUTIVE_SKIPS = 8`
 cap sits at twice the longest observed streak, so it engages at no shipped
@@ -140,6 +179,9 @@ with apply_teacache(flux, coefficients=my_coeffs):
 
 The handle's `provenance` field will record `source="user"` so calls to
 `handle.provenance` make the origin clear.
+
+Your polynomial is evaluated on the raw measured delta. The calibrated-range
+clamp applies only to a variant's own built-in tuple.
 
 ## img2img coefficient reuse
 

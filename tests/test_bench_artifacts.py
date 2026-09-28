@@ -316,3 +316,50 @@ def test_krea_bench_artifact_is_meaningful():
     assert report["gating_ratio"] > report["compile_avoidance_ratio"], (
         "the win must come from gating on FLUX.1"
     )
+
+
+# --- FLUX.2 [klein] base 4B / 9B (re-benched for v0.12.0's calibrated-range gate) --------------------------------
+
+_KLEIN_BASE_BENCH = {
+    "flux2-klein-base-4b": _REPO_ROOT / "_artifacts" / "v0.12.0_bench_klein_base_4b.json",
+    "flux2-klein-base-9b": _REPO_ROOT / "_artifacts" / "v0.12.0_bench_klein_base_9b.json",
+}
+# Measured 2026-09-28, identical in all three reps: base-4b skips 8 of 48 active steps (9 before the gate stopped
+# extrapolating below its calibrated range, which un-skipped step 6), base-9b 13 (unchanged).
+_KLEIN_BASE_SKIPS = {"flux2-klein-base-4b": 8, "flux2-klein-base-9b": 13}
+
+
+def _klein_base_row(variant_id: str) -> list[str]:
+    for line in _README.read_text().splitlines():
+        s = line.strip()
+        if s.startswith(f"| `{variant_id}` (CFG)"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) >= 7 and cells[1].isdigit():
+                return cells
+    raise AssertionError(f"No `{variant_id}` (CFG) row found in the README Benchmarks table")
+
+
+def test_klein_base_bench_artifacts_are_committed_at_the_canonical_recipe():
+    """Bug: the README cites a Klein base report that is missing, from another recipe, or run condition-outer."""
+    for variant_id, path in _KLEIN_BASE_BENCH.items():
+        assert path.exists(), f"missing {path}"
+        report = json.loads(path.read_text())
+        assert report["schema_version"] == 3
+        assert report["variant"] == variant_id.removeprefix("flux2-")
+        assert report["num_inference_steps"] == 50 and report["guidance"] == 4.0
+        assert report["chunk_order"] == "rep-outer"
+        assert report["reps"] >= 3
+        assert report["skipped_counts"] == [_KLEIN_BASE_SKIPS[variant_id]] * report["reps"]
+        assert max(report["max_consecutive_skips"]) == 1
+
+
+def test_readme_klein_base_rows_match_committed_artifacts():
+    """Bug: the README's Klein base rows keep the pre-0.12 numbers (1.22x, 9 / 50) after the re-bench."""
+    for variant_id, path in _KLEIN_BASE_BENCH.items():
+        h = bench_headline(json.loads(path.read_text()))
+        cells = _klein_base_row(variant_id)
+        assert int(cells[1]) == h["steps"]
+        assert cells[2] == f"{h['vanilla_s']:.1f}s"
+        assert cells[3] == f"{h['wrapper_s']:.1f}s"
+        assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
+        assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"

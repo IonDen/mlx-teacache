@@ -18,24 +18,27 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
 - Default `rel_l1_thresh`: **0.17** (per-variant default, tuned via the v0.4.0 sweep)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps, bf16, q4, mflux 0.18.0, v0.10.0 bench, 2026-08-15):
+At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps interleaved rep-outer, bf16, q4, mflux 0.18.0, v0.12.0 bench, 2026-09-28):
 
 | Condition | Median wall-clock | Peak memory |
 |---|---|---|
-| vanilla | 233.9 s | ~10.5 GB |
-| wrapper, no gate (compile-avoidance only) | 231.2 s | ~6.0 GB |
-| wrapper, gated (full TeaCache) | 192.4 s | ~6.1 GB |
+| vanilla | 237.5 s | ~10.7 GB |
+| wrapper, no gate (compile-avoidance only) | 234.2 s | ~5.5 GB |
+| wrapper, gated (full TeaCache) | 197.8 s | ~5.5 GB |
 
-- **Combined speedup: 1.22×** (v0.6.0 measured 1.23× at the same recipe; unchanged to within noise)
-- **Gating contribution (v0.4.1 effect): 1.20×**
+- **Combined speedup: 1.20×** (v0.10.0 measured 1.22× and v0.6.0 1.23×, with one more skip; see below)
+- **Gating contribution (v0.4.1 effect): 1.18×**
 - **`mx.compile`-path avoidance (v0.4 effect): 1.01×** — effectively noise on M1 Max at this recipe; the wrapper's main `mx.compile` benefit is memory (~45% peak drop), not wall-clock
-- Skip count stable across reps: 9 of 48 active steps skipped at `rel_l1_thresh=0.17` (byte-identical to v0.4.1's algorithmic skip count); the longest run of consecutive skips is 2
+- Skip count stable across reps: 8 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row
+- SSIM 0.985 vs vanilla at this recipe
+
+Until 0.12.0 the gate also skipped step 6 here (9 of 48, one run of 2). That step's input change was smaller than any step in this variant's calibration, and the polynomial, which is forced through zero, priced it as almost no change. 0.12.0 holds the change to the calibrated range (0.0283 to 0.2198) before evaluating the polynomial, so a change that small is priced at 0.144, the lowest the fit gives inside that range. With a floor that high, at the 0.17 default the gate can never skip two steps in a row. On an 864×1152 run the same effect had been skipping three early steps at every threshold down to 0.08.
 
 At the 25-step `low_step` recipe (`guidance=1.0`) the gate skips 3/25 with **1.41× wall-clock** and SSIM > 0.99 (v0.4.0 same-process measurement; not re-bench'd under subprocess-per-rep yet).
 
-> **Note on the v0.4.1 claim.** v0.4.1 reported 1.26× combined on this variant, decomposed as 1.16× gating × 1.09× compile-avoidance. The 1.26× combined number was honest within day-to-day noise; the subprocess-per-rep harness lands 1.23× (v0.6.0) and 1.22× (v0.10.0), a difference of a few percent that sits inside any reasonable measurement band. The *decomposition* is what needed correcting. With subprocess isolation, gating is doing essentially all the work (1.20–1.22×) and compile-avoidance is at noise level (1.01×). The v0.4.1 same-process harness had the wrapper inheriting warm allocator state, which got attributed to compile-avoidance.
+> **Note on the v0.4.1 claim.** v0.4.1 reported 1.26× combined on this variant, decomposed as 1.16× gating × 1.09× compile-avoidance. The 1.26× combined number was honest within day-to-day noise; the subprocess-per-rep harness landed 1.23× (v0.6.0) and 1.22× (v0.10.0), a difference of a few percent that sits inside any reasonable measurement band. The *decomposition* is what needed correcting. With subprocess isolation, gating is doing essentially all the work (1.20–1.22×) and compile-avoidance is at noise level (1.01×). The v0.4.1 same-process harness had the wrapper inheriting warm allocator state, which got attributed to compile-avoidance.
 
-Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.10.0_bench_klein_base_4b.json` (v0.6.0's at `_artifacts/v0.6.0_bench_klein_base_4b.json`); regenerate side-by-side images with `scripts/bench_comparison.py`.
+Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.12.0_bench_klein_base_4b.json` (v0.10.0's and v0.6.0's sit alongside it); regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 The 0.17 default was chosen because the polynomial R² is low (0.106) and the engagement window is narrow:
 - At 0.20 (package default): 19/25 skips, SSIM ~0.76 — visibly degraded.

@@ -5,7 +5,15 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] — 2026-09-28
+
+A gate fix for the FLUX.2 [klein] base, Z-Image and Qwen-Image variants, and the rebuilt comparison page. No change to the public API. At the committed bench recipes one number moves: Klein base 4B now skips 8 of 48 active steps instead of 9 and runs 1.20× faster instead of 1.22×. Klein base 9B, Z-Image and Qwen-Image skip exactly the steps they skipped before.
+
+### Fixed
+- **The gate no longer treats a tiny change in its input as no change at all.** The polynomials for Klein base, Z-Image and Qwen-Image were fitted with the curve forced through zero, so below the smallest input change their calibration produced, the curve's shape decided the prediction, not the data. On an 864×1152, 50-step Klein base 4B run, steps 2, 6 and 7 had input changes of 0.0035, 0.0067 and 0.0033, about a tenth of the smallest calibrated one (0.0283). The polynomial priced them at 0.025 to 0.049 of output change, although every output change measured during calibration was at least 0.107, so those steps were skipped at every threshold down to 0.08. The gate now holds the input change to the range the coefficients were fitted on before evaluating the polynomial. Each of these variants records that range (`CALIBRATED_RANGE` in its config), and the step statistics still report the measured change. With the range in place, a single skip always adds at least 0.144 (Klein base), 0.082 (Z-Image) or 0.067 (Qwen-Image) to the running total, which limits the longest run of skips at the shipped thresholds to 1, 1 and 4 steps. FLUX.1 dev, schnell and Krea, the distilled Klein variants, and coefficients you pass yourself are evaluated as before.
+- Klein base 4B at its canonical recipe (50 steps, guidance 4.0, 512×512) was re-benched three-way with this gate: 1.20× combined, 1.18× from skipped steps, SSIM 0.985 against vanilla, the longest skip run now 1 instead of 2. Klein base 9B was re-benched too: 1.37× combined, 1.35× from skipped steps, SSIM 0.993, the same 13 skips as before. Z-Image and Qwen-Image were not re-benched: their bench recipe is their calibration recipe, and replaying the gate over their calibration traces gives the same decisions with and without the range. The README, the variant pages, the calibration notes and the streak table cite the new reports (`_artifacts/v0.12.0_bench_klein_base_4b.json`, `_artifacts/v0.12.0_bench_klein_base_9b.json`).
+- The comparison page's TeaCache-on images for Klein base and Z-Image were rendered with 0.11.1 and are not re-rendered in this release. A note on the page says so; for the Klein base 4B pair a replay of its gate predicts 10 skipped steps instead of 11.
+- README footnote ¹ no longer credits part of FLUX.1-dev's speedup to `mx.compile`-path avoidance. mflux does not compile the FLUX.1 predict step, and the gap the footnote described was run-to-run spread, not a second speedup mechanism.
 
 ### Changed
 - COMPARISON.md is rebuilt: one tennis-at-sunset scene per non-distilled model, generated once with TeaCache off and once with it on, each pair backed by its own page of per-step previews and full generation details. A new schema-2 report is written to `_artifacts/comparison/report.json`; the earlier report stays as it was. The old showcase images are removed, and `docs/comparison/` is left out of the sdist. The distilled-vs-base Klein study moves to its own page.
@@ -13,8 +21,9 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Z-Image and FLUX.2 [klein] base pairs on COMPARISON.md are rendered again, in 8-bit weights. Z-Image runs at 864×1152 with its own wording of the scene and a negative prompt, which clears the red cheek patches and white specks the shared prompt produced. Klein base 4B runs at 864×1152 and Klein base 9B at 576×768. Each model page now shows the prompt it ran with, and the negative prompt where one was set; the main page no longer quotes it.
 - `scripts/bench_comparison.py --quality-probe NAME` renders one candidate setting without touching the comparison chunks or report, for condition A or B, with optional overrides for size, guidance, quantization, prompt, negative prompt and TeaCache threshold.
 
-### Fixed
-- README footnote ¹ no longer credits part of FLUX.1-dev's speedup to `mx.compile`-path avoidance. mflux does not compile the FLUX.1 predict step, and the gap the footnote described was run-to-run spread, not a second speedup mechanism.
+### Internal
+- `scripts/bench_comparison.py --quality-probe` records the gate's per-step trace (decision, timestep, measured change, running total) in each TeaCache-on record, so a skip pattern can be explained without re-running the model.
+- Fast tests pin the range: kernel tests for both ends of the clamp and for in-range changes, a replay of the real 864×1152 trace that reproduces the two measured pre-0.12 runs and the new decisions, config pins against the calibration files, a wiring test for every `apply()` and gate call site, a streak-bound test per clamped variant, and README-to-report pins for both Klein base benchmark rows.
 
 ## [0.11.1] — 2026-09-24
 

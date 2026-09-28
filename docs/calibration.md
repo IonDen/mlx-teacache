@@ -29,7 +29,10 @@ Since 0.12.0 each of these variants records the range its fit was made on as
 calibration JSON (signal B for Z-Image, signal A for Qwen-Image; klein-base-9b
 takes base-4b's along with its coefficients). The gate clamps the measured
 delta into that range before evaluating the polynomial, so a delta below it is
-priced like the smallest calibrated one and a delta above it like the largest.
+priced like the smallest calibrated one. A delta above it is a larger change
+than the fit ever saw, and the gate always computes that step: on Klein base the
+fit's value at the top of its range (0.164) is below the 0.17 default, so
+pricing it there would still allow a skip.
 The step's recorded `rel_l1` is still the measured delta, so the stats show
 when a run went outside the range. FLUX.1 dev and schnell (upstream tuples with
 no recorded range), Krea (a free-intercept fit, which predicts more change

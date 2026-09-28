@@ -30,7 +30,7 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 - **Gating contribution (v0.4.1 effect): 1.18×**
 - **`mx.compile`-path avoidance (v0.4 effect): 1.01×** — effectively noise on M1 Max at this recipe; the wrapper's main `mx.compile` benefit is memory (~45% peak drop), not wall-clock
 - Skip count stable across reps: 8 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row
-- SSIM 0.985 vs vanilla at this recipe
+- SSIM 0.985 vs vanilla at this recipe (`_artifacts/v0.12.0_klein_base_ssim.json`)
 
 Until 0.12.0 the gate also skipped step 6 here (9 of 48, one run of 2). That step's input change was smaller than any step in this variant's calibration, and the polynomial, which is forced through zero, priced it as almost no change. 0.12.0 holds the change to the calibrated range (0.0283 to 0.2198) before evaluating the polynomial, so a change that small is priced at 0.144, the lowest the fit gives inside that range. With a floor that high, at the 0.17 default the gate can never skip two steps in a row. On an 864×1152 run the same effect had been skipping three early steps at every threshold down to 0.08.
 

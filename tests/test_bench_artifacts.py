@@ -363,3 +363,20 @@ def test_readme_klein_base_rows_match_committed_artifacts():
         assert cells[3] == f"{h['wrapper_s']:.1f}s"
         assert cells[4].replace("*", "").replace("×", "") == f"{h['speedup_x']:.2f}"
         assert cells[5].replace("*", "") == f"{h['skipped']} / {h['steps']}"
+
+
+def test_klein_base_ssim_claims_match_the_committed_record():
+    """Bug: the README footnotes or variant pages quote an SSIM that no committed file backs, or that drifts from
+    the record computed on the v0.12.0 bench images."""
+    record = json.loads((_REPO_ROOT / "_artifacts" / "v0.12.0_klein_base_ssim.json").read_text())
+    readme = _README.read_text()
+    for slug, page in (
+        ("klein-base-4b", "flux2-klein-base-4b.md"),
+        ("klein-base-9b", "flux2-klein-base-9b.md"),
+    ):
+        entry = record["variants"][slug]
+        assert (_REPO_ROOT / entry["bench_report"]).exists()
+        quoted = f"SSIM {entry['ssim_gated_vs_vanilla']:.3f}"
+        assert quoted in readme, f"{quoted} ({slug}) not in README"
+        page_text = (_REPO_ROOT / "docs" / "variants" / page).read_text()
+        assert f"{quoted} vs vanilla at this recipe" in page_text, f"{quoted} not on {page}"

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "method": "skimage.metrics.structural_similarity(vanilla, gated, channel_axis=-1, data_range=255) on the RGB PNGs bench_speedup.py saved for the rep-0 vanilla and gated conditions",
+  "computed": "2026-09-28",
+  "variants": {
+    "klein-base-4b": {
+      "bench_report": "_artifacts/v0.12.0_bench_klein_base_4b.json",
+      "ssim_gated_vs_vanilla": 0.985,
+      "ssim_nogate_vs_vanilla": 0.9964,
+      "sha256": {
+        "vanilla.png": "40c7de52f6493b784108a2b2c8dcc7aae43b655da4014f0c670a03a04cef7899",
+        "wrapper_gated.png": "255c6199b0090cd305fab58caea83fab57ae917e4ed99d203bb345e13da2a4e6",
+        "wrapper_nogate.png": "14d9561b7c47f852af18851ecf453099f1bbabfb9c0078916617b5969f1bbdb5"
+      }
+    },
+    "klein-base-9b": {
+      "bench_report": "_artifacts/v0.12.0_bench_klein_base_9b.json",
+      "ssim_gated_vs_vanilla": 0.993,
+      "ssim_nogate_vs_vanilla": 0.9963,
+      "sha256": {
+        "vanilla.png": "96291436aeef4e8deb4b4e780311728255e6f76102c873b5181c399ceb54f633",
+        "wrapper_gated.png": "31ee7c8dbc919e40911cd0a91448084f2491b92ab07858bcf6ba352946ed276d",
+        "wrapper_nogate.png": "06e215e1e6f1a5a479799217e68eea992933de706e206fdb17186c02d3f272a4"
+      }
+    }
+  }
+}

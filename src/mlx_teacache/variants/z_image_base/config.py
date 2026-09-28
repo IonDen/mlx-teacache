@@ -28,6 +28,13 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
+# The rel_l1 range the fit above was made on (scripts/_calibration_z_image.json, signal B: x_min, x_max).
+# The gate clamps the measured delta into it before evaluating the polynomial:
+# this fit is origin-constrained (p(0) = 0), so extrapolating below x_min would
+# price a tiny delta as almost no change although no calibrated step changed
+# that little. Stored verbatim; must move with the coefficients.
+CALIBRATED_RANGE: tuple[float, float] = (0.027887196237753466, 0.25914120883567665)
+
 # Set at the SSIM knee from scripts/sweep_threshold_z_image.py
 # (tests/_artifacts/sweep_z_image/results_z_image.json, 2026-06-01 sweep):
 # SSIM holds >= 0.99 through 0.12 (15/48 steps skipped, SSIM 0.9913) then cliffs

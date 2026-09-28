@@ -22,6 +22,13 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
+# The rel_l1 range the fit above was made on (scripts/_calibration_flux2_klein_base_4b.json: x_min, x_max).
+# The gate clamps the measured delta into it before evaluating the polynomial:
+# this fit is origin-constrained (p(0) = 0), so extrapolating below x_min would
+# price a tiny delta as almost no change although no calibrated step changed
+# that little. Stored verbatim; must move with the coefficients.
+CALIBRATED_RANGE: tuple[float, float] = (0.028261402621865273, 0.21984468400478363)
+
 DEFAULT_THRESH: float = 0.17
 
 RECIPES: dict[str, dict[str, Any]] = {

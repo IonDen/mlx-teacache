@@ -74,11 +74,19 @@ def gate_step(  # type: ignore[no-untyped-def]
     num_steps: int,
     step_idx: int,
     mod_in: mx.array,
+    calibrated_range: tuple[float, float] | None = None,
 ) -> GateDecision:
     """Return a structured decision for one denoising step.
 
     `state` is a mlx_teacache.cache.TeaCacheState (duck-typed here to keep the
-    gate module pure / circular-import-free)."""
+    gate module pure / circular-import-free).
+
+    `calibrated_range` is the (min, max) rel_l1 the coefficients were fitted on.
+    When given, the measured delta is clamped into it before the polynomial is
+    evaluated, so the fit is never extrapolated: an origin-constrained fit
+    (p(0) = 0) would otherwise price a delta far below its data as almost no
+    change. The decision still reports the measured rel_l1. None (the default,
+    and always for caller-supplied coefficients) evaluates the raw delta."""
     # Hard short-circuit: threshold <= 0 ⇒ always compute, never cache.
     # At non-positive threshold no future step can ever be skipped, so the
     # cache can never be consumed. Setting should_update_cache=False avoids
@@ -156,7 +164,10 @@ def gate_step(  # type: ignore[no-untyped-def]
     # advanced only on computed steps, feeding cumulative drift into a
     # consecutive-delta calibration (a documented deviation, corrected here).
     state.previous_mod_input = mod_in
-    predicted_raw = poly_eval(coefficients, rel_l1) if math.isfinite(rel_l1) else math.nan
+    x = rel_l1
+    if calibrated_range is not None and math.isfinite(x):
+        x = min(max(x, calibrated_range[0]), calibrated_range[1])
+    predicted_raw = poly_eval(coefficients, x) if math.isfinite(x) else math.nan
     if not math.isfinite(predicted_raw):
         # A finite signal whose reduction overflowed (inf / inf = nan), or a
         # polynomial that blew up. Python's max(0.0, nan) is 0.0, which would

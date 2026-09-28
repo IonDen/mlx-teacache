@@ -22,7 +22,7 @@ from mlx_teacache.variants.flux2_klein_base_4b.integration import (
     make_teacache_predict_factory,
 )
 
-from .config import COEFFICIENTS, DEFAULT_THRESH
+from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
 
 _PROVENANCE = Provenance(
     source="builtin",
@@ -73,6 +73,8 @@ def apply(
     internal = _InternalHandle(
         rel_l1_thresh=resolved_thresh,
         coefficients=resolved_coeffs,
+        # The clamp belongs to this variant's fit, never to caller-supplied coefficients.
+        calibrated_range=CALIBRATED_RANGE if coefficients is None else None,
         skip_first_n_steps=skip_first_n_steps,
         skip_last_n_steps=skip_last_n_steps,
     )

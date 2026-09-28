@@ -40,6 +40,13 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.0,
 )
 
+# The rel_l1 range the fit above was made on (scripts/_calibration_qwen.json, signal A: x_min, x_max).
+# The gate clamps the measured delta into it before evaluating the polynomial:
+# this fit is origin-constrained (p(0) = 0), so extrapolating below x_min would
+# price a tiny delta as almost no change although no calibrated step changed
+# that little. Stored verbatim; must move with the coefficients.
+CALIBRATED_RANGE: tuple[float, float] = (0.04675976472922664, 0.587799896108221)
+
 # From scripts/sweep_threshold_qwen.py (768x768/50, Signal A, stock q4, v0.10.0 gate,
 # 2026-09-06): SSIM degrades gracefully with no cliff (0.980 at 0.20, 0.976 at 0.25,
 # 0.967 at 0.30); 33/48 active steps skipped at 0.30, longest streak 4. Reaffirmed.

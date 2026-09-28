@@ -7,14 +7,20 @@ and _artifacts/validation_klein_base_9b.json for the evidence."""
 
 from typing import Any
 
-# Cross-import to preserve object identity with base-4b's COEFFICIENTS.
-# The test `test_klein_base_9b_reuses_base_4b_coefficients` asserts
-# `BASE_9B is BASE_4B`.
+# Cross-import to preserve object identity with base-4b's COEFFICIENTS and
+# CALIBRATED_RANGE. The tests `test_klein_base_9b_reuses_base_4b_coefficients`
+# and `test_klein_base_9b_reuses_base_4b_calibrated_range` assert `is`.
+from mlx_teacache.variants.flux2_klein_base_4b.config import (
+    CALIBRATED_RANGE as _BASE_4B_RANGE,
+)
 from mlx_teacache.variants.flux2_klein_base_4b.config import (
     COEFFICIENTS as _BASE_4B_COEFFS,
 )
 
 COEFFICIENTS: tuple[float, float, float, float, float] = _BASE_4B_COEFFS
+
+# The fit's range travels with the reused coefficients.
+CALIBRATED_RANGE: tuple[float, float] = _BASE_4B_RANGE
 
 DEFAULT_THRESH: float = 0.17  # reused from base-4b v0.4.0 sweep
 

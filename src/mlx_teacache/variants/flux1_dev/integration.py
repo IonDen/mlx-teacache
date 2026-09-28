@@ -59,6 +59,7 @@ class _InternalHandle:
         coefficients: tuple[float, float, float, float, float],
         skip_first_n_steps: int,
         skip_last_n_steps: int,
+        calibrated_range: tuple[float, float] | None = None,
     ) -> None:
         self._state = _InternalHandleState()
         self._gen_ctx = _GenerationContext()
@@ -66,6 +67,8 @@ class _InternalHandle:
         self.coefficients = coefficients
         self.skip_first_n_steps = skip_first_n_steps
         self.skip_last_n_steps = skip_last_n_steps
+        # (min, max) rel_l1 the coefficients were fitted on; None = evaluate the raw delta.
+        self.calibrated_range = calibrated_range
         # Fields set by wrap_generate_image
         self._generate_image_was_instance_attr: bool = False
         self._original_generate_image: Any = None
@@ -361,6 +364,7 @@ def flux1_forward_with_gate(
         num_steps=active_num_steps,
         step_idx=state.step_counter,
         mod_in=mod_in,
+        calibrated_range=handle.calibrated_range,
     )
 
     # 6. Stats — staging only; commit happens in call_after_loop.

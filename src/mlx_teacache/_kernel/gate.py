@@ -86,8 +86,8 @@ def gate_step(  # type: ignore[no-untyped-def]
     evaluated, so the fit is never extrapolated: an origin-constrained fit
     (p(0) = 0) would otherwise price a delta far below its data as almost no
     change. A delta above the range always computes. The decision still reports
-    the measured rel_l1. None (the default,
-    and always for caller-supplied coefficients) evaluates the raw delta."""
+    the measured rel_l1. None (the default, and always for caller-supplied
+    coefficients) evaluates the raw delta."""
     # Hard short-circuit: threshold <= 0 ⇒ always compute, never cache.
     # At non-positive threshold no future step can ever be skipped, so the
     # cache can never be consumed. Setting should_update_cache=False avoids

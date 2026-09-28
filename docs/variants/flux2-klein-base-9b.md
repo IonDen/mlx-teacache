@@ -30,7 +30,7 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 - **Combined speedup: 1.37×** (v0.10.0 measured 1.37× and v0.6.0 1.36× at the same recipe)
 - **Gating contribution (v0.4.1 effect): 1.35×**
 - **`mx.compile`-path avoidance (v0.4 effect): 1.02×** — small on this recipe/chip
-- Skip count stable across reps: 13 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row (max consecutive-skip streak 1), the same steps as before 0.12.0's calibrated-range check, which changes nothing at this recipe
+- Skip count stable across reps: 13 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row (max consecutive-skip streak 1), the same steps as before 0.12.0's calibrated-range clamp, which changes nothing at this recipe (the bench ran before the rule that always computes a change above the range was added; that rule was not traced on 9B)
 - SSIM 0.993 vs vanilla at this recipe (`_artifacts/v0.12.0_klein_base_ssim.json`)
 
 > **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. That measurement was inflated by same-process MLX state leakage in the v0.5.x bench harness: vanilla ran cold while the wrapper inherited warm MLX allocator state from it, so the wall-clock difference conflated the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness makes every condition cold and exposes the honest 1.36×; the v0.10.0 and v0.12.0 re-measurements land at 1.37×.

@@ -5,8 +5,8 @@
   "variants": {
     "klein-base-4b": {
       "bench_report": "_artifacts/v0.12.0_bench_klein_base_4b.json",
-      "ssim_gated_vs_vanilla": 0.985,
-      "ssim_nogate_vs_vanilla": 0.9964,
+      "ssim_gated_vs_vanilla": 0.98499,
+      "ssim_nogate_vs_vanilla": 0.99636,
       "sha256": {
         "vanilla.png": "40c7de52f6493b784108a2b2c8dcc7aae43b655da4014f0c670a03a04cef7899",
         "wrapper_gated.png": "255c6199b0090cd305fab58caea83fab57ae917e4ed99d203bb345e13da2a4e6",
@@ -15,8 +15,8 @@
     },
     "klein-base-9b": {
       "bench_report": "_artifacts/v0.12.0_bench_klein_base_9b.json",
-      "ssim_gated_vs_vanilla": 0.993,
-      "ssim_nogate_vs_vanilla": 0.9963,
+      "ssim_gated_vs_vanilla": 0.99302,
+      "ssim_nogate_vs_vanilla": 0.99628,
       "sha256": {
         "vanilla.png": "96291436aeef4e8deb4b4e780311728255e6f76102c873b5181c399ceb54f633",
         "wrapper_gated.png": "31ee7c8dbc919e40911cd0a91448084f2491b92ab07858bcf6ba352946ed276d",

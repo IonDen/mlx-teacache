@@ -264,7 +264,8 @@ def test_z_image_calibrated_range_does_not_reprice_any_calibration_step():
     """RED if z-image's CALIBRATED_RANGE re-prices a step the gate measures on its signal-B calibration
     traces (the signal-A range, or x_min raised to 0.04, both do), which would change decisions at the
     recipe the published speedup was measured on. The first prompt's replay also
-    reproduces the committed bench pattern, so the replay stands in for the real forward here."""
+    reproduces the committed bench pattern, so the replay stands in for the real forward here. Z-Image's x_max is
+    a first, never-priced delta (the largest priced one is 0.160), so only the calibration pin guards that end."""
     from mlx_teacache.variants.z_image_base.config import CALIBRATED_RANGE
     from mlx_teacache.variants.z_image_base.config import COEFFICIENTS as Z_IMAGE
     from mlx_teacache.variants.z_image_base.config import DEFAULT_THRESH as Z_IMAGE_THRESH
@@ -275,3 +276,74 @@ def test_z_image_calibrated_range_does_not_reprice_any_calibration_step():
     traces = [xs[i * per : (i + 1) * per] for i in range(data["n_fit_prompts"])]
     _assert_range_is_inert(traces, Z_IMAGE, Z_IMAGE_THRESH, CALIBRATED_RANGE)
     assert _replay_with(traces[0], Z_IMAGE, Z_IMAGE_THRESH, CALIBRATED_RANGE)[0] == _Z_IMAGE_BENCH_PATTERN
+
+
+# Consecutive-delta rel_l1 on steps 2..48 at the Klein base 4B BENCH recipe: 512x512, q4, 50 steps, guidance 4.0,
+# seed 42, "a red apple on a wooden table" (bench_comparison.py --quality-probe B4bench512, mflux 0.18.0 / MLX 0.31.2,
+# 2026-09-28, final 0.12.0 gate). Largest priced delta 0.105, below x_max; four below x_min.
+_BASE_4B_BENCH_RECIPE_DELTAS = [
+    0.0568390883866572,
+    0.04156359309346746,
+    0.023474542473212543,
+    0.007987420097913655,
+    0.014984833832546203,
+    0.024174336055239814,
+    0.0299693387047029,
+    0.08037126242219152,
+    0.04765493856343859,
+    0.0497580808911661,
+    0.10006168759229332,
+    0.05270453023496026,
+    0.09903368665586099,
+    0.04945264581107923,
+    0.09270917684987715,
+    0.04787496539725272,
+    0.08612639357967966,
+    0.08274903294442992,
+    0.07694946145959407,
+    0.07489668568199839,
+    0.06980956900190784,
+    0.09186084887599913,
+    0.05687156192065269,
+    0.08063751492093313,
+    0.05061726660043204,
+    0.06754938923828695,
+    0.063178480543373,
+    0.05854238939331963,
+    0.0671910489657119,
+    0.05095564216071488,
+    0.058885307084874966,
+    0.05019472137895997,
+    0.0652982969644987,
+    0.061276409366648465,
+    0.051038927700481566,
+    0.05883783966306897,
+    0.06187761116201586,
+    0.05265744290150964,
+    0.06251390132546615,
+    0.06459705837700948,
+    0.07430591780683003,
+    0.061969325047877145,
+    0.05834646897901857,
+    0.06448790747303473,
+    0.059417941245359596,
+    0.10501636393869969,
+    0.059463147717401695,
+]
+
+
+def test_base_4b_bench_recipe_replay_reproduces_both_measured_benches():
+    """RED if the range's effect is mis-modelled or the clamp stops reaching the gate: replayed without the range
+    this trace gives the pattern the v0.10.0 bench measured (9 skips); with it, the pattern the v0.12.0 bench
+    measured (8 skips). Both oracles are the committed hardware reports."""
+    from mlx_teacache.variants.flux2_klein_base_4b.config import CALIBRATED_RANGE
+    from mlx_teacache.variants.flux2_klein_base_4b.config import COEFFICIENTS as BASE_4B
+
+    def measured(report: str) -> str:
+        return json.loads((_REPO_ROOT / "_artifacts" / report).read_text())["skip_patterns"][0]
+
+    trace = [0.1, *_BASE_4B_BENCH_RECIPE_DELTAS]  # step 1 only seeds; its delta is never priced
+    assert _replay_with(trace, BASE_4B, 0.17, None)[0] == measured("v0.10.0_bench_klein_base_4b.json")
+    assert _replay_with(trace, BASE_4B, 0.17, CALIBRATED_RANGE)[0] == measured(
+        "v0.12.0_bench_klein_base_4b.json"
+    )

@@ -81,3 +81,56 @@ def test_the_decision_reports_the_measured_delta_not_the_clamped_one() -> None:
     """Bug: stats record the clamped x, hiding that the run left the calibrated domain."""
     clamped = _gate_on_delta(0.0035, thresh=0.08, calibrated_range=_RANGE)
     assert clamped.rel_l1 == pytest.approx(0.0035, rel=1e-4)
+
+
+def _longest_streak_on_tiny_deltas(variant: str, *, ranged: bool) -> int:
+    """Drive the real gate at the variant's default threshold with 50 steps of a 1e-4 delta, far below every
+    calibrated range: the worst case, since each fit is lowest at its range's lower end (asserted below)."""
+    import importlib
+
+    config = importlib.import_module(f"mlx_teacache.variants.{variant}.config")
+    state = TeaCacheState()
+    mod = mx.array([1.0])
+    streak = best = 0
+    for step in range(50):
+        if step > 0:
+            mod = mod * (1.0 + 1e-4)
+        dec = gate_step(
+            state,
+            rel_l1_thresh=config.DEFAULT_THRESH,
+            coefficients=config.COEFFICIENTS,
+            skip_first=1,
+            skip_last=1,
+            num_steps=50,
+            step_idx=step,
+            mod_in=mod,
+            calibrated_range=config.CALIBRATED_RANGE if ranged else None,
+        )
+        if dec.should_update_cache:
+            state.cached_residual = mx.zeros((1,))
+        streak = streak + 1 if not dec.should_compute else 0
+        best = max(best, streak)
+    return best
+
+
+@pytest.mark.parametrize(
+    ("variant", "bound"),
+    [("flux2_klein_base_4b", 1), ("flux2_klein_base_9b", 1), ("z_image_base", 1), ("qwen_image", 4)],
+)
+def test_the_range_bounds_the_longest_skip_run_at_the_default_threshold(variant: str, bound: int) -> None:
+    """Bug: without the range a stretch of tiny deltas is priced near zero and the gate skips until the 8-step
+    runaway cap forces a compute; with it, each skip costs at least p(x_min), so at the shipped threshold the
+    run is bounded (1 for Klein base and Z-Image, 4 for Qwen, the longest streaks their benches show)."""
+    import importlib
+
+    from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS, poly_eval
+
+    config = importlib.import_module(f"mlx_teacache.variants.{variant}.config")
+    lo, hi = config.CALIBRATED_RANGE
+    grid = [lo + (hi - lo) * i / 2000 for i in range(2001)]
+    assert (
+        min(grid, key=lambda x: poly_eval(config.COEFFICIENTS, x)) == lo
+    )  # the worst case really is the floor
+
+    assert _longest_streak_on_tiny_deltas(variant, ranged=False) == MAX_CONSECUTIVE_SKIPS
+    assert _longest_streak_on_tiny_deltas(variant, ranged=True) == bound

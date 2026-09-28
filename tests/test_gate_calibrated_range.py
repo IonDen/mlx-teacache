@@ -67,6 +67,18 @@ def test_a_delta_above_the_range_is_priced_at_the_calibrated_maximum() -> None:
     assert clamped.predicted_distance == pytest.approx(0.16414, abs=1e-4)
 
 
+def test_a_delta_above_the_range_always_computes_even_where_the_fit_would_allow_a_skip() -> None:
+    """Bug: a delta larger than anything calibrated is priced at p(x_max) and skipped whenever that price is under
+    the threshold. On Klein base p(0.2198) = 0.164 sits below the 0.17 default, so a change bigger than any
+    calibrated step would still reuse the cached residual. Above the range the gate must compute."""
+    at_default = _gate_on_delta(0.30, thresh=0.17, calibrated_range=_RANGE)
+    assert at_default.kind == "computed"
+    assert at_default.predicted_distance == pytest.approx(0.16414, abs=1e-4)
+    assert _gate_on_delta(5.0, thresh=0.17, calibrated_range=_RANGE).kind == "computed"
+    # The same delta just inside the range is still priced by the fit and may skip.
+    assert _gate_on_delta(0.2190, thresh=0.17, calibrated_range=_RANGE).kind == "skipped"
+
+
 def test_a_delta_inside_the_range_is_priced_exactly_as_without_it() -> None:
     """Bug: the range is applied to every delta (e.g. always evaluating at a bound), changing in-domain
     decisions the shipped defaults were tuned on."""
@@ -81,6 +93,30 @@ def test_the_decision_reports_the_measured_delta_not_the_clamped_one() -> None:
     """Bug: stats record the clamped x, hiding that the run left the calibrated domain."""
     clamped = _gate_on_delta(0.0035, thresh=0.08, calibrated_range=_RANGE)
     assert clamped.rel_l1 == pytest.approx(0.0035, rel=1e-4)
+
+
+def test_an_overflowed_delta_stays_a_numerical_miss_with_the_range() -> None:
+    """Bug: the clamp runs on a non-finite delta. A finite signal whose difference overflows float32 gives
+    rel_l1 = +inf (finite denominator); clamped, that becomes x_max, is priced at 0.164 and skipped, reusing a
+    residual on the very step the numerical-miss path exists to catch."""
+    state = TeaCacheState()
+    previous = mx.concatenate([mx.array([3.0e38], dtype=mx.float32), mx.zeros((1023,), dtype=mx.float32)])
+    state.previous_mod_input = previous
+    state.cached_residual = mx.zeros((1,))
+    decision = gate_step(
+        state,
+        rel_l1_thresh=0.17,
+        coefficients=_COEFFS,
+        skip_first=1,
+        skip_last=1,
+        num_steps=25,
+        step_idx=5,
+        mod_in=-previous,
+        calibrated_range=_RANGE,
+    )
+    assert decision.kind == "numerical-miss"
+    assert decision.rel_l1 is None
+    assert state.cached_residual is None
 
 
 def _longest_streak_on_tiny_deltas(variant: str, *, ranged: bool) -> int:

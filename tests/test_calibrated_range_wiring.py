@@ -70,11 +70,23 @@ def test_distilled_klein_runs_without_a_range() -> None:
 
 def test_every_gate_step_call_site_passes_the_handles_range() -> None:
     """Bug: a forward (FLUX.1, FLUX.2 plain/CFG, Z-Image plain/CFG, Qwen) calls gate_step without the range,
-    so that path silently extrapolates the fit again. The forwards only run with real weights."""
-    calls = passes = 0
-    for path in (_SRC / "variants").glob("*/integration.py"):
-        text = path.read_text()
-        calls += text.count("gate_step(")
-        passes += text.count("calibrated_range=handle.calibrated_range")
-    assert calls == 6
-    assert passes == calls
+    or with a constant instead of the handle's, so that path silently extrapolates the fit again. The forwards
+    only run with real weights, so each call is checked in the source: every gate_step(...) must pass
+    calibrated_range=handle.calibrated_range."""
+    import ast
+
+    calls = []
+    for path in sorted((_SRC / "variants").glob("*/integration.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "gate_step":
+                kw = {k.arg: k.value for k in node.keywords}
+                value = kw.get("calibrated_range")
+                wired = (
+                    isinstance(value, ast.Attribute)
+                    and value.attr == "calibrated_range"
+                    and isinstance(value.value, ast.Name)
+                    and value.value.id == "handle"
+                )
+                calls.append((f"{path.parent.name}:{node.lineno}", wired))
+    assert len(calls) == 6, calls
+    assert all(wired for _, wired in calls), [site for site, wired in calls if not wired]

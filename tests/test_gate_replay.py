@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 import mlx.core as mx
+import pytest
 
 from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.gate import gate_step
@@ -186,19 +187,28 @@ def test_base_4b_replay_without_the_range_reproduces_both_measured_runs():
 
 def test_base_4b_calibrated_range_stops_the_threshold_independent_skips():
     """RED on the 0094 bug: without the variant's calibrated range the 0.0035 / 0.0067 / 0.0033 deltas are
-    skipped at 0.08 and 0.12 alike. With it, no step is skipped at either threshold, and the 0.17 default
-    loses exactly one skip (the steps 6-7 double skip becomes single)."""
+    skipped at 0.08 and 0.12 alike. With it nothing can be skipped at either threshold (inside the range the
+    fit never predicts below p(x_min) = 0.144), and at the 0.17 default two skips in a row become impossible
+    (2 x 0.144 > 0.17), which costs exactly one of the measured run's skips."""
     from mlx_teacache.variants.flux2_klein_base_4b.config import CALIBRATED_RANGE
 
     assert _replay_base_4b(0.08, CALIBRATED_RANGE) == "C" * _NUM_STEPS
     assert _replay_base_4b(0.12, CALIBRATED_RANGE) == "C" * _NUM_STEPS
-    assert _replay_base_4b(0.17, CALIBRATED_RANGE) == "CCSCSCSCSCSCCCCSCCSCSCCCCCCCCCCCCCCCCCCCCCCCCCSCSC"
+    at_default = _replay_base_4b(0.17, CALIBRATED_RANGE)
+    assert "SS" not in at_default
+    assert at_default.count("S") == _BASE_4B_MEASURED_AT_017.count("S") - 1
+    # Regression snapshot of the replayed decisions (not measured on hardware at this recipe).
+    assert at_default == "CCSCSCSCSCSCCCCSCCSCSCCCCCCCCCCCCCCCCCCCCCCCCCSCSC"
 
 
-def _replay_with(trace: list[float], coefficients, thresh: float, calibrated_range) -> str:
+def _replay_with(
+    trace: list[float], coefficients, thresh: float, calibrated_range
+) -> tuple[str, list[float | None]]:
+    """Skip pattern and per-step predicted distance of the real gate driven by a consecutive-delta trace."""
     state = TeaCacheState()
     mod = mx.array([1.0])
     pattern = []
+    predictions = []
     deltas = [*trace, 0.1]  # the forced last step's delta is never measured
     for step in range(_NUM_STEPS):
         if step > 0:
@@ -217,16 +227,31 @@ def _replay_with(trace: list[float], coefficients, thresh: float, calibrated_ran
         if dec.should_update_cache:
             state.cached_residual = mx.zeros((1,))
         pattern.append("C" if dec.should_compute else "S")
-    return "".join(pattern)
+        predictions.append(dec.predicted_distance)
+    return "".join(pattern), predictions
 
 
-def test_qwen_calibrated_range_leaves_the_measured_bench_pattern_unchanged():
-    """RED if qwen's CALIBRATED_RANGE is narrower than its fit's data: the bench recipe is the calibration
-    recipe, so the clamp must not move the shipped 3.0x operating point (32-33 skips, the bench pattern)."""
+def _assert_range_is_inert(traces: list[list[float]], coefficients, thresh: float, calibrated_range) -> None:
+    """Every gated step of every trace is priced the same with and without the range. A narrowing that
+    reaches a delta the gate actually measures re-prices that step. (Each trace's first delta, into the seed
+    step, is never priced; the exact range ends are pinned against the calibration files in
+    test_calibration_artifacts.py.)"""
+    for n, trace in enumerate(traces):
+        plain = _replay_with(trace, coefficients, thresh, None)[1]
+        ranged = _replay_with(trace, coefficients, thresh, calibrated_range)[1]
+        assert ranged == pytest.approx(plain, abs=1e-6), f"prompt {n}"
+
+
+def test_qwen_calibrated_range_does_not_reprice_any_calibration_step():
+    """RED if qwen's CALIBRATED_RANGE is narrow enough to re-price a step the gate measures on its own
+    calibration traces (e.g. x_min raised to 0.06). The bench recipe is the calibration recipe, so an inert
+    range also leaves the shipped operating point (32-33 skips, the bench pattern) where it was. Qwen's x_max
+    is each prompt's first, never-priced delta, so only the calibration pin guards that end."""
     from mlx_teacache.variants.qwen_image.config import CALIBRATED_RANGE
 
-    patterns = [_replay_with(t, COEFFICIENTS, DEFAULT_THRESH, CALIBRATED_RANGE) for t in _prompt_traces()]
-    assert all(32 <= p.count("S") <= 33 for p in patterns), patterns
+    traces = _prompt_traces()
+    _assert_range_is_inert(traces, COEFFICIENTS, DEFAULT_THRESH, CALIBRATED_RANGE)
+    patterns = [_replay_with(t, COEFFICIENTS, DEFAULT_THRESH, CALIBRATED_RANGE)[0] for t in traces]
     assert _BENCH_PATTERN in patterns
 
 
@@ -235,14 +260,18 @@ def test_qwen_calibrated_range_leaves_the_measured_bench_pattern_unchanged():
 _Z_IMAGE_BENCH_PATTERN = "CCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCC"
 
 
-def test_z_image_replay_with_its_calibrated_range_matches_the_committed_bench():
-    """RED if z-image's CALIBRATED_RANGE is too narrow (or taken from signal A instead of the shipped signal B
-    fit) and changes decisions at the recipe the published speedup was measured on."""
+def test_z_image_calibrated_range_does_not_reprice_any_calibration_step():
+    """RED if z-image's CALIBRATED_RANGE re-prices a step the gate measures on its signal-B calibration
+    traces (the signal-A range, or x_min raised to 0.04, both do), which would change decisions at the
+    recipe the published speedup was measured on. The first prompt's replay also
+    reproduces the committed bench pattern, so the replay stands in for the real forward here."""
     from mlx_teacache.variants.z_image_base.config import CALIBRATED_RANGE
     from mlx_teacache.variants.z_image_base.config import COEFFICIENTS as Z_IMAGE
     from mlx_teacache.variants.z_image_base.config import DEFAULT_THRESH as Z_IMAGE_THRESH
 
     data = json.loads((_REPO_ROOT / "scripts" / "_calibration_z_image.json").read_text())
     xs = data["signals"]["B"]["x_values"]
-    first_prompt = xs[: len(xs) // data["n_fit_prompts"]]
-    assert _replay_with(first_prompt, Z_IMAGE, Z_IMAGE_THRESH, CALIBRATED_RANGE) == _Z_IMAGE_BENCH_PATTERN
+    per = len(xs) // data["n_fit_prompts"]
+    traces = [xs[i * per : (i + 1) * per] for i in range(data["n_fit_prompts"])]
+    _assert_range_is_inert(traces, Z_IMAGE, Z_IMAGE_THRESH, CALIBRATED_RANGE)
+    assert _replay_with(traces[0], Z_IMAGE, Z_IMAGE_THRESH, CALIBRATED_RANGE)[0] == _Z_IMAGE_BENCH_PATTERN

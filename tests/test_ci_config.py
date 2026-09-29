@@ -82,6 +82,12 @@ def test_ruff_targets_the_lowest_supported_version() -> None:
     assert _pyproject()["tool"]["ruff"]["target-version"] == f"py{floor.replace('.', '')}"
 
 
+def test_ruff_format_leaves_markdown_alone() -> None:
+    """Bug: someone drops the *.md format exclude and the next ruff bump (0.16+ formats Markdown code blocks)
+    rewrites the Python snippets in docs/papers, which is edited by its own process."""
+    assert "*.md" in _pyproject()["tool"]["ruff"].get("format", {}).get("exclude", [])
+
+
 def test_readme_python_badge_states_the_floor_as_a_range() -> None:
     """The badge is hand-written (shields' pyversions enumerates every version), so it
     must be pinned to the declared floor or it will quietly advertise the wrong one."""

@@ -6,32 +6,39 @@ on:
   pull_request:
   workflow_dispatch:  # allows the parity job to be triggered manually
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
       - name: Install lint group
-        run: uv sync --no-install-project --group lint
+        run: uv sync --locked --no-install-project --group lint
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
       - name: Install typecheck group
-        run: uv sync --no-install-project --group typecheck
+        run: uv sync --locked --no-install-project --group typecheck
       - run: uv run mypy src/mlx_teacache
 
   test-pure-core:
@@ -42,17 +49,19 @@ jobs:
     # proven at 3.10 (the test-mflux matrix covers 3.11-3.13 on its side).
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.10"
       - name: Install uv
         run: pip install uv
       - name: Install test-core (NO mflux extra)
-        run: uv sync --group test-core
+        run: uv sync --locked --group test-core
       - name: Run pure-core tests (no coverage gate — collected by `coverage` job)
         run: uv run pytest -m "not parity and not slow and not benchmark and not network and not mflux" -v --cov=mlx_teacache --cov-branch --cov-report=xml:coverage-core.xml
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-core
           path: coverage-core.xml
@@ -63,17 +72,19 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
         run: pip install uv
       - name: Install test-mflux
-        run: uv sync --group test-mflux
+        run: uv sync --locked --group test-mflux
       - name: Run tests (no parity, no slow, no benchmark)
         run: uv run pytest -m "not parity and not slow and not benchmark and not network" -v --cov=mlx_teacache --cov-branch --cov-report=xml:coverage-mflux-${{ matrix.python-version }}.xml
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-mflux-${{ matrix.python-version }}
           path: coverage-mflux-${{ matrix.python-version }}.xml
@@ -81,15 +92,18 @@ jobs:
   test-mflux-floor:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
+      # Sync from uv.lock, then move only mflux off it.
       - name: Install test-mflux, then pin mflux to the floor (0.17.5)
         run: |
-          uv sync --group test-mflux
+          uv sync --locked --group test-mflux
           uv pip install "mflux==0.17.5"
       - name: Verify floor version + run fast mflux lane (no re-sync, no coverage)
         run: |
@@ -99,8 +113,10 @@ jobs:
   test-mflux-latest:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install uv
@@ -109,9 +125,10 @@ jobs:
       # mflux version whose forwards have not been verified against the copies, so a new
       # in-range upstream release turns it red until the drift table is re-recorded
       # after a real-weights parity run. That is the intended trade-off.
+      # Sync from uv.lock, then move only mflux off it.
       - name: Install test-mflux, then upgrade mflux to the newest in-range
         run: |
-          uv sync --group test-mflux
+          uv sync --locked --group test-mflux
           uv pip install --upgrade "mflux>=0.17.5,<0.21"
       - name: Show resolved mflux and run the fast lane without re-syncing
         run: |
@@ -121,8 +138,10 @@ jobs:
   sdist-smoke:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install uv
@@ -130,16 +149,39 @@ jobs:
       - name: Build and verify the lean sdist
         run: bash scripts/sdist_smoke.sh
 
+  audit:
+    # Informational: a newly published advisory on a dev/CI dependency must not block merges,
+    # so this job never fails the workflow. Read the log; refresh uv.lock when it lists something.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Audit the locked dependency set
+        run: |
+          uv export --frozen --all-groups --all-extras --no-hashes > "$RUNNER_TEMP/req.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --disable-pip --desc off
+
   coverage:
     needs: [test-pure-core, test-mflux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - run: pip install coverage
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-*
           merge-multiple: true
@@ -147,15 +189,13 @@ jobs:
         # Each test-* job uploaded a coverage XML; combine them and fail
         # below a floor.
         #
-        # Why not 100%: about a third of `api.py` and the mflux integration
-        # surface are only reachable when a real `Flux1` / `Flux2Klein` is
-        # patched — those paths live behind `pytest.mark.parity` and need
-        # gated HuggingFace weights (FLUX.1-dev terms-acceptance), so they
-        # cannot run on a GitHub-hosted runner without secrets and license
-        # acceptance. Parity tests cover those paths locally and via the
-        # `workflow_dispatch`-only `test-parity` job. The floor here gates
-        # *regressions in the stub-testable surface* — anything reachable
-        # without real model weights.
+        # Why not 100%: the last few percent of the integration layer are
+        # only reachable when a real `Flux1` / `Flux2Klein` / Z-Image / Qwen
+        # model is patched (behind `pytest.mark.parity`, gated HuggingFace
+        # weights), which a GitHub-hosted runner cannot run. Parity tests
+        # cover those paths locally and via the `workflow_dispatch`-only
+        # `test-parity` job. The floor gates regressions in everything
+        # reachable without real model weights.
         run: |
           python -c "
           import xml.etree.ElementTree as ET, sys, glob
@@ -178,14 +218,28 @@ jobs:
               print('Missed lines (first 30):')
               for fname, lineno in sorted(missed)[:30]:
                   print(f'  {fname}:{lineno}')
-          # FLOOR rationale: ~35% of the codebase is parity-only-testable
-          # (FLUX.1 ProxyFlux1Transformer + the FLUX.2 _predict closure +
-          # the gated forward functions, now living inside each variant's
-          # integration.py, plus most of api.py's apply_teacache dispatch and
-          # handle.py's restore paths). Those paths need a real mflux model
-          # loaded on Apple Silicon and are exercised by the parity job
-          # (test-parity), not by test-pure-core / test-mflux. The combined
-          # non-parity gate is therefore inherently capped.
+          # FLOOR rationale: measured combined line coverage (pure-core lane +
+          # test-mflux lane) is 95.6% (1766/1847 lines, 2026-09-29). The
+          # 81 uncovered lines are the parity-only residue:
+          # - variants/*/integration.py: the real-model forward bodies that
+          #   need loaded weights, mostly in qwen_image (31 lines: the
+          #   _qwen_prelude and per-block joint-transformer walk), z_image_base
+          #   (18: the timestep -> t_emb re-walk and CFG forward),
+          #   flux2_klein_base_4b (14: the CFG _predict closure and its
+          #   timestep normalisation) and flux1_dev (4: the gated FLUX.1
+          #   forward's defensive guards and restore branch); the five
+          #   other variants (flux1_schnell, flux1_krea_dev,
+          #   flux2_klein_4b/9b, flux2_klein_base_9b) miss 2 lines each, the
+          #   restore branch that deletes an instance-level generate_image;
+          # - variants/__init__.py (3 lines): CalibrationError guards for a
+          #   malformed variant config, never true for a shipped variant;
+          # - integrations/mflux/lifecycle.py (1 line): the fall-through
+          #   return of the callback-identity lookup
+          #   (_callback_present_by_identity).
+          # The floor sits about 3pp below the measurement so a small
+          # parity-only addition does not trip it while a real loss of
+          # stub-testable coverage does. The real release-quality gate is the
+          # parity job + SSIM PR-gate on real weights, not this floor.
           #
           # Floor history:
           # - pre-v0.4.1: ~70%, floor 65% (5pp headroom)
@@ -195,17 +249,13 @@ jobs:
           #   integrations (most of it parity-only forward port + apply()),
           #   dropping the combined rate to ~64%. Floor lowered to 62% to
           #   restore the ~2pp headroom.
-          # - v0.7.0: z-image-base is a self-contained mini-kernel (~212 stmts).
-          #   Its apply()/predict-factory/validation (~94 stmts) are unit-tested
-          #   in the pure-core lane (tests/test_z_image_apply.py), but the
-          #   ZImageTransformer re-walk + CFG forward (~118 stmts) are model-only
-          #   and live in the parity lane. Combined rate dropped to ~61%. Floor
-          #   lowered to 58% to restore the ~3pp headroom.
-          #
-          # The real release-quality gate is the parity job + SSIM PR-gate on
-          # real weights, not this floor. See PR #9 for the v0.6.0 adjustment
-          # rationale.
-          FLOOR = 58.0
+          # - v0.7.0: z-image-base added ~212 stmts, ~118 of them model-only.
+          #   Combined rate dropped to ~61%. Floor lowered to 58%.
+          # - 2026-09-29: 58 -> 92. The forward ports, apply() paths and
+          #   handle restore paths gained fake-model unit tests over the
+          #   0.9-0.12 releases; the measured combined rate is 95.6%, so the
+          #   old floor no longer guarded anything.
+          FLOOR = 92.0
           sys.exit(0 if pct >= FLOOR else 1)
           "
 
@@ -218,14 +268,16 @@ jobs:
     runs-on: macos-14
     needs: test-mflux
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
       - name: Install test-mflux
-        run: uv sync --group test-mflux
+        run: uv sync --locked --group test-mflux
       - name: Run parity tests
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

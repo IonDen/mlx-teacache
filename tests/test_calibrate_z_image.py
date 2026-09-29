@@ -2,7 +2,7 @@
 
 Pure-core (mflux-free): imports the calibration script (mlx + numpy + the
 model-agnostic _kernel.gate only; mflux is imported lazily inside main()).
-NOT added to conftest._MFLUX_FILES — runs in the pure-core lane.
+NOT listed in tests/_lanes.py — runs in the pure-core lane.
 """
 
 import sys

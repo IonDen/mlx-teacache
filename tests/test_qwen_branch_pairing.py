@@ -193,7 +193,8 @@ def test_skip_step_reconstructs_from_cache_without_running_body(monkeypatch) -> 
 
 
 def test_negative_branch_reuses_its_own_residual_on_skip(monkeypatch) -> None:  # noqa: ANN001
-    """Bug caught: integration.py:356 `+ state.cached_residual_neg` -> `+ state.cached_residual` stays green today.
+    """Bug caught: the Qwen forward rebuilding a skipped negative call with `+ state.cached_residual`
+    instead of `+ state.cached_residual_neg`.
 
     The seed step caches residual 1 on the positive call and residual 2 on the
     negative call; the forced skip on step 1 must rebuild each branch from its

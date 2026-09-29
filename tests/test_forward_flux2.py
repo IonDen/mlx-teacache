@@ -267,7 +267,7 @@ def _zero_coefficient_handle() -> Any:
 
 
 def test_skip_step_adds_cached_residual_to_current_input():
-    """Bug caught: integration.py:282 `body_in_concat + state.cached_residual` -> `body_in_concat` stays green today.
+    """Bug caught: flux2_forward_with_gate rebuilding a skip as `body_in_concat` without `+ state.cached_residual`.
 
     Seed at hidden 1.0 with text 0.5 caches an image-stream residual of 0.5 + 3.0;
     the forced skip at hidden 2.0 must return 2.0 + 3.5 = 5.5."""
@@ -293,7 +293,7 @@ def test_skip_step_adds_cached_residual_to_current_input():
 
 
 def test_predict_with_negative_prompt_runs_cfg_forward():
-    """Bug caught: integration.py:517 `cfg_active = <negative inputs present>` -> `cfg_active = False` stays green today.
+    """Bug caught: the FLUX.2 predict closure setting `cfg_active = False` instead of testing for the negative inputs.
 
     With a negative prompt and guidance 4.0 the closure must mark CFG active and
     return the CFG combine neg + 4 * (pos - neg): hidden 1.0, positive text 1.0,

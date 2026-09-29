@@ -45,6 +45,7 @@ _MFLUX_FILES = {
     "test_lifecycle.py",
     "test_forward_flux1.py",
     "test_forward_flux2.py",
+    "test_forward_z_image_fake.py",  # imports the z-image-base integration module
     "test_cfg_branch_independence.py",  # calls flux2_cfg_forward_with_gate which lazily imports mflux
     "test_api.py",
     "test_parity_flux1.py",

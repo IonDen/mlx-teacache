@@ -200,16 +200,16 @@ def flux2_forward_with_gate(
             temb_mod_params_txt,
             concat_rotary_emb,
         )
+        timestep_val = float(timestep.flatten()[0])
         stats.record(
             StepDecision(
                 step_idx=state.step_counter,
-                timestep=float(timestep.flatten()[0]),
+                timestep=timestep_val,
                 rel_l1=None,
                 accumulated_distance=state.accumulated_distance,
                 decision="computed",
             )
         )
-        state.last_timestep = float(timestep.flatten()[0])
         out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
         out = inner.norm_out(out, temb)
         out = inner.proj_out(out)
@@ -256,10 +256,7 @@ def flux2_forward_with_gate(
         )
     )
 
-    # 6. Debug-only timestep tracking.
-    state.last_timestep = float(timestep.flatten()[0])
-
-    # 7. Compute path.
+    # 6. Compute path.
     if decision.should_compute:
         body_out_concat = _flux2_run_body(
             inner,
@@ -371,7 +368,6 @@ def flux2_cfg_forward_with_gate(
                 decision="computed",
             )
         )
-        state.last_timestep = timestep_val
         state.step_counter += 1
         return _flux2_apply_tail_and_combine(
             inner, body_out_pos, body_out_neg, enc_pos, enc_neg, temb, guidance
@@ -400,7 +396,6 @@ def flux2_cfg_forward_with_gate(
         calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
-    state.last_timestep = timestep_val
 
     # 5. Compute / skip — applied uniformly across both branches.
     body_in_concat_pos = mx.concatenate([enc_pos, body_in], axis=1)

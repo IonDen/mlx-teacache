@@ -53,4 +53,3 @@ def test_release_arrays_drops_the_three_arrays_and_nothing_else() -> None:
     assert state.cached_residual is None
     assert state.cached_residual_neg is None
     assert state.step_counter == 7
-    assert state.num_steps == 10

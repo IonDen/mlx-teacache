@@ -250,7 +250,6 @@ def zimage_forward_with_gate(
                 decision="computed",
             )
         )
-        state.last_timestep = timestep_val
         state.step_counter += 1
         return _zimage_tail(transformer, main_out, t_emb, pre)
 
@@ -278,7 +277,6 @@ def zimage_forward_with_gate(
         calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
-    state.last_timestep = timestep_val
 
     if decision.should_compute:
         main_out = _run_main_layers(transformer, h1, pre, t_emb, start=1)
@@ -329,7 +327,6 @@ def zimage_cfg_forward_with_gate(
                 decision="computed",
             )
         )
-        state.last_timestep = timestep_val
         state.step_counter += 1
         noise_pos = _zimage_tail(transformer, main_out_pos, t_emb, pre_pos)
         noise_neg = _zimage_tail(transformer, main_out_neg, t_emb, pre_neg)
@@ -359,7 +356,6 @@ def zimage_cfg_forward_with_gate(
         calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
-    state.last_timestep = timestep_val
 
     if decision.should_compute:
         main_out_pos = _run_main_layers(transformer, h1_pos, pre_pos, t_emb, start=1)

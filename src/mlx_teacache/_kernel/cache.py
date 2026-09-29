@@ -10,9 +10,7 @@ previous_mod_input    : mx.array | None
 cached_residual       : mx.array | None  — positive branch residual
 cached_residual_neg   : mx.array | None  — negative branch residual (CFG)
 accumulated_distance  : float
-last_timestep         : float | None
 skip_window_validated : bool
-num_steps             : int | None
 consecutive_skips     : int
 """
 
@@ -28,9 +26,7 @@ class TeaCacheState:
     cached_residual: mx.array | None = None
     cached_residual_neg: mx.array | None = None
     accumulated_distance: float = 0.0
-    last_timestep: float | None = None
     skip_window_validated: bool = False
-    num_steps: int | None = None
     consecutive_skips: int = 0
 
     def reset_for_new_generation(self, *, num_steps: int) -> None:
@@ -43,6 +39,9 @@ class TeaCacheState:
         Clears both ``cached_residual`` (positive branch) and
         ``cached_residual_neg`` (negative branch) to prevent cross-generation
         pollution under CFG.
+
+        ``num_steps`` is accepted for call-site compatibility and is not
+        stored: the active step count lives on the generation context.
         """
         self.step_counter = 0
         self.previous_mod_input = None
@@ -50,9 +49,7 @@ class TeaCacheState:
         self.cached_residual_neg = None
         self.accumulated_distance = 0.0
         self.consecutive_skips = 0
-        self.last_timestep = None
         self.skip_window_validated = False
-        self.num_steps = num_steps
 
     def store_residuals(self, *, pos: mx.array | None = None, neg: mx.array | None = None) -> None:
         """Materialise and keep the body residual(s).

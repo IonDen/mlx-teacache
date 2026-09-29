@@ -17,9 +17,7 @@ def test_field_set_matches_v05():
         "cached_residual",
         "cached_residual_neg",
         "accumulated_distance",
-        "last_timestep",
         "skip_window_validated",
-        "num_steps",
         # v0.10.0: consecutive-delta anchoring (Option A) — runaway-skip streak counter.
         "consecutive_skips",
     }
@@ -36,8 +34,6 @@ def test_reset_signature_takes_num_steps():
     s.cached_residual = mx.array([1.0])
     s.cached_residual_neg = mx.array([2.0])
     s.skip_window_validated = True
-    s.num_steps = 8
-    s.last_timestep = 0.5
     s.previous_mod_input = mx.array([0.1])
 
     s.reset_for_new_generation(num_steps=12)
@@ -47,9 +43,7 @@ def test_reset_signature_takes_num_steps():
     assert s.cached_residual is None
     assert s.cached_residual_neg is None
     assert s.accumulated_distance == 0.0
-    assert s.last_timestep is None
     assert s.skip_window_validated is False
-    assert s.num_steps == 12
 
 
 def test_shim_re_exports_state_identity():

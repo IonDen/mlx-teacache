@@ -72,21 +72,27 @@ def _patch_physics(monkeypatch, *, signal_value: float) -> dict:
     calls = {"prelude": 0, "signal_a": 0, "run_body": 0, "tail": 0}
 
     class _Pre:
-        def __init__(self) -> None:
-            self.h_in = mx.zeros((1, 4, 8))
+        def __init__(self, hidden_states: mx.array) -> None:
+            # h_in is the call's own hidden_states, so a skip step's reconstruction
+            # is observably built on the CURRENT step's input, not a replayed one.
+            self.h_in = hidden_states
             self.text_embeddings = mx.zeros((1, 8))
 
     def fake_prelude(inner, t, config, hidden_states):  # noqa: ANN001
         calls["prelude"] += 1
-        return _Pre()
+        return _Pre(hidden_states)
 
     def fake_signal_a(inner, pre):  # noqa: ANN001
         calls["signal_a"] += 1
         return mx.full((1, 4, 8), signal_value)
 
     def fake_run_body(inner, pre, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        # Branch-dependent body: a negative-valued encoder_hidden_states marks the
+        # negative (unconditional) call and gets residual 2; any other call gets 1.
+        # Distinct residuals make a positive/negative cache swap observable.
         calls["run_body"] += 1
-        return pre.h_in + mx.ones((1, 4, 8))
+        negative = bool(mx.any(k["encoder_hidden_states"] < 0).item())
+        return pre.h_in + mx.full((1, 4, 8), 2.0 if negative else 1.0)
 
     def fake_tail(inner, body_out, pre, *a, **k):  # noqa: ANN001, ANN002, ANN003
         calls["tail"] += 1
@@ -184,6 +190,52 @@ def test_skip_step_reconstructs_from_cache_without_running_body(monkeypatch) -> 
     # fake_run_body returns pre.h_in + ones ⇒ residual = ones ⇒ reconstruction = zeros + ones = ones.
     assert bool(mx.array_equal(out_pos, mx.ones((1, 4, 8))))
     assert bool(mx.array_equal(out_neg, mx.ones((1, 4, 8))))
+
+
+def test_negative_branch_reuses_its_own_residual_on_skip(monkeypatch) -> None:  # noqa: ANN001
+    """Bug caught: integration.py:356 `+ state.cached_residual_neg` -> `+ state.cached_residual` stays green today.
+
+    The seed step caches residual 1 on the positive call and residual 2 on the
+    negative call; the forced skip on step 1 must rebuild each branch from its
+    own residual on top of that step's h_in."""
+    calls = _patch_physics(monkeypatch, signal_value=0.5)
+    inner = SimpleNamespace()
+    h = _InternalHandle(
+        rel_l1_thresh=0.5,
+        coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ step 1 skips after the step-0 seed
+        skip_first_n_steps=0,
+        skip_last_n_steps=1,
+    )
+    h._gen_ctx.token = 1
+    h._gen_ctx.active_num_steps = 4
+
+    def call(t: int, *, hidden: float, negative: bool) -> mx.array:
+        return qwen_forward_with_gate(
+            inner,
+            h,
+            t=t,
+            config=SimpleNamespace(num_inference_steps=4),
+            hidden_states=mx.full((1, 4, 8), hidden),
+            encoder_hidden_states=mx.full((1, 2, 8), -1.0 if negative else 1.0),
+            encoder_hidden_states_mask=mx.ones((1, 2)),
+            qwen_image_ids=None,
+            cond_image_grid=None,
+        )
+
+    # Step 0 seeds both branches (positive residual 1, negative residual 2).
+    call(0, hidden=10.0, negative=False)
+    call(0, hidden=20.0, negative=True)
+    assert calls["run_body"] == 2
+
+    # Step 1 is a forced skip; each branch has its own, new h_in.
+    h_in_pos = mx.full((1, 4, 8), 3.0)
+    h_in_neg = mx.full((1, 4, 8), 5.0)
+    out_pos_skip = call(1, hidden=3.0, negative=False)
+    out_neg_skip = call(1, hidden=5.0, negative=True)
+    assert calls["run_body"] == 2  # the body did not run on the skip step
+    assert [d.decision for d in h._state.stats._staging.decisions] == ["computed", "skipped"]
+    assert mx.array_equal(out_neg_skip, h_in_neg + 2).item()
+    assert mx.array_equal(out_pos_skip, h_in_pos + 1).item()
 
 
 def test_fast_path_marks_cfg_active(monkeypatch) -> None:  # noqa: ANN001

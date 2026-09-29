@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling==1.32.4", "hatch-vcs==0.5.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -28,7 +28,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["mlx>=0.31", "numpy"]
+dependencies = ["mlx>=0.31"]
 
 [project.optional-dependencies]
 mflux = ["mflux>=0.17.5,<0.21"]
@@ -46,6 +46,7 @@ test-core = [
     "pytest>=8",
     "pytest-cov",
     "hypothesis>=6",
+    "numpy",
     'tomli>=2.0; python_version < "3.11"',
 ]
 test-mflux = [
@@ -64,7 +65,7 @@ source = "vcs"
 version-file = "src/mlx_teacache/_version.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/", "scripts/", "docs/", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md", "pyproject.toml"]
+include = ["src/", "/scripts/", "docs/", "LICENSE", "NOTICE", "README.md", "CHANGELOG.md", "pyproject.toml"]
 exclude = [
     ".hypothesis/",
     "tests/reference/",          # nested per-variant subdirs and all .safetensors
@@ -72,6 +73,8 @@ exclude = [
     "tests/converted/",
     "notes/",
     "docs/comparison/",          # links images under _artifacts/, which the sdist does not ship
+    "docs/papers/",              # research memos published on GitHub, not package docs
+    "scripts/_verify*",          # local-only checks; hatchling ignores .git/info/exclude
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -130,7 +133,8 @@ source = ["mlx_teacache"]
 exclude_also = ["if TYPE_CHECKING:"]
 # fail_under is intentionally NOT set globally — the per-PR `coverage` CI job
 # (see ci.yml) combines results across test-core + test-mflux and gates against
-# a FLOOR (currently 58%), not 100%: ~35% of the package is only reachable with
-# real weights (the parity lane), so 100% combined is structurally impossible
-# off that lane. The real release-quality gate is the manual parity run that
-# must pass before tagging. Per-task TDD runs should NOT trigger a global gate.
+# a FLOOR (currently 92%), not 100%: the last few percent of the package are
+# only reachable with real weights (the parity tests), so 100% combined is
+# structurally impossible without them. The real release-quality gate is the
+# manual parity run that must pass before tagging. Per-task TDD runs should NOT trigger a
+# global gate.

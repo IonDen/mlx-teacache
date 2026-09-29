@@ -95,6 +95,54 @@ def test_the_decision_reports_the_measured_delta_not_the_clamped_one() -> None:
     assert clamped.rel_l1 == pytest.approx(0.0035, rel=1e-4)
 
 
+def test_a_skipped_step_reports_the_measured_delta_not_the_clamped_one() -> None:
+    """Bug: the skipped branch reports the clamped x. At threshold 0.3 a 0.0035 delta is priced at
+    p(0.0283) = 0.144 and skipped, and the decision must still say 0.0035, not 0.0283."""
+    skipped = _gate_on_delta(0.0035, thresh=0.3, calibrated_range=_RANGE)
+    assert skipped.kind == "skipped"
+    assert skipped.rel_l1 == pytest.approx(0.0035, rel=1e-4)
+
+
+def test_a_delta_exactly_at_the_range_maximum_is_priced_by_the_fit_not_forced_to_compute() -> None:
+    """Bug: `x > x_max` becomes `x >= x_max`, so a delta equal to the top of the calibrated range takes the
+    force-compute path. Identity price p(x) = x, delta 0.25 exactly, range top 0.25, threshold 0.3: skipped."""
+    line = (0.0, 0.0, 0.0, 1.0, 0.0)
+    state = TeaCacheState()
+
+    def run(hi: float) -> GateDecision:
+        state.reset_for_new_generation(num_steps=10)
+        for idx, mod in ((0, 1.0), (1, 1.0)):
+            gate_step(
+                state,
+                rel_l1_thresh=0.3,
+                coefficients=line,
+                skip_first=1,
+                skip_last=1,
+                num_steps=10,
+                step_idx=idx,
+                mod_in=mx.array([mod]),
+                calibrated_range=(0.05, hi),
+            )
+        state.cached_residual = mx.zeros((1,))
+        return gate_step(
+            state,
+            rel_l1_thresh=0.3,
+            coefficients=line,
+            skip_first=1,
+            skip_last=1,
+            num_steps=10,
+            step_idx=2,
+            mod_in=mx.array([1.25]),
+            calibrated_range=(0.05, hi),
+        )
+
+    at_top = run(0.25)
+    assert at_top.kind == "skipped"
+    assert at_top.predicted_distance == pytest.approx(0.25)
+    # One notch below the top the same delta is above the range and computes.
+    assert run(0.2499).kind == "computed"
+
+
 def test_an_overflowed_delta_stays_a_numerical_miss_with_the_range() -> None:
     """Bug: the clamp runs on a non-finite delta. A finite signal whose difference overflows float32 gives
     rel_l1 = +inf (finite denominator); clamped, that becomes x_max, is priced at 0.164 and skipped, reusing a
@@ -103,6 +151,7 @@ def test_an_overflowed_delta_stays_a_numerical_miss_with_the_range() -> None:
     previous = mx.concatenate([mx.array([3.0e38], dtype=mx.float32), mx.zeros((1023,), dtype=mx.float32)])
     state.previous_mod_input = previous
     state.cached_residual = mx.zeros((1,))
+    state.cached_residual_neg = mx.zeros((1,))
     decision = gate_step(
         state,
         rel_l1_thresh=0.17,
@@ -117,6 +166,7 @@ def test_an_overflowed_delta_stays_a_numerical_miss_with_the_range() -> None:
     assert decision.kind == "numerical-miss"
     assert decision.rel_l1 is None
     assert state.cached_residual is None
+    assert state.cached_residual_neg is None
 
 
 def _longest_streak_on_tiny_deltas(variant: str, *, ranged: bool) -> int:

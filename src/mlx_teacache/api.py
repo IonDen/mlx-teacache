@@ -14,6 +14,7 @@ from typing import Any
 
 from mlx_teacache._kernel.coefficients import validate_custom
 from mlx_teacache.errors import (
+    AlreadyPatchedError,
     IncompatibleModelError,
     TeaCacheDisabledWarning,
     TeaCacheNoBenefitWarning,
@@ -112,8 +113,6 @@ def apply_teacache(
     # --- Already-patched sentinel check ---
     existing = getattr(flux, "_teacache_handle", None)
     if existing is not None:
-        from mlx_teacache.errors import AlreadyPatchedError
-
         raise AlreadyPatchedError(
             variant_id=getattr(existing, "variant_id", "unknown"),
             rel_l1_thresh=existing.rel_l1_thresh,

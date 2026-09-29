@@ -11,21 +11,22 @@ from typing import Literal
 
 import mlx.core as mx
 
+from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache.errors import TeaCacheValueError
 
 GateKind = Literal["computed", "forced", "skipped", "numerical-miss"]
 
+# Runaway-skip guard, not a tuning knob (intentional divergence from
+# upstream ali-vilab TeaCache, like the max(0,·) clamp below). The
+# origin-constrained in-repo fits are positive for small deltas but cross
+# zero at large ones (base-4b x≈0.24, z-image x≈0.29, qwen x≈0.78), past the
+# range they were calibrated on; there the max(0,·) clamp turns a large,
+# real change into a predicted change of zero, so the accumulator stops
+# advancing and a stale residual could be reused without bound at a
+# user-raised threshold. Observed max streaks at per-variant default
+# thresholds are recorded in docs/calibration.md; raise this constant only
+# from a re-measured run.
 MAX_CONSECUTIVE_SKIPS = 8
-"""Runaway-skip guard, not a tuning knob (intentional divergence from
-upstream ali-vilab TeaCache, like the max(0,·) clamp below). The
-origin-constrained in-repo fits are positive for small deltas but cross
-zero at large ones (base-4b x≈0.24, z-image x≈0.29, qwen x≈0.78), past the
-range they were calibrated on; there the max(0,·) clamp turns a large,
-real change into a predicted change of zero, so the accumulator stops
-advancing and a stale residual could be reused without bound at a
-user-raised threshold. Observed max streaks at per-variant default
-thresholds are recorded in docs/calibration.md; raise this constant only
-from a re-measured run."""
 
 
 @dataclass(frozen=True)
@@ -66,8 +67,8 @@ def _all_finite(t: mx.array) -> bool:
     return bool(mx.all(mx.isfinite(t)))
 
 
-def gate_step(  # type: ignore[no-untyped-def]
-    state,
+def gate_step(
+    state: TeaCacheState,
     *,
     rel_l1_thresh: float,
     coefficients: tuple[float, float, float, float, float],
@@ -80,8 +81,7 @@ def gate_step(  # type: ignore[no-untyped-def]
 ) -> GateDecision:
     """Return a structured decision for one denoising step.
 
-    `state` is a mlx_teacache.cache.TeaCacheState (duck-typed here to keep the
-    gate module pure / circular-import-free).
+    `state` is the per-generation TeaCacheState; the gate reads and updates it.
 
     `calibrated_range` is the (min, max) rel_l1 the coefficients were fitted on.
     When given, the measured delta is clamped into it before the polynomial is

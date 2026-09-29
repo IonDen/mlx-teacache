@@ -95,7 +95,11 @@ def make_flux1_fake(alias: str = "dev") -> Any:
     ) -> str:
         config = SimpleNamespace(num_inference_steps=num_inference_steps, init_time_step=0)
         latents = mx.zeros((1, 4, 8))
-        for cb in list(flux.callbacks.before_loop):
+        # Iterate the live registry lists, not copies: mflux 0.18's GenerationContext
+        # loops over `registry.after_loop_callbacks()` (generation_context.py:56-57),
+        # which returns the `after_loop` list object itself (callback_registry.py:40-41),
+        # so a callback that edits that list in place changes the in-flight loop.
+        for cb in flux.callbacks.before_loop:
             cb.call_before_loop(seed=seed, prompt=prompt, latents=latents, config=config)
         for t in range(num_inference_steps + _extra_transformer_calls):
             flux.transformer(
@@ -105,7 +109,7 @@ def make_flux1_fake(alias: str = "dev") -> Any:
                 prompt_embeds=mx.zeros((1, 2, 8)),
                 pooled_prompt_embeds=mx.zeros((1, 8)),
             )
-        for cb in list(flux.callbacks.after_loop):
+        for cb in flux.callbacks.after_loop:
             cb.call_after_loop(seed=seed, prompt=prompt, latents=latents, config=config)
         return "image"
 

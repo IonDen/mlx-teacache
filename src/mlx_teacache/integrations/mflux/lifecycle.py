@@ -257,7 +257,13 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
 def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
     """Walk every callback list on the registry and remove `target` by identity.
     Returns True iff at least one removal succeeded. mflux's CallbackRegistry
-    stores the lists on `before_loop` / `in_loop` / `after_loop` / `interrupt`."""
+    stores the lists on `before_loop` / `in_loop` / `after_loop` / `interrupt`.
+
+    Each list is replaced by a filtered copy rather than edited in place:
+    restore() can run from inside an after-loop callback while mflux is still
+    iterating that very list, and deleting an earlier entry would shift the
+    list under the loop so the next callback is skipped. The loop keeps
+    walking the old list; later readers see the new one."""
     removed_any = False
     for attr in (
         "before_loop",
@@ -266,11 +272,9 @@ def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
         "interrupt",
     ):
         lst = getattr(registry, attr, None)
-        if isinstance(lst, list):
-            for i in range(len(lst) - 1, -1, -1):
-                if lst[i] is target:
-                    del lst[i]
-                    removed_any = True
+        if isinstance(lst, list) and any(item is target for item in lst):
+            setattr(registry, attr, [item for item in lst if item is not target])
+            removed_any = True
     return removed_any
 
 

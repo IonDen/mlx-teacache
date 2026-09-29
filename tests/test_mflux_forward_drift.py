@@ -62,6 +62,12 @@ _TARGETS: list[tuple[str, str, str, str]] = [
         "QwenTransformerBlock",
         "__call__",
     ),
+    (
+        "qwen.QwenTransformerBlock._modulate",
+        "mflux.models.qwen.model.qwen_transformer.qwen_transformer_block",
+        "QwenTransformerBlock",
+        "_modulate",
+    ),
     ("flux1.Flux1.generate_image", "mflux.models.flux.variants.txt2img.flux", "Flux1", "generate_image"),
     (
         "flux2.Flux2Klein.generate_image",
@@ -90,8 +96,9 @@ _TARGETS: list[tuple[str, str, str, str]] = [
 KNOWN: dict[str, dict[str, str]] = {
     # Digests come from fingerprint_function_node over the wheel sources and are the
     # same on CPython 3.10 through 3.14 (interpreter-dependent AST fields are dropped).
-    # Flux2TransformerBlock, Flux2Modulation and QwenTransformerBlock are pinned because
-    # the gate-signal extractors (`_flux2_extract_mod_input`, `_qwen_signal_a`) re-implement
+    # Flux2TransformerBlock, Flux2Modulation and QwenTransformerBlock (its forward and the
+    # static `_modulate` that `_qwen_signal_a` calls directly) are pinned because the
+    # gate-signal extractors (`_flux2_extract_mod_input`, `_qwen_signal_a`) re-implement
     # their first lines and unpack the modulation tuple by position.
     # 0.17.5, the floor: the FLUX.2 transformer forward differs from 0.18.0, which
     # gained its KV-cache path there; the copy does not take it (kv_cache is None). The
@@ -104,6 +111,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2TransformerBlock.__call__": "358009e3df2458c7",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "09830d48dfa71077",
         "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -120,6 +128,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "09830d48dfa71077",
         "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -127,7 +136,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "59ba0f1448730c80",
     },
-    # 0.18.1 is identical to 0.18.0 on all ten targets.
+    # 0.18.1 is identical to 0.18.0 on all fourteen targets.
     "0.18.1": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
@@ -136,6 +145,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "09830d48dfa71077",
         "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -160,6 +170,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "8cee664523fcb6ed",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -179,6 +190,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "8cee664523fcb6ed",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -192,7 +204,7 @@ KNOWN: dict[str, dict[str, str]] = {
     # `qwen-image` is Qwen-Image-2512, still uncalibrated and warned about.
     # Only Flux2Klein.generate_image moved: the VAE decode after the loop now passes
     # tiling_config, which the wrapper passes through untouched. Also new in 0.20, outside
-    # these ten targets: RopeEmbedder.__init__ evaluates Z-Image's rotary tables (the lazy
+    # these fourteen targets: RopeEmbedder.__init__ evaluates Z-Image's rotary tables (the lazy
     # tables the Z-Image parity fixture materialises by hand), and call_in_loop can receive a
     # `denoised` argument, but only when a subscriber declares it; ours do not.
     "0.20.0": {
@@ -203,6 +215,7 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "80a99e48781d55be",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -235,8 +248,8 @@ def test_installed_mflux_version_has_verified_forward_fingerprints() -> None:
 def test_forward_fingerprint_matches_the_verified_one(label: str) -> None:
     installed = version("mflux")
     if installed not in KNOWN:
-        # The summary test above already fails once for an unknown version; ten
-        # more failures would only repeat it.
+        # The summary test above already fails once for an unknown version; one
+        # more failure per target would only repeat it.
         pytest.skip(
             f"mflux {installed} unknown; see test_installed_mflux_version_has_verified_forward_fingerprints"
         )

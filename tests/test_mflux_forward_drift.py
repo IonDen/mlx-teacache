@@ -44,6 +44,24 @@ _TARGETS: list[tuple[str, str, str, str]] = [
         "QwenTransformer",
         "__call__",
     ),
+    (
+        "flux2.Flux2TransformerBlock.__call__",
+        "mflux.models.flux2.model.flux2_transformer.transformer_block",
+        "Flux2TransformerBlock",
+        "__call__",
+    ),
+    (
+        "flux2.Flux2Modulation.__call__",
+        "mflux.models.flux2.model.flux2_transformer.modulation",
+        "Flux2Modulation",
+        "__call__",
+    ),
+    (
+        "qwen.QwenTransformerBlock.__call__",
+        "mflux.models.qwen.model.qwen_transformer.qwen_transformer_block",
+        "QwenTransformerBlock",
+        "__call__",
+    ),
     ("flux1.Flux1.generate_image", "mflux.models.flux.variants.txt2img.flux", "Flux1", "generate_image"),
     (
         "flux2.Flux2Klein.generate_image",
@@ -72,13 +90,20 @@ _TARGETS: list[tuple[str, str, str, str]] = [
 KNOWN: dict[str, dict[str, str]] = {
     # Digests come from fingerprint_function_node over the wheel sources and are the
     # same on CPython 3.10 through 3.14 (interpreter-dependent AST fields are dropped).
+    # Flux2TransformerBlock, Flux2Modulation and QwenTransformerBlock are pinned because
+    # the gate-signal extractors (`_flux2_extract_mod_input`, `_qwen_signal_a`) re-implement
+    # their first lines and unpack the modulation tuple by position.
     # 0.17.5, the floor: the FLUX.2 transformer forward differs from 0.18.0, which
-    # gained its KV-cache path there; the copy does not take it (kv_cache is None).
+    # gained its KV-cache path there; the copy does not take it (kv_cache is None). The
+    # FLUX.2 block forward differs too (same KV-cache change); modulation and Qwen block match.
     "0.17.5": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "3c93bbfb5aaaf31f",
         "z_image.ZImageTransformer.__call__": "779a9ad06bfc2a65",
         "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "358009e3df2458c7",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "flux1.Flux1.generate_image": "09830d48dfa71077",
         "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -92,6 +117,9 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
         "z_image.ZImageTransformer.__call__": "779a9ad06bfc2a65",
         "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "flux1.Flux1.generate_image": "09830d48dfa71077",
         "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -105,6 +133,9 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
         "z_image.ZImageTransformer.__call__": "779a9ad06bfc2a65",
         "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "flux1.Flux1.generate_image": "09830d48dfa71077",
         "flux2.Flux2Klein.generate_image": "e5b748fe91a48d44",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -126,6 +157,9 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2Transformer.__call__": "214c37be79a602b4",
         "z_image.ZImageTransformer.__call__": "da0a464f9e29b64b",
         "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "8cee664523fcb6ed",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -142,6 +176,9 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
         "z_image.ZImageTransformer.__call__": "179208f45cc524e1",
         "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "8cee664523fcb6ed",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
@@ -163,6 +200,9 @@ KNOWN: dict[str, dict[str, str]] = {
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
         "z_image.ZImageTransformer.__call__": "179208f45cc524e1",
         "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "80a99e48781d55be",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",

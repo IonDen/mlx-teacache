@@ -77,6 +77,7 @@ the per-prompt chunks once all are present.
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -87,6 +88,7 @@ import mlx.core as mx
 import numpy as np
 from _memory_saver import make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
+from _qwen_config import QWEN_ORIGINAL, qwen_config
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # reuse the RUNTIME signal fn
 from mlx_teacache.variants.qwen_image.integration import (
@@ -457,11 +459,12 @@ def _capture_one_prompt(flux: Any, prompt: str, *, steps: int = NUM_INFERENCE_ST
 
 
 def _chunk_from_reducer(
-    reducer: _QwenPairReducer, *, prompt_idx: int, prompt: str, steps: int
+    reducer: _QwenPairReducer, *, prompt_idx: int, prompt: str, steps: int, model: str
 ) -> dict[str, Any]:
     """The per-prompt chunk: both signals' (x, y) series plus the process's MLX peak."""
     chunk: dict[str, Any] = {
         "idx": prompt_idx,
+        "model": model,
         "prompt": prompt,
         "num_captures": reducer.steps,
         "steps": steps,
@@ -479,14 +482,13 @@ def _register_memory_saver(flux: Any, saver_cls: Any) -> None:
     flux.callbacks.register(make_memory_saver(flux, saver_cls))
 
 
-def _run_memory_probe() -> None:
+def _run_memory_probe(model: str) -> None:
     """Load the model, run ONE generation at the pinned recipe (no capture),
     print the peak vs the device working-set ceiling, write NO JSON."""
-    from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
-    print(f"[memory-probe] Loading Qwen-Image (quantize={QUANTIZE})...", flush=True)
-    flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
+    print(f"[memory-probe] Loading {model} (quantize={QUANTIZE})...", flush=True)
+    flux = QwenImage(quantize=QUANTIZE, model_config=qwen_config(model))
     flux.freeze()
     from mflux.callbacks.instances.memory_saver import MemorySaver
 
@@ -513,7 +515,7 @@ def _run_memory_probe() -> None:
     print("[memory-probe] done (no JSON written).", flush=True)
 
 
-def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) -> None:
+def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool, model: str) -> None:
     """Capture ONE prompt and write its chunk file, then exit.
 
     A fresh subprocess per prompt = fresh MLX memory (no cross-prompt
@@ -532,6 +534,7 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) 
         ys = [round(0.02 * (k + 1), 5) for k in range(m)]
         chunk: dict[str, Any] = {
             "idx": prompt_idx,
+            "model": model,
             "prompt": prompt,
             "num_captures": steps,
             "steps": steps,
@@ -555,33 +558,58 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) 
     # The generation alone peaks ~26.2 GiB active (vanilla bench), above the
     # recommended working set; the watchdog is the only thing that stops a paging storm.
     arm_mlx_watchdog(on_abort=abort_handler(f"calibrate_qwen-prompt{prompt_idx}", chunk_dir))
-    from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
-    print(f"[worker {prompt_idx}] loading Qwen-Image (q{QUANTIZE}) for {prompt!r} ...", flush=True)
-    flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
+    print(f"[worker {prompt_idx}] loading {model} (q{QUANTIZE}) for {prompt!r} ...", flush=True)
+    flux = QwenImage(quantize=QUANTIZE, model_config=qwen_config(model))
     flux.freeze()
     from mflux.callbacks.instances.memory_saver import MemorySaver
 
     _register_memory_saver(flux, MemorySaver)
     reducer = _capture_one_prompt(flux, prompt, steps=steps)
     assert reducer.steps == steps, f"expected {steps} captures, got {reducer.steps}"
-    chunk = _chunk_from_reducer(reducer, prompt_idx=prompt_idx, prompt=prompt, steps=steps)
+    chunk = _chunk_from_reducer(reducer, prompt_idx=prompt_idx, prompt=prompt, steps=steps, model=model)
     out.write_text(json.dumps(chunk, indent=2))
     print(f"[worker {prompt_idx}] wrote {out} (peak {chunk['peak_memory_gb']:.2f} GB)", flush=True)
 
 
-def _aggregate_path(chunk_dir: Path, *, dry_run: bool) -> Path:
+def calibration_paths(model: str) -> tuple[Path, str]:
+    """Default chunk dir and output file name for ``model``. The original checkpoint keeps the committed
+    names; any other checkpoint gets a subfolder of the (gitignored) default chunk dir, and its fit is written
+    inside that folder, so its captures and fit can neither mix with nor overwrite the committed calibration."""
+    if model == QWEN_ORIGINAL:
+        return CHUNK_DIR_DEFAULT, OUTPUT_JSON
+    slug = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
+    # Nested under the gitignored default chunk dir so a non-default run can never reach git or the sdist.
+    return CHUNK_DIR_DEFAULT / slug, f"_calibration_qwen_{slug}.json"
+
+
+def _check_chunk_models(chunks: list[dict[str, Any]], model: str) -> None:
+    """Refuse to aggregate chunks captured from a different checkpoint. Chunks without a ``model`` key
+    (older runs) count as the original ``Qwen/Qwen-Image``."""
+    for chunk in chunks:
+        found = chunk.get("model", QWEN_ORIGINAL)
+        if found != model:
+            raise SystemExit(
+                f"[orchestrator] chunk for prompt {chunk.get('idx')} was captured from {found}, not {model}; "
+                "refusing to aggregate. Use a separate --chunk-dir per checkpoint."
+            )
+
+
+def _aggregate_path(chunk_dir: Path, *, dry_run: bool, model: str = QWEN_ORIGINAL) -> Path:
     """Where the final aggregated calibration JSON lands. The committed
-    scripts/_calibration_qwen.json is written ONLY by a real run into the default
-    chunk dir; a dry-run or a custom chunk dir writes beside its chunks so a smoke
-    never clobbers the committed artifact."""
-    if not dry_run and chunk_dir.resolve() == CHUNK_DIR_DEFAULT.resolve():
+    scripts/_calibration_qwen.json is written ONLY by a real run of the original checkpoint into the
+    default chunk dir; a dry-run, a custom chunk dir or another checkpoint writes beside its chunks so
+    a smoke or a 2512 run never clobbers the committed artifact."""
+    _, out_name = calibration_paths(model)
+    if not dry_run and model == QWEN_ORIGINAL and chunk_dir.resolve() == CHUNK_DIR_DEFAULT.resolve():
         return Path(__file__).parent / OUTPUT_JSON
-    return chunk_dir / OUTPUT_JSON
+    return chunk_dir / out_name
 
 
-def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: str, dry_run: bool) -> None:
+def _run_orchestrator(
+    *, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: str, dry_run: bool, model: str
+) -> None:
     """Spawn one worker SUBPROCESS per pending prompt (sequential — never two 20B
     loads at once), each writing its chunk on completion; resume by skipping
     prompts whose chunk already exists; aggregate + fit once all are present."""
@@ -604,6 +632,8 @@ def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: 
             str(steps),
             "--chunk-dir",
             str(chunk_dir),
+            "--model",
+            model,
         ]
         if dry_run:
             cmd.append("--dry-run")
@@ -623,10 +653,12 @@ def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: 
 
     # All chunks present -> aggregate + fit. Same report schema as the monolith.
     chunks = [json.loads((chunk_dir / _chunk_filename(i)).read_text()) for i in range(n_prompts)]
+    _check_chunk_models(chunks, model)
     n_fit = _n_fit(n_prompts, N_HELDOUT)
     acc = _accumulate_chunks(chunks, n_fit)
     report: dict[str, Any] = {
         "variant": "qwen-image",
+        "model": model,
         "num_inference_steps": steps,
         "guidance": GUIDANCE,
         "height": HEIGHT,
@@ -661,7 +693,7 @@ def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: 
             flush=True,
         )
 
-    out = _aggregate_path(chunk_dir, dry_run=dry_run)
+    out = _aggregate_path(chunk_dir, dry_run=dry_run, model=model)
     out.write_text(json.dumps(report, indent=2))
     print(f"\n[orchestrator] aggregated {n_prompts} chunks ({gen_seconds:.1f}s generation). Wrote {out}")
     print(
@@ -670,8 +702,15 @@ def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: 
     )
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model",
+        default=QWEN_ORIGINAL,
+        help="Qwen-Image checkpoint to calibrate (default: the original, which the shipped coefficients came "
+        "from). Another checkpoint writes its chunks and fit under scripts/_calib_qwen_chunks/<model>/, "
+        "never the committed calibration.",
+    )
     parser.add_argument("--fit-mode", default="origin", choices=["free", "origin"])
     parser.add_argument(
         "--memory-probe",
@@ -687,15 +726,22 @@ def main() -> None:
     parser.add_argument(
         "--chunk-dir",
         type=Path,
-        default=CHUNK_DIR_DEFAULT,
-        help="per-prompt chunk files live here; resume reads them",
+        default=None,
+        help="per-prompt chunk files live here; resume reads them (default: scripts/_calib_qwen_chunks/, or its <model>/ subfolder for a non-default --model)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="synthetic chunks, no model load — validates the chunk/resume/aggregate plumbing",
     )
+    return parser
+
+
+def main() -> None:
+    parser = _build_parser()
     args = parser.parse_args()
+    if args.chunk_dir is None:
+        args.chunk_dir = calibration_paths(args.model)[0]
 
     if args.memory_probe:
         from _mlx_caps import install_caps
@@ -704,12 +750,18 @@ def main() -> None:
         from _mlx_watchdog import abort_handler, arm_mlx_watchdog
 
         arm_mlx_watchdog(on_abort=abort_handler("calibrate_qwen-memory-probe"))
-        _run_memory_probe()
+        _run_memory_probe(args.model)
         return
     if args.worker:
         if args.prompt_idx is None:
             parser.error("--worker requires --prompt-idx")
-        _run_worker(args.prompt_idx, steps=args.steps, chunk_dir=args.chunk_dir, dry_run=args.dry_run)
+        _run_worker(
+            args.prompt_idx,
+            steps=args.steps,
+            chunk_dir=args.chunk_dir,
+            dry_run=args.dry_run,
+            model=args.model,
+        )
         return
     _run_orchestrator(
         steps=args.steps,
@@ -717,6 +769,7 @@ def main() -> None:
         chunk_dir=args.chunk_dir,
         fit_mode=args.fit_mode,
         dry_run=args.dry_run,
+        model=args.model,
     )
 
 

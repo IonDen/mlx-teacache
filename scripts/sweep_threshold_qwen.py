@@ -48,6 +48,7 @@ import numpy as np
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _memory_saver import make_memory_saver as _make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
+from _qwen_config import qwen_original_config
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
@@ -219,7 +220,6 @@ def _run_worker(
         (chunk_dir / f"{unit}.aborted.json").write_text(json.dumps({"unit": unit, **payload}, indent=2))
 
     arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=headroom_gib)
-    from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
     from mlx_teacache import apply_teacache
@@ -237,7 +237,7 @@ def _run_worker(
 
         enable_qwen_mixed_precision()
     print(f"[worker {unit}] loading qwen-image ({build}) ...", flush=True)
-    flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
+    flux = QwenImage(quantize=QUANTIZE, model_config=qwen_original_config())
     flux.freeze()
     # mflux's MemorySaver frees the Qwen2.5-VL text encoder (several GB at q4) once the
     # prompt is encoded, before the denoising loop. Without it this recipe sits within

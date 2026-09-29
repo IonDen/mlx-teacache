@@ -225,10 +225,10 @@ def _load_flux(variant: str) -> Any:
 
         flux = ZImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.z_image())
     elif variant == "qwen":
-        from mflux.models.common.config.model_config import ModelConfig
+        from _qwen_config import qwen_original_config
         from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
-        flux = QwenImage(quantize=_VARIANT_QUANTIZE[variant], model_config=ModelConfig.qwen_image())
+        flux = QwenImage(quantize=_VARIANT_QUANTIZE[variant], model_config=qwen_original_config())
     else:
         raise ValueError(f"unsupported variant: {variant!r}")
     flux.freeze()

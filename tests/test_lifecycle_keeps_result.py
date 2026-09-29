@@ -65,6 +65,23 @@ def test_restore_from_after_loop_callback_keeps_later_callbacks_running() -> Non
     assert len(flux.callbacks.after_loop) == 2  # TeaCache's own callback is gone
 
 
+class _RaiseAfterLoop:
+    def call_after_loop(self, *a, **k):
+        raise RuntimeError("user callback failed")
+
+
+def test_error_after_restore_from_a_callback_still_propagates() -> None:
+    """Bug caught: the wrapper's frozen-stats branch returns from its finally
+    block, which swallows an exception a later callback raised after restore()."""
+    flux = make_flux1_fake()
+    handle = apply_teacache(flux, rel_l1_thresh=0.2)
+    flux.callbacks.register(_RestoreAfterLoop(handle))
+    flux.callbacks.register(_RaiseAfterLoop())
+    with pytest.raises(RuntimeError, match="user callback failed"):
+        flux.generate_image(seed=0, prompt="p", num_inference_steps=6)
+    assert handle.stats.generations == 0
+
+
 def test_apply_again_after_restore_from_a_callback_registers_and_commits() -> None:
     """Bug caught: after restore() rebinds the callback lists, a second
     apply_teacache registers somewhere the wrapper's presence check or the loop

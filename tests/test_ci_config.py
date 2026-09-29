@@ -126,3 +126,23 @@ def test_readme_quotes_only_the_extra_mflux_range() -> None:
     readme = (_REPO_ROOT / "README.md").read_text()
     quoted = set(re.findall(r"`(?:mflux)?(>=\d+(?:\.\d+)*,<\d+(?:\.\d+)*)`", readme))
     assert quoted == {_mflux_extra_range()}
+
+
+def _job_block(workflow: str, job: str) -> list[str]:
+    """Comment-stripped lines of one top-level job (two-space indent) in the workflow."""
+    lines = [line.split("#", 1)[0].rstrip() for line in workflow.splitlines()]
+    start = lines.index(f"  {job}:")
+    block: list[str] = []
+    for line in lines[start + 1 :]:
+        if re.match(r"^  \S", line) or re.match(r"^\S", line):
+            break
+        block.append(line)
+    return block
+
+
+def test_parity_job_raises_the_wall_backstop_to_twelve_hours() -> None:
+    """Bug: the dispatch-only parity job running under the 3 h default wall backstop; the full
+    parity lane takes ~9 h, so the backstop would abort it partway with exit code 4."""
+    block = _job_block(_CI_WORKFLOW.read_text(), "test-parity")
+    env_values = [line.strip() for line in block if line.strip().startswith("PYTEST_PARITY_WALL_S:")]
+    assert env_values == ['PYTEST_PARITY_WALL_S: "43200"']

@@ -229,4 +229,6 @@ jobs:
       - name: Run parity tests
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # The full parity lane runs ~9 h; the session wall backstop defaults to 3 h.
+          PYTEST_PARITY_WALL_S: "43200"
         run: uv run pytest -m parity -v

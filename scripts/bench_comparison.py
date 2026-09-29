@@ -31,7 +31,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
-from _bench_telemetry import teacache_version
 from _comparison_recipes import Recipe, prompt_for
 from _comparison_sheet import frame_paths
 from _comparison_steps import medians_by_kind, preview_subtracted_speedup, steady_state_speedup
@@ -380,6 +379,15 @@ def _now_tag() -> str:
     return datetime.now().strftime("%Y-%m-%d-%H%M%S-%f")
 
 
+def _mlx_teacache_version() -> str:
+    """The installed package version. The public comparison page credits this string (through
+    docs/_generate_comparison.py's release label), so it stays a package version; the git-describe
+    stamp belongs to the bench reports only."""
+    import mlx_teacache
+
+    return str(mlx_teacache.__version__)
+
+
 def _versions() -> dict[str, str]:
     from importlib.metadata import version
 
@@ -427,8 +435,6 @@ def _run_generation(
     from _comparison_recipes import SEED, prompt_for, teacache_kwargs
     from _comparison_steps import decision_kinds, gate_trace, register_stamped_preview, split_steps
     from mlx_taef.integrations.mflux import LivePreviewCallback
-
-    import mlx_teacache
 
     slug = path_slug or recipe.slug
     reset_condition_outputs(raw_root, slug, condition, trash=Path.home() / ".Trash", tag=_now_tag())
@@ -540,7 +546,7 @@ def _run_generation(
         "memory": memory,
         "frames": len(preview.saved_paths),
         "released_encoders": released,
-        "mlx_teacache_version": teacache_version(REPO, fallback=mlx_teacache.__version__),
+        "mlx_teacache_version": _mlx_teacache_version(),
     }
     if handle is not None:
         from _bench_telemetry import streak_telemetry

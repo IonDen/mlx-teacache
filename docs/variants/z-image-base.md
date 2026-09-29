@@ -31,7 +31,7 @@ At the 512×512 red-apple bench recipe on M1 Max 32 GB (subprocess-per-rep, 3 re
 - The wall-clock win is entirely gating. `mx.compile`-path avoidance is not a tailwind on Z-Image — the no-gate wrapper runs at vanilla speed (228.9 s vs 227.4 s; the eager re-walk neither beats nor loses to mflux's compiled `_predict` on this model), so the whole 1.31× is step-skipping.
 - Peak memory drops from 17.2 GB to 11.5 GB. This is the eager wrapper bypassing mflux's compiled `_predict`, not the skip path: the no-gate wrapper shows the same ~11.5 GB peak. Same effect documented on klein-base-9b.
 - Skip count stable across reps: 15 of 48 active steps skipped at `rel_l1_thresh=0.12`, never two in a row (max consecutive-skip streak 1). SSIM 0.991 vs vanilla on this prompt.
-- v0.7.0 reported 1.17× at this recipe (245.3 s → 209.4 s, `scripts/_bench_z_image_v0_7_0.json`) with a thermally confounded three-way split. The skip count and pattern are identical, so the gap is host state in that session, not the gate.
+- v0.7.0 reported 1.17× at this recipe (245.3 s → 209.4 s, `_artifacts/_bench_z_image_v0_7_0.json`) with a thermally confounded three-way split. The skip count and pattern are identical, so the gap is host state in that session, not the gate.
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant z-image --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.10.0_bench_z_image.json`.
 

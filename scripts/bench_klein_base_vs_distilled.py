@@ -43,8 +43,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import mlx_version, repo_relative, teacache_version
 from _bench_telemetry import streak_telemetry as _streak_telemetry
-from _mlx_watchdog import arm_mlx_watchdog
+from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
+
+PARTIAL_EXIT_CODE = 3
 
 # Portrait recipe for the distilled-vs-base study, on its own page. One prompt +
 # seed across every condition in this script.
@@ -514,19 +517,13 @@ def _mflux_version() -> str:
         return "unknown"
 
 
-def _mlx_version() -> str:
-    try:
-        from importlib.metadata import version
-
-        return version("mlx")
-    except Exception:
-        return "unknown"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _mlx_teacache_version() -> str:
     from mlx_teacache import __version__
 
-    return __version__
+    return teacache_version(REPO_ROOT, fallback=__version__)
 
 
 def _provenance() -> dict[str, str]:
@@ -565,7 +562,7 @@ def _detect_hardware(
         "ram_gb": resolved_ram,
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
-        "mlx_version": _mlx_version(),
+        "mlx_version": mlx_version(),
         "mlx_teacache_version": _mlx_teacache_version(),
         "mflux_version": _mflux_version(),
         "quantize": quantize_label(quantize),
@@ -637,6 +634,10 @@ def _run_one_worker(
     payload = _parse_worker_line(proc.stdout)
     if payload is not None and "aborted" in payload:
         return payload
+    if proc.returncode == WATCHDOG_EXIT_CODE:
+        raise RuntimeError(
+            f"worker {size}/{condition}/rep{rep} was ABORTED by the memory watchdog but emitted no abort payload"
+        )
     if proc.returncode != 0:
         raise RuntimeError(f"worker failed for {size}/{condition}/rep{rep}: exit {proc.returncode}")
     if payload is None:
@@ -734,7 +735,7 @@ def _build_report(
         "hardware": hardware,
         "conditions": {cond: aggregate_condition(loaded[cond]) for cond in conditions},
         "ssim": ssim,
-        "images_dir": str(images_dir),
+        "images_dir": repo_relative(images_dir, REPO_ROOT),
     }
 
 
@@ -833,7 +834,7 @@ def main() -> None:
                 "Nothing persisted; lower the recipe or caps before re-invoking. ==",
                 flush=True,
             )
-            raise SystemExit(4)
+            raise SystemExit(WATCHDOG_EXIT_CODE)
         written = persist_chunk(results_dir, result)
         print(f">> chunk persisted: {written}", flush=True)
 
@@ -844,7 +845,7 @@ def main() -> None:
             f"\n== PARTIAL: {total - len(remaining)}/{total} chunks persisted under {results_dir}; "
             f"{len(remaining)} pending — re-invoke to continue. No report written. =="
         )
-        raise SystemExit(3)
+        raise SystemExit(PARTIAL_EXIT_CODE)
 
     # A single-condition run cannot produce a complete report, so it must NOT write
     # over an existing full one. Its chunks are on disk; a later full run rebuilds the

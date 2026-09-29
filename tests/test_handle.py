@@ -63,7 +63,13 @@ def test_handle_has_no_variant_branches() -> None:
 
     source = inspect.getsource(handle_module)
     code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#")).lower()
-    for bad in ("flux1", "flux2", "klein"):
+    from mlx_teacache.variants import _REGISTRY
+
+    # Every registered variant id (hyphen and underscore spellings) plus the family words (bare "flux" is left out: `apply_teacache(flux)` and "mflux" legitimately appear).
+    needles = {vid.lower() for vid in _REGISTRY} | {vid.lower().replace("-", "_") for vid in _REGISTRY}
+    needles |= {"flux1", "flux2", "klein", "qwen", "z-image", "z_image", "zimage"}
+    assert {"flux1-dev", "qwen-image", "z-image-base"} <= needles  # the registry really was enumerated
+    for bad in sorted(needles):
         assert bad not in code, f"handle.py must not mention {bad!r}"
 
 

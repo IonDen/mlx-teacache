@@ -3,10 +3,53 @@
 Both ``bench_speedup.py`` and ``bench_comparison.py`` record, per gated
 generation, the per-step skip pattern and the longest run of consecutive skips
 so ``docs/calibration.md``'s streak table can be filled from committed bench
-reports. Pure functions over ``TeaCacheStats``; no mlx / mflux imports.
+reports. It also builds the report stamps (MLX version, code version, repo-relative
+paths). Everything here is a pure function; ``mlx.core`` is imported only inside
+``mlx_version``.
 """
 
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+
+_GIT_TIMEOUT_SECONDS = 5
+
+
+def mlx_version() -> str:
+    """Version of the ``mlx.core`` that is imported in this process."""
+    import mlx.core as mx
+
+    return str(mx.__version__)
+
+
+def teacache_version(
+    repo_root: Path,
+    *,
+    fallback: str,
+    run: Callable[..., Any] = subprocess.run,
+) -> str:
+    """``git describe --tags --dirty --always`` for the checkout at ``repo_root``.
+
+    An editable install freezes its dist version at ``uv sync`` time, so the dist
+    version can name an older release than the code that ran. Any git failure
+    (no git, not a checkout, timeout, empty output) returns ``fallback``.
+    """
+    argv = ["git", "-C", str(repo_root), "describe", "--tags", "--dirty", "--always"]
+    try:
+        out = run(argv, capture_output=True, text=True, check=True, timeout=_GIT_TIMEOUT_SECONDS)
+    except (OSError, subprocess.SubprocessError):
+        return fallback
+    described = str(out.stdout).strip()
+    return described or fallback
+
+
+def repo_relative(path: Path, repo_root: Path) -> str:
+    """``path`` relative to ``repo_root`` (POSIX form), or just its name when it lies outside."""
+    try:
+        return Path(path).resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return Path(path).name
 
 
 def skip_pattern(decision_kinds: list[str]) -> str:

@@ -573,15 +573,15 @@ def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, mak
 def test_user_coefficients_provenance_all_variants(variant_id: str, make_flux) -> None:
     """All 7 variants: custom coefficients yield handle.provenance.source == 'user'.
 
-    User-supplied coefficients don't change the apply-time no-benefit warning:
-    it's keyed on the registry's default_thresh (a per-variant fact), not on
-    what the caller passes, so distilled Kleins still warn here too."""
+    User-supplied coefficients suppress the apply-time no-benefit warning
+    (it describes the builtin polynomial), so distilled Kleins do not warn
+    here either."""
     from tests.conftest import expect_distilled_warning
 
     flux = make_flux()
     flux.freeze()
     custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
-    with expect_distilled_warning(variant_id):
+    with expect_distilled_warning(variant_id, coefficients=custom_coeffs):
         handle = apply_teacache(flux, coefficients=custom_coeffs)
     try:
         assert handle.variant_id == variant_id

@@ -63,7 +63,7 @@ Each worker installs three caps BEFORE the model loads (``_mlx_caps.install_caps
 a device-clamped wired cap (the only hard ceiling; non-pageable Metal memory),
 the advisory soft cap, and a bound on MLX's retained cache pool (2 GiB, 1 GiB
 for qwen), then arms the active+cache watchdog (``_mlx_watchdog``), which
-aborts the worker with exit 3 and a ``::BENCH_RESULT::{"aborted": ...}`` line
+aborts the worker with exit 4 and a ``::BENCH_RESULT::{"aborted": ...}`` line
 the moment resident memory exceeds ``memory_size - 4 GiB``. The orchestrator
 persists that payload as ``<condition>_rep<N>.aborted.json`` (never as a chunk)
 and exits 4. The soft cap is taken from the variant's META["memory_cap_hint_gb"]
@@ -73,7 +73,8 @@ vanilla then wrapper in the same process panicked the kernel on 2026-05-19 and
 accumulation, and the watchdog is what stops a pageable-memory paging storm.
 
 Exit codes: 0 report written · 3 PARTIAL (chunks pending, re-invoke) · 4 ABORTED
-by the memory watchdog (artifact written, nothing persisted as a result).
+by the memory watchdog (artifact written, nothing persisted as a result). The worker
+itself also dies with 4 on an abort; 3 is never a watchdog code.
 
 Compatibility note
 ------------------
@@ -96,8 +97,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import mlx_version, repo_relative, teacache_version
 from _bench_telemetry import streak_telemetry as _streak_telemetry
-from _mlx_watchdog import arm_mlx_watchdog
+from _memory_saver import make_memory_saver as _make_memory_saver
+from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
+
+PARTIAL_EXIT_CODE = 3
 
 PROMPT = "a red apple on a wooden table"
 SEED = 42
@@ -180,19 +185,6 @@ _DEFAULT_CACHE_GB = 2.0
 # compressed-memory thrash (a step went from ~20 s to ~230 s on 2026-09-06). Applied to
 # every condition of the run alike; the report records it.
 _VARIANT_MEMORY_SAVER: dict[str, bool] = {"qwen": True}
-
-
-def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
-    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned.
-
-    keep_transformer=True frees only the text encoders. cache_limit_bytes=None
-    matters: MemorySaver's default (1 GB) branch calls mx.set_cache_limit,
-    overriding install_caps, calls mx.reset_peak_memory before the load peak is
-    read, and switches the VAE to tiled decode, which changes output pixels and
-    would make the SSIM numbers and committed images incomparable. MemorySaver
-    also runs gc.collect and mx.clear_cache after every loop; that applies to
-    every condition alike, so the ratios stand."""
-    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
 
 
 def _memory_saver_for(variant: str) -> bool:
@@ -436,10 +428,17 @@ def _mflux_version() -> str:
         return "unknown"
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
 def _mlx_teacache_version() -> str:
     from mlx_teacache import __version__
 
-    return __version__
+    return teacache_version(REPO_ROOT, fallback=__version__)
+
+
+def _images_dir_field(path: Path) -> str:
+    return repo_relative(path, REPO_ROOT)
 
 
 def _macos_sysctl(key: str) -> str | None:
@@ -482,8 +481,9 @@ def _detect_hardware(*, quantize: int) -> dict[str, Any]:
         "ram_gb": ram_gb,
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
+        "mlx_version": mlx_version(),
         "mlx_teacache_version": _mlx_teacache_version(),
-        **_git_revision(Path(__file__).resolve().parent.parent),
+        **_git_revision(REPO_ROOT),
         "mflux_version": _mflux_version(),
         "quantize": quantize,
         "dtype": "bf16",
@@ -533,6 +533,8 @@ def _run_one_worker(
     payload = _parse_worker_line(proc.stdout)
     if payload is not None and "aborted" in payload:
         return payload  # the caller persists the abort artifact and stops
+    if proc.returncode == WATCHDOG_EXIT_CODE:
+        raise RuntimeError(f"worker {label} was ABORTED by the memory watchdog but emitted no abort payload")
     if proc.returncode != 0:
         raise RuntimeError(f"worker failed for {label}: exit {proc.returncode}")
     if payload is None:
@@ -863,7 +865,7 @@ def main() -> None:
                 f"> {result['ceiling_bytes'] / 1024**3:.2f} GB ceiling; artifact {written}. "
                 "No chunk persisted; re-invoke only after lowering the recipe or the caps. =="
             )
-            sys.exit(4)
+            sys.exit(WATCHDOG_EXIT_CODE)
         written = _persist_chunk(results_dir, result)
         print(f">> chunk persisted: {written}", flush=True)
 
@@ -874,7 +876,7 @@ def main() -> None:
             f"\n== PARTIAL: {total_chunks - len(remaining)}/{total_chunks} chunks persisted under "
             f"{results_dir}; {len(remaining)} pending — re-invoke to continue. No report written. =="
         )
-        sys.exit(3)
+        sys.exit(PARTIAL_EXIT_CODE)
     all_results: dict[str, list[dict[str, Any]]] = loaded
 
     # --- Aggregate ---
@@ -946,7 +948,7 @@ def main() -> None:
             "skipped_counts": skipped_counts,
             "computed_counts": computed_counts,
             **_wrapper_streak_arrays(all_results["wrapper"]),
-            "bench_images_dir": str(bench_dir),
+            "bench_images_dir": _images_dir_field(bench_dir),
             "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
             "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],
             "vanilla_load_peak_memory_gb": _memory_arrays(all_results["vanilla"], "load_peak_memory_gb"),

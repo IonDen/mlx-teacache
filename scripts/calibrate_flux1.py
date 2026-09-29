@@ -33,6 +33,7 @@ from typing import Any
 
 import mlx.core as mx
 import mlx.nn as nn
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from calibrate_flux2 import CALIBRATION_PROMPTS, _fit_polynomial
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1, poly_eval
@@ -63,13 +64,38 @@ _CANONICAL_DIR = Path(__file__).resolve().parent
 # Pure helpers (unit-tested without weights).
 # ---------------------------------------------------------------------------
 
+PARTIAL_EXIT_CODE = 3
+
+
+class _Flux1PairReducer:
+    """Online consecutive-step reducer: keeps only step t-1's (mod_in, body_out).
+
+    Each `push` reduces (t, t-1) to the pair (x = rel-L1 of the gate signal,
+    y = rel-L1 of the body output) with the gate's own `mean_abs_rel_l1`, then
+    drops step t-1. The same function on the same array pairs as reducing a
+    whole-generation capture afterwards, without holding every step's
+    activations until `generate_image` returns."""
+
+    def __init__(self) -> None:
+        self._prev: tuple[mx.array, mx.array] | None = None
+        self.pairs: list[tuple[float, float]] = []
+        self.steps = 0
+
+    def push(self, mod_in: mx.array, body_out: mx.array) -> None:
+        mx.eval(mod_in, body_out)
+        if self._prev is not None:
+            prev_mod, prev_body = self._prev
+            self.pairs.append((mean_abs_rel_l1(mod_in, prev_mod), mean_abs_rel_l1(body_out, prev_body)))
+        self._prev = (mod_in, body_out)
+        self.steps += 1
+
 
 def _pairs_from_capture(mod_ins: list[mx.array], body_outs: list[mx.array]) -> list[tuple[float, float]]:
     """Consecutive-step (x, y) pairs: x = rel-L1 of the gate signal, y = rel-L1 of the body output."""
-    return [
-        (mean_abs_rel_l1(mod_ins[t], mod_ins[t - 1]), mean_abs_rel_l1(body_outs[t], body_outs[t - 1]))
-        for t in range(1, len(mod_ins))
-    ]
+    reducer = _Flux1PairReducer()
+    for mod_in, body_out in zip(mod_ins, body_outs, strict=True):
+        reducer.push(mod_in, body_out)
+    return reducer.pairs
 
 
 def _r2_score(coeffs: tuple[float, float, float, float, float], xs: list[float], ys: list[float]) -> float:
@@ -158,12 +184,12 @@ def _default_chunk_dir(model: str) -> Path:
 
 class _RecordingFlux1Transformer(nn.Module):  # type: ignore[misc]
     """Runs the vanilla FLUX.1 forward through the integration's own helpers and
-    records (mod_in, body_out) per step. No gating, no skipping."""
+    feeds (mod_in, body_out) per step to the online reducer. No gating, no skipping."""
 
-    def __init__(self, inner: Any, captures: list[tuple[mx.array, mx.array]]) -> None:
+    def __init__(self, inner: Any, reducer: _Flux1PairReducer) -> None:
         super().__init__()
         object.__setattr__(self, "_inner", inner)
-        object.__setattr__(self, "_captures", captures)
+        object.__setattr__(self, "_reducer", reducer)
 
     def __call__(
         self,
@@ -186,8 +212,7 @@ class _RecordingFlux1Transformer(nn.Module):  # type: ignore[misc]
         )
         mod_in = _flux1_extract_mod_input(inner.transformer_blocks[0], body_in, temb)
         body_out = _flux1_run_body(inner, body_in, enc, temb, rot, kwargs)
-        mx.eval(mod_in, body_out)
-        object.__getattribute__(self, "_captures").append((mod_in, body_out))
+        object.__getattribute__(self, "_reducer").push(mod_in, body_out)
         return _flux1_tail(inner, body_out, enc, temb)
 
     def freeze(self, *args: Any, **kwargs: Any) -> Any:
@@ -262,15 +287,15 @@ def _capture_worker(model: str, prompt_idx: int, *, chunk_dir: Path, dry_run: bo
         return
     _guard(f"calibrate_flux1-{model}-prompt{prompt_idx}", chunk_dir)
     flux = _load_flux(model)
-    captures: list[tuple[mx.array, mx.array]] = []
+    reducer = _Flux1PairReducer()
     original = flux.transformer
-    flux.transformer = _RecordingFlux1Transformer(original, captures)
+    flux.transformer = _RecordingFlux1Transformer(original, reducer)
     try:
         elapsed = _generate(flux, prompt=prompt, model=model)
     finally:
         flux.transformer = original
-    assert len(captures) == steps, f"expected {steps} captures, got {len(captures)}"
-    pairs = _pairs_from_capture([m for m, _ in captures], [b for _, b in captures])
+    assert reducer.steps == steps, f"expected {steps} captures, got {reducer.steps}"
+    pairs = reducer.pairs
     out.write_text(
         json.dumps(
             {
@@ -398,13 +423,18 @@ def _run_capture(
         rc = _spawn(
             ["--worker", "--model", model, "--prompt-idx", str(idx), "--chunk-dir", str(chunk_dir), *extra]
         )
+        if rc == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] worker for prompt {idx} was ABORTED by the memory watchdog; lower the recipe "
+                "before rerunning; completed chunks are reused"
+            )
         if rc != 0 or not (chunk_dir / _chunk_filename(model, idx)).exists():
             raise SystemExit(
                 f"[orchestrator] worker for prompt {idx} failed (rc={rc}); completed chunks are reused"
             )
     if _pending_prompt_indices(chunk_dir, model, n_prompts):
         print("[orchestrator] PARTIAL: prompts remain; re-invoke to continue", flush=True)
-        return 3
+        return PARTIAL_EXIT_CODE
     xs, ys = _aggregate_pairs(chunk_dir, model, n_prompts)
     coeffs, r2 = _fit_polynomial(xs, ys, fit_mode=fit_mode)
     result: dict[str, Any] = {
@@ -454,13 +484,18 @@ def _run_sweep(
         rc = _spawn(
             ["--worker", "--model", model, "--sweep-unit", unit, "--chunk-dir", str(chunk_dir), *extra]
         )
+        if rc == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] sweep worker for {unit} was ABORTED by the memory watchdog; lower the recipe "
+                "before rerunning; completed chunks are reused"
+            )
         if rc != 0 or not (chunk_dir / _sweep_chunk_filename(model, unit)).exists():
             raise SystemExit(
                 f"[orchestrator] sweep worker for {unit} failed (rc={rc}); completed chunks are reused"
             )
     if [u for u in units if not (chunk_dir / _sweep_chunk_filename(model, u)).exists()]:
         print("[orchestrator] PARTIAL: units remain; re-invoke to continue", flush=True)
-        return 3
+        return PARTIAL_EXIT_CODE
     vanilla = json.loads((chunk_dir / _sweep_chunk_filename(model, "vanilla")).read_text())["vanilla_seconds"]
     chunks = [json.loads((chunk_dir / _sweep_chunk_filename(model, u)).read_text()) for u in units[1:]]
     summary = _build_sweep_summary(chunks, vanilla, model=model)

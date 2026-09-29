@@ -1,6 +1,6 @@
 # tests/test_gate_hypothesis.py
 import mlx.core as mx
-from hypothesis import HealthCheck, given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from mlx_teacache.cache import TeaCacheState
@@ -17,10 +17,16 @@ def _fresh(num_steps: int = 25) -> TeaCacheState:
 
 
 @given(coeffs=_COEFFS)
-@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(coeffs=(0.0, 0.0, 0.0, 0.0, 0.0))  # every step priced at 0: the equality case
+@settings(max_examples=100, deadline=None)
 def test_threshold_zero_never_skips(coeffs):
+    """Bug: the threshold <= 0 fast-path is weakened (e.g. `< 0.0`), so a zero threshold falls into the
+    comparison and, with a seeded residual, caches and measures a delta instead of a plain compute."""
     state = _fresh()
     state.previous_mod_input = mx.ones((1, 8, 16))
+    # The seed guard also needs a cached residual; without one the seed branch answers and the fast-path
+    # is never the only thing standing between the call and the comparison.
+    state.cached_residual = mx.ones((1, 8, 16))
     mod_in = mx.ones((1, 8, 16)) * 1.5
     dec = gate_step(
         state,
@@ -32,7 +38,9 @@ def test_threshold_zero_never_skips(coeffs):
         step_idx=5,
         mod_in=mod_in,
     )
-    assert dec.kind != "skipped"
+    assert dec.kind == "computed"
+    assert dec.should_compute and not dec.should_update_cache
+    assert dec.rel_l1 is None
 
 
 @given(

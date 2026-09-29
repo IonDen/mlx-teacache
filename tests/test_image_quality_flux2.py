@@ -71,8 +71,13 @@ PR_TIME_PROMPT = "a red apple on a wooden table"
 _SSIM_BASE_4B_TXT2IMG: float | None = 0.95  # measured 0.9927
 _SSIM_BASE_9B_TXT2IMG: float | None = 0.95  # measured 0.9920
 _SSIM_SLOW_FLOOR = 0.80  # documented slow-suite variance floor (5-prompt suite)
-_SSIM_CFG_BASE_4B = 0.85  # pre-existing CFG PR-gate floor (unchanged)
-_SSIM_CFG_BASE_9B = 0.95  # _artifacts/validation_klein_base_9b.json: 0.986 measured, 12 skips
+_SSIM_CFG_BASE_4B = 0.95  # _artifacts/v0.12.0_klein_base_ssim.json: measured 0.985 at 8/48 skips
+_SKIP_BAND_CFG_BASE_4B = (4, 14)  # _artifacts/v0.12.0_klein_base_ssim.json: measured 8 skips
+# base-9B CFG: the bench recipe is this gate's recipe (apple, seed 42, 512x512, 50 steps,
+# guidance 4.0, q4). _artifacts/v0.12.0_bench_klein_base_9b.json: 13 skips in each of 3 reps;
+# _artifacts/v0.12.0_klein_base_ssim.json: SSIM 0.99302 gated vs vanilla on that run's images.
+_SSIM_CFG_BASE_9B = 0.95  # measured 0.993
+_SKIP_BAND_CFG_BASE_9B = (7, 19)  # measured 13 skips, +-6
 
 
 def _require_ssim(constant: float | None, label: str) -> float:
@@ -251,6 +256,8 @@ def test_default_threshold_ssim_klein_pr_gate(
         vanilla_latent = _capture(flux, **kw)
         with apply_teacache(flux) as h:  # uses package default rel_l1_thresh
             wrapper_latent = _capture(flux, **kw)
+            # txt2img uses 25 steps (default), not the CFG recipe's 50 steps,
+            # so the skip band is not applicable here; only check engagement.
             assert h.stats.skipped_count >= 1, (
                 f"Expected >= 1 skip for {variant_id} txt2img at default threshold; "
                 f"got {h.stats.skipped_count}. Cache is not engaging — check coefficients."
@@ -286,11 +293,11 @@ def test_default_threshold_ssim_klein_pr_gate(
 
 
 def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
-    """v0.4.1 release blocker: at default rel_l1_thresh (0.17), CFG-engaged
-    generation on flux2-klein-base-4b at g=4.0/50 steps must produce SSIM
-    >= 0.85 vs vanilla AND fire >= 1 skip. Skip-count assertion locks in
-    the v0.4.1 engagement claim — without it the test would pass with 0
-    skips and the feature would be dormant (v0.3 postmortem lesson)."""
+    """CFG gate for flux2-klein-base-4b: at the default rel_l1_thresh (0.17),
+    g=4.0 / 50 steps must produce SSIM >= 0.95 vs vanilla AND a skip count in
+    [4, 14] (measured 8 skips, SSIM 0.985). The lower bound keeps a dormant
+    cache (0 skips) from passing on SSIM alone; the upper bound catches a gate
+    that skips far more than it was measured to."""
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
@@ -300,11 +307,11 @@ def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
     vanilla_latent = _capture(flux, **kw)
     with apply_teacache(flux) as h:  # uses per-variant default rel_l1_thresh=0.17
         wrapped_latent = _capture(flux, **kw)
-        assert h.stats.skipped_count >= 1, (
-            f"Expected >=1 skip under CFG; got {h.stats.skipped_count}. "
-            f"If this fires reliably, fall into the 0-skip contingency: "
-            f"run CFG-aware calibration via scripts/calibrate_flux2.py "
-            f"--guidance 4.0 --num-inference-steps 50."
+        lo, hi = _SKIP_BAND_CFG_BASE_4B
+        assert lo <= h.stats.skipped_count <= hi, (
+            f"Expected skips in [{lo}, {hi}] under CFG; got {h.stats.skipped_count}. "
+            f"The measured value at 50 steps + guidance 4.0 is 8 skips "
+            f"(_artifacts/v0.12.0_klein_base_ssim.json)."
         )
     vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
     wrapped_img = _decode_to_uint8(flux, wrapped_latent, height=kw["height"], width=kw["width"])
@@ -317,14 +324,14 @@ def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
 
 
 def test_ssim_pr_gate_cfg_klein_base_9b() -> None:
-    """CFG gate for flux2-klein-base-9b: at default rel_l1_thresh (0.17),
-    g=4.0 / 50 steps must produce SSIM >= 0.95 vs vanilla AND fire >= 1
-    skip.
+    """CFG gate for flux2-klein-base-9b: at the default rel_l1_thresh (0.17),
+    g=4.0 / 50 steps must produce SSIM >= 0.95 vs vanilla AND a skip count in
+    [7, 19].
 
-    Threshold source: _artifacts/validation_klein_base_9b.json —
-    measured SSIM 0.986, 12 skips at rel_l1_thresh=0.17. Floor is set
-    at 0.95 to accommodate per-machine numerical variance while still
-    catching regressions.
+    Source: _artifacts/v0.12.0_bench_klein_base_9b.json (same recipe as this
+    gate: 13 skips in every rep) and _artifacts/v0.12.0_klein_base_ssim.json
+    (SSIM 0.993 on that run's images). The floor keeps the base-4B margin for
+    per-machine numerical variance.
     """
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
@@ -335,11 +342,11 @@ def test_ssim_pr_gate_cfg_klein_base_9b() -> None:
     vanilla_latent = _capture(flux, **kw)
     with apply_teacache(flux) as h:  # uses per-variant default rel_l1_thresh=0.17
         wrapped_latent = _capture(flux, **kw)
-        assert h.stats.skipped_count >= 1, (
-            f"Expected >=1 skip for base-9b under CFG; got {h.stats.skipped_count}. "
-            f"If this fires reliably, run CFG-aware calibration via "
-            f"scripts/calibrate_flux2.py --variant klein-base-9b --guidance 4.0 "
-            f"--num-inference-steps 50."
+        lo, hi = _SKIP_BAND_CFG_BASE_9B
+        assert lo <= h.stats.skipped_count <= hi, (
+            f"Expected skips in [{lo}, {hi}] for base-9b under CFG; got {h.stats.skipped_count}. "
+            f"The measured value at 50 steps + guidance 4.0 is 13 skips "
+            f"(_artifacts/v0.12.0_bench_klein_base_9b.json)."
         )
     vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
     wrapped_img = _decode_to_uint8(flux, wrapped_latent, height=kw["height"], width=kw["width"])

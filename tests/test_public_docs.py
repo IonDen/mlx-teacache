@@ -63,11 +63,11 @@ def test_no_public_doc_cites_gitignored_artifacts():
 
 
 def test_mflux_files_allowlist_all_exist():
-    from tests.conftest import _MFLUX_FILES
+    from tests._lanes import MFLUX_FILES
 
     tests_dir = _REPO / "tests"
-    missing = sorted(filename for filename in _MFLUX_FILES if not (tests_dir / filename).exists())
-    assert not missing, f"_MFLUX_FILES lists non-existent files: {missing}"
+    missing = sorted(rel_path for rel_path in MFLUX_FILES if not (tests_dir / rel_path).exists())
+    assert not missing, f"MFLUX_FILES lists non-existent files: {missing}"
 
 
 def test_public_docstring_summaries_name_all_supported_model_families():
@@ -81,3 +81,18 @@ def test_public_docstring_summaries_name_all_supported_model_families():
     for summary in summaries:
         for family in ("flux", "qwen-image", "z-image"):
             assert family in summary, f"{family} missing from public summary: {summary!r}"
+
+
+def test_public_docs_cite_only_committed_report_paths():
+    """Bug: a bench or calibration report moves (scripts/ -> _artifacts/) and a public page keeps
+    citing the old path, a dead reference for every reader. CHANGELOG is exempt: its entries record
+    the paths as they were at that release."""
+    offenders = []
+    for relative_path in _PUBLIC_DOCS:
+        if relative_path == "CHANGELOG.md":
+            continue
+        text = (_REPO / relative_path).read_text()
+        for cited in re.findall(r"`((?:scripts|_artifacts)/[^`*\s]+\.json)`", text):
+            if not (_REPO / cited).exists():
+                offenders.append(f"{relative_path}: {cited}")
+    assert not offenders, f"public docs cite report paths that do not exist: {offenders}"

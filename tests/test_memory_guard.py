@@ -194,3 +194,19 @@ def test_cache_cap_failure_is_emitted_and_never_raised():
     apply_mlx_memory_caps(mx, messages.append)
     assert any("set_cache_limit" in message for message in messages)
     assert mx.memory_calls, "the soft cap must still be applied after a cache-cap failure"
+
+
+def test_apply_caps_honours_a_smaller_cache_cap_for_the_parity_lane():
+    """bug caught: the parity lane's 1 GiB pool request ignored, leaving the 2 GiB fast-lane pool
+    (Qwen parity at ~26 GiB active + 2 GiB crowds the 28 GiB active+cache ceiling)."""
+    max_working_set = int(0.78 * 32 * GIB)
+    mx = _FakeMx({"memory_size": 32 * GIB, "max_recommended_working_set_size": max_working_set})
+    apply_mlx_memory_caps(mx, lambda _m: None, cache_cap_bytes=GIB)
+    assert mx.cache_calls == [GIB]
+
+
+def test_smaller_cache_cap_also_bounds_the_no_wired_fallback():
+    """bug caught: the 1 GiB parity cap applied only when a wired cap exists; 5 % of 32 GiB is 1.6 GiB."""
+    mx = _FakeMx({"memory_size": 32 * GIB})
+    apply_mlx_memory_caps(mx, lambda _m: None, cache_cap_bytes=GIB)
+    assert mx.cache_calls == [GIB]

@@ -11,7 +11,10 @@ so this runs in the mflux lane.
 import sys
 from pathlib import Path
 
+import mlx.core as mx
 import pytest
+
+from mlx_teacache._kernel.gate import mean_abs_rel_l1
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import calibrate_flux2 as cf  # noqa: E402
@@ -120,3 +123,91 @@ def test_aggregate_path_dry_run_never_clobbers_committed(tmp_path: Path) -> None
 def test_aggregate_path_custom_chunk_dir_never_clobbers_committed(tmp_path: Path) -> None:
     output_json = cf._VARIANTS["klein-base-4b"]["output_json"]
     assert cf._aggregate_path(tmp_path, "klein-base-4b", dry_run=False) == tmp_path / output_json
+
+
+def _held_arrays(obj: object) -> int:
+    """Count the mx.arrays an object keeps alive through its attributes."""
+
+    def walk(v: object) -> int:
+        if isinstance(v, mx.array):
+            return 1
+        if isinstance(v, dict):
+            return sum(walk(x) for x in v.values())
+        if isinstance(v, (list, tuple)):
+            return sum(walk(x) for x in v)
+        return 0
+
+    return walk(vars(obj))
+
+
+def _normal(seed: int) -> mx.array:
+    return mx.random.normal((1, 16, 8), key=mx.random.key(seed))
+
+
+def test_online_reducer_cfg_series_match_retain_then_reduce() -> None:
+    """bug caught: the CFG reducer writing the negative branch's rel-L1 into ys_pos
+    (branch swap), or pairing step t with a stale step, versus the old path that kept
+    every step and reduced (t, t-1) afterwards with the gate's mean_abs_rel_l1."""
+    mod = [_normal(i) for i in range(6)]
+    pos = [_normal(100 + i) for i in range(6)]
+    neg = [_normal(200 + i) for i in range(6)]
+    reducer = cf._Flux2PairReducer(cfg=True)
+    for m, p, n in zip(mod, pos, neg, strict=True):
+        reducer.push(m, p, n)
+    series = reducer.chunk_series()
+    assert sorted(series) == ["xs", "ys_neg", "ys_pos"]
+    for key, arrays in (("xs", mod), ("ys_pos", pos), ("ys_neg", neg)):
+        expected = [mean_abs_rel_l1(arrays[t], arrays[t - 1]) for t in range(1, 6)]
+        assert len(series[key]) == 5
+        assert max(abs(a - b) for a, b in zip(series[key], expected, strict=True)) <= 1e-7
+    assert reducer.steps == 6
+    assert _held_arrays(reducer) == 3  # step t-1's mod_in, body_out_pos, body_out_neg
+
+
+def test_online_reducer_non_cfg_series_match_retain_then_reduce() -> None:
+    """bug caught: the non-CFG reducer emitting ys_pos/ys_neg keys (the aggregator reads
+    `ys` there) or keeping every step alive instead of step t-1 only."""
+    mod = [_normal(i) for i in range(6)]
+    body = [_normal(100 + i) for i in range(6)]
+    reducer = cf._Flux2PairReducer(cfg=False)
+    for m, b in zip(mod, body, strict=True):
+        reducer.push(m, b)
+    series = reducer.chunk_series()
+    assert sorted(series) == ["xs", "ys"]
+    for key, arrays in (("xs", mod), ("ys", body)):
+        expected = [mean_abs_rel_l1(arrays[t], arrays[t - 1]) for t in range(1, 6)]
+        assert max(abs(a - b) for a, b in zip(series[key], expected, strict=True)) <= 1e-7
+    assert _held_arrays(reducer) == 2
+
+
+def test_reducer_uses_the_runtime_gate_signal_not_a_sum_ratio() -> None:
+    """bug caught: calibrate_flux2 computing its own sum|d| / (sum|prev| + 1e-12) instead
+    of the runtime's mean|d| / max(mean|prev|, 1e-12). The two agree on ordinary inputs
+    and part at a zero previous step: 4 elements of |d| = 1 give 1e12 from the runtime
+    function and 4e12 from the sum ratio."""
+    reducer = cf._Flux2PairReducer(cfg=False)
+    reducer.push(mx.zeros((4,)), mx.ones((4,)))
+    reducer.push(mx.ones((4,)), mx.ones((4,)) * 2.0)
+    series = reducer.chunk_series()
+    assert series["xs"] == [pytest.approx(1e12, rel=1e-6)]
+    assert series["ys"] == [1.0]
+
+
+def test_worker_chunk_carries_the_series_and_the_peak_memory() -> None:
+    """bug caught: the chunk JSON losing peak_memory_gb (the only record of the capture's
+    real-weights peak) or the CFG per-branch series the aggregator reads."""
+    reducer = cf._Flux2PairReducer(cfg=True)
+    for i in range(3):
+        reducer.push(_normal(i), _normal(100 + i), _normal(200 + i))
+    chunk = cf._chunk_from_reducer(reducer, idx=2, prompt="p")
+    assert [k for k in chunk if k != "peak_memory_gb"] == [
+        "idx",
+        "prompt",
+        "num_captures",
+        "xs",
+        "ys_pos",
+        "ys_neg",
+    ]
+    assert chunk["idx"] == 2 and chunk["prompt"] == "p" and chunk["num_captures"] == 3
+    assert len(chunk["xs"]) == len(chunk["ys_pos"]) == len(chunk["ys_neg"]) == 2
+    assert isinstance(chunk["peak_memory_gb"], float) and chunk["peak_memory_gb"] > 0.0

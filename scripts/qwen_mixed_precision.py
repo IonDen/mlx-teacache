@@ -13,7 +13,7 @@ hook. MLX's nn.quantize honors a per-layer class_predicate return:
   False -> keep full precision (bf16);  {"bits": 8} -> q8;  True -> default bits (q4).
 
 The same predicate is documented for users in docs/variants/qwen-image.md so they
-can reproduce the showcase quality; this module is the copy our bench/sweep import.
+can reproduce the showcase quality; the bench and sweep scripts import this module.
 """
 
 from typing import Any

@@ -103,10 +103,17 @@ def _release_label(version: str) -> str:
     unreleased patch (hatch-vcs bumps the patch the commit after a tag), so the label is the previous
     patch release (0.11.2.devN -> 0.11.1). A dev version whose patch component is already 0 (e.g.
     "0.12.0.dev3") has no prior patch to fall back to, so the label names the release it precedes instead
-    ("a development build before 0.12.0"). A plain release version is shown as its own public version, and
-    a string PEP 440 can't parse is shown exactly as recorded rather than crashing the generator."""
+    ("a development build before 0.12.0"). A plain release version is shown as its own public version. A
+    git-describe stamp ("v0.12.0-3-gabc1234-dirty") credits the tag it builds on (0.12.0), never the commit
+    count, sha or dirty flag. Any other string PEP 440 can't parse is shown exactly as recorded rather than
+    crashing the generator."""
+    import re
+
     from packaging.version import InvalidVersion, Version
 
+    described = re.fullmatch(r"v?(\d+\.\d+\.\d+)(?:-\d+-g[0-9a-f]+)?(?:-dirty)?", version)
+    if described and described.group(1) != version:
+        return described.group(1)
     try:
         parsed = Version(version)
     except InvalidVersion:

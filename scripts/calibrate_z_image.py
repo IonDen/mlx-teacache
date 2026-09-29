@@ -17,11 +17,16 @@ The runtime cache stores the residual `main_out - unified_in`; the script also
 records the residual's rel-L1 so we can compare which target is better-
 conditioned on this single-stream model.
 
-The capturing closure RE-WALKS `ZImageTransformer.__call__` (mflux 0.17.5,
-transformer.py:57-139) with taps, running the full vanilla forward (no skips),
-and returns the real CFG-combined noise so the scheduler trajectory is correct.
-A first-step self-check asserts the re-walk's noise matches the transformer's
-own forward (cosine >= 0.999) — a faithful-port guard.
+The capturing closure runs the full vanilla forward (no skips) through the
+variant integration's own helpers (`_zimage_t_emb`, `_zimage_prelude`,
+`_run_main_layers`, `_zimage_tail`), so the calibration fits the forward the
+runtime executes, and returns the real CFG-combined noise so the scheduler
+trajectory is correct. A first-step self-check asserts the capture's noise
+matches the transformer's own forward (cosine >= 0.999) — a faithful-port guard.
+
+Each step's taps go to an online reducer that keeps only step t-1's arrays and
+appends the (t, t-1) rel-L1 floats with the runtime's `mean_abs_rel_l1`, so a
+generation never holds more than one previous step of activations.
 
 Run (AFTER the model is downloaded; HEAVY — one full vanilla forward per prompt,
 ~221s each at the pinned recipe ⇒ ~37 min for 10 prompts):
@@ -29,7 +34,8 @@ Run (AFTER the model is downloaded; HEAVY — one full vanilla forward per promp
     uv run python scripts/calibrate_z_image.py --fit-mode origin
 
 Output: scripts/_calibration_z_image.json (both signals' fits + R^2 + curve
-range + held-out split + raw arrays for offline refit).
+range + held-out split + raw arrays for offline refit + the run's
+peak_memory_gb).
 """
 
 import argparse
@@ -42,6 +48,12 @@ import mlx.core as mx
 import numpy as np
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # reuse the RUNTIME signal fn
+from mlx_teacache.variants.z_image_base.integration import (
+    _run_main_layers,
+    _zimage_prelude,
+    _zimage_t_emb,
+    _zimage_tail,
+)
 
 # --- Pinned recipe (findings 2026-05-31). Calibrate + sweep + bench all share it. ---
 SEED = 42
@@ -114,110 +126,96 @@ def _rel_l1(curr: mx.array, prev: mx.array) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Capturing forward re-walk of ZImageTransformer.__call__ (transformer.py:57-139).
+# Capturing forward: the integration's own prelude / main-layer / tail helpers
+# (the runtime forward of ZImageTransformer.__call__), with taps.
 # ---------------------------------------------------------------------------
 
 
 def _zimage_capture_forward(
     transformer: Any, latents: mx.array, t_emb: mx.array, cap_feats: mx.array
 ) -> dict[str, Any]:
-    """Re-walk the Z-Image transformer for ONE branch, tapping the gate signals.
+    """Run the Z-Image transformer for ONE branch, tapping the gate signals.
 
-    Returns dict(signal_A, signal_B, unified_in, main_out, noise). `t_emb` is
-    passed in (timestep-only, shared across branches/steps for a given timestep).
-    Mirrors transformer.py:77-139 verbatim; only adds taps. `noise` is the final
-    negated output — must equal `transformer(...)` for the same inputs.
+    Returns dict(signal_A, signal_B, main_out, noise). `t_emb` is passed in
+    (timestep-only, shared across branches for a given timestep). Signal A is
+    the noise-refiner output, i.e. the image part of the unified stream; Signal
+    B is layer 0's residual, computed exactly as the runtime gate does. `noise`
+    is the negated output — must equal `transformer(...)` for the same inputs.
     """
-    ZImageTransformer = type(transformer)
-    key = f"{transformer.patch_size}-{transformer.f_patch_size}"
-
-    # Patchify (transformer.py:78-83)
-    x_emb, cap_emb, x_size, x_pos_ids, cap_pos_ids, x_pad_mask, cap_pad_mask = ZImageTransformer._patchify(
-        image=latents,
-        cap_feats=cap_feats,
-        patch_size=transformer.patch_size,
-        f_patch_size=transformer.f_patch_size,
+    pre = _zimage_prelude(transformer, latents, t_emb, cap_feats)
+    signal_A = pre.unified_in[:, : pre.x_len]  # noise-refiner output (image-only)
+    h1 = transformer.layers[0](
+        x=pre.unified_in, attn_mask=pre.attn_mask, freqs_cis=pre.freqs_cis, t_emb=t_emb
     )
-    # Image embedding (85-90)
-    x_emb = transformer.all_x_embedder[key](x_emb)
-    x_emb = mx.where(x_pad_mask[:, None], transformer.x_pad_token, x_emb)
-    x_freqs_cis = transformer.rope_embedder(x_pos_ids)
-    x_attn_mask = mx.ones((1, x_emb.shape[0]), dtype=mx.bool_)
-    x_emb = mx.expand_dims(x_emb, axis=0)
-    # Noise refiner (92-99)  -> Signal A tap (image-only, caption-independent)
-    for layer in transformer.noise_refiner:
-        x_emb = layer(x=x_emb, attn_mask=x_attn_mask, freqs_cis=x_freqs_cis, t_emb=t_emb)
-    signal_A = x_emb
-    # Caption embedding + context refiner (101-114)
-    cap_emb = transformer.cap_embedder[1](transformer.cap_embedder[0](cap_emb))
-    cap_emb = mx.where(cap_pad_mask[:, None], transformer.cap_pad_token, cap_emb)
-    cap_freqs_cis = transformer.rope_embedder(cap_pos_ids)
-    cap_attn_mask = mx.ones((1, cap_emb.shape[0]), dtype=mx.bool_)
-    cap_emb = mx.expand_dims(cap_emb, axis=0)
-    for layer in transformer.context_refiner:
-        cap_emb = layer(x=cap_emb, attn_mask=cap_attn_mask, freqs_cis=cap_freqs_cis)
-    # Unify + main layers (116-128)  -> Signal B tap (first main layer residual)
-    x_len = x_emb.shape[1]
-    unified_in = mx.concatenate([x_emb, cap_emb], axis=1)
-    unified_freqs_cis = mx.concatenate([x_freqs_cis, cap_freqs_cis], axis=0)
-    unified_attn_mask = mx.ones((1, unified_in.shape[1]), dtype=mx.bool_)
-    unified = unified_in
-    signal_B = None
-    for i, layer in enumerate(transformer.layers):
-        unified = layer(x=unified, attn_mask=unified_attn_mask, freqs_cis=unified_freqs_cis, t_emb=t_emb)
-        if i == 0:
-            signal_B = unified - unified_in  # first-main-layer residual
-    main_out = unified
-    # Final layer + unpatchify + negation (130-139)
-    final = transformer.all_final_layer[key](main_out, t_emb)
-    output = ZImageTransformer._unpatchify(
-        x=final[0, :x_len],
-        size=x_size,
-        patch_size=transformer.patch_size,
-        f_patch_size=transformer.f_patch_size,
-        out_channels=transformer.out_channels,
-    )
+    signal_B = h1 - pre.unified_in  # first-main-layer residual (the runtime gate signal)
+    main_out = _run_main_layers(transformer, h1, pre, t_emb, start=1)
     return {
         "signal_A": signal_A,
         "signal_B": signal_B,
-        "unified_in": unified_in,
         "main_out": main_out,
-        "noise": -output,
+        "noise": _zimage_tail(transformer, main_out, t_emb, pre),
     }
 
 
-def _t_emb(transformer: Any, timestep: Any, sigmas: mx.array) -> mx.array:
-    """Replicate the timestep -> t_emb path (transformer.py:66-75)."""
-    if not isinstance(timestep, mx.array):
-        if isinstance(timestep, int):
-            sigma_t = sigmas[timestep].reshape((1,))
-            timestep = mx.ones_like(sigma_t) - sigma_t
-        else:
-            timestep = mx.array(timestep, dtype=mx.float32)
-    if timestep.ndim == 0:
-        timestep = timestep.reshape((1,))
-    return transformer.t_embedder(timestep.astype(mx.float32) * transformer.t_scale)
+class _ZImagePairReducer:
+    """Online consecutive-step reducer: keeps only step t-1's arrays.
+
+    Each `push` reduces (t, t-1) with the runtime's `mean_abs_rel_l1`: x per
+    signal (A, and B on the positive branch), y = the worst branch's main_out
+    rel-L1 (the positive branch stands in when a step has no negative one), then
+    drops step t-1. The same function on the same array pairs as reducing a
+    whole-generation capture afterwards, without holding every step."""
+
+    def __init__(self) -> None:
+        self._prev: dict[str, mx.array] | None = None
+        self._xs: dict[str, list[float]] = {"A": [], "B": []}
+        self._ys: list[float] = []
+        self.steps = 0
+
+    def push(
+        self,
+        *,
+        signal_A: mx.array,
+        signal_B: mx.array,
+        main_out_pos: mx.array,
+        main_out_neg: mx.array | None = None,
+    ) -> None:
+        step = {
+            "signal_A": signal_A,
+            "signal_B": signal_B,
+            "main_out_pos": main_out_pos,
+            "main_out_neg": main_out_pos if main_out_neg is None else main_out_neg,
+        }
+        mx.eval(*step.values())
+        prev = self._prev
+        if prev is not None:
+            self._xs["A"].append(_rel_l1(step["signal_A"], prev["signal_A"]))
+            self._xs["B"].append(_rel_l1(step["signal_B"], prev["signal_B"]))
+            y_pos = _rel_l1(step["main_out_pos"], prev["main_out_pos"])
+            y_neg = _rel_l1(step["main_out_neg"], prev["main_out_neg"])
+            self._ys.append(max(y_pos, y_neg))  # worst-branch target (matches flux2 'worst' policy)
+        self._prev = step
+        self.steps += 1
+
+    def finish(self) -> None:
+        """Drop the last step's arrays once the prompt is over; the pair floats stay."""
+        self._prev = None
+
+    def series(self, signal_key: str) -> tuple[list[float], list[float]]:
+        """(x = signal rel-L1, y = worst-branch main_out rel-L1) pairs across steps."""
+        return list(self._xs[signal_key]), list(self._ys)
 
 
-def _make_capturing_factory(captures: list[dict[str, Any]], self_check: dict[str, bool]) -> Any:
+def _make_capturing_factory(reducer: _ZImagePairReducer, self_check: dict[str, bool]) -> Any:
     def factory(transformer: Any) -> Any:
         def predict(latents, timestep, sigmas, text_encodings, negative_encodings, guidance):  # noqa: ANN001
-            t_emb = _t_emb(transformer, timestep, sigmas)
+            t_emb = _zimage_t_emb(transformer, timestep, sigmas)
             pos = _zimage_capture_forward(transformer, latents, t_emb, text_encodings)
-            rec: dict[str, Any] = {
-                "signal_A": pos["signal_A"],
-                "signal_B_pos": pos["signal_B"],
-                "main_out_pos": pos["main_out"],
-                "unified_in_pos": pos["unified_in"],
-            }
             noise = pos["noise"]
+            main_out_neg = None
             if negative_encodings is not None:
                 neg = _zimage_capture_forward(transformer, latents, t_emb, negative_encodings)
-                rec |= {
-                    "signal_B_neg": neg["signal_B"],
-                    "main_out_neg": neg["main_out"],
-                    "unified_in_neg": neg["unified_in"],
-                }
+                main_out_neg = neg["main_out"]
                 noise = pos["noise"] + guidance * (pos["noise"] - neg["noise"])  # z_image.py:209
             # Faithful-port self-check on the first captured step.
             if not self_check["done"]:
@@ -225,8 +223,12 @@ def _make_capturing_factory(captures: list[dict[str, Any]], self_check: dict[str
                 cos = float(mx.sum(ref * pos["noise"]) / (mx.linalg.norm(ref) * mx.linalg.norm(pos["noise"])))
                 assert cos >= 0.999, f"re-walk diverges from transformer forward: cos={cos:.6f} (port bug)"
                 self_check["done"] = True
-            mx.eval(*[v for v in rec.values() if isinstance(v, mx.array)])
-            captures.append(rec)
+            reducer.push(
+                signal_A=pos["signal_A"],
+                signal_B=pos["signal_B"],
+                main_out_pos=pos["main_out"],
+                main_out_neg=main_out_neg,
+            )
             return noise
 
         return predict
@@ -234,12 +236,12 @@ def _make_capturing_factory(captures: list[dict[str, Any]], self_check: dict[str
     return factory
 
 
-def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
-    captures: list[dict[str, Any]] = []
+def _capture_one_prompt(flux: Any, prompt: str) -> _ZImagePairReducer:
+    reducer = _ZImagePairReducer()
     self_check = {"done": False}
     had = "_predict" in vars(flux)
     original = flux._predict if had else None
-    flux._predict = _make_capturing_factory(captures, self_check)
+    flux._predict = _make_capturing_factory(reducer, self_check)
     try:
         flux.generate_image(
             prompt=prompt,
@@ -254,28 +256,8 @@ def _capture_one_prompt(flux: Any, prompt: str) -> list[dict[str, Any]]:
             flux._predict = original
         else:
             del flux._predict
-    return captures
-
-
-def _pairs_for(
-    captures: list[dict[str, Any]], signal_key: str, *, branch: str
-) -> tuple[list[float], list[float]]:
-    """Build (x=signal rel-L1, y=worst-branch main_out rel-L1) pairs across steps."""
-    xs: list[float] = []
-    ys: list[float] = []
-    for t in range(1, len(captures)):
-        if signal_key == "A":
-            x = _rel_l1(captures[t]["signal_A"], captures[t - 1]["signal_A"])
-        else:  # B (caption-dependent) — use the requested branch
-            x = _rel_l1(captures[t][f"signal_B_{branch}"], captures[t - 1][f"signal_B_{branch}"])
-        y_pos = _rel_l1(captures[t]["main_out_pos"], captures[t - 1]["main_out_pos"])
-        y_neg = _rel_l1(
-            captures[t].get("main_out_neg", captures[t]["main_out_pos"]),
-            captures[t - 1].get("main_out_neg", captures[t - 1]["main_out_pos"]),
-        )
-        xs.append(x)
-        ys.append(max(y_pos, y_neg))  # worst-branch target (matches flux2 'worst' policy)
-    return xs, ys
+        reducer.finish()  # also on an interrupted prompt: keep the floats, not the arrays
+    return reducer
 
 
 def main() -> None:
@@ -299,13 +281,15 @@ def main() -> None:
     flux = ZImage(quantize=QUANTIZE, model_config=ModelConfig.z_image())
     flux.freeze()
 
-    all_caps: list[list[dict[str, Any]]] = []
+    reducers: list[_ZImagePairReducer] = []
     t0 = time.time()
     for i, prompt in enumerate(CALIBRATION_PROMPTS, 1):
         print(f"[{i}/{len(CALIBRATION_PROMPTS)}] {prompt!r}", flush=True)
-        caps = _capture_one_prompt(flux, prompt)
-        assert len(caps) == NUM_INFERENCE_STEPS, f"expected {NUM_INFERENCE_STEPS} captures, got {len(caps)}"
-        all_caps.append(caps)
+        reducer = _capture_one_prompt(flux, prompt)
+        assert reducer.steps == NUM_INFERENCE_STEPS, (
+            f"expected {NUM_INFERENCE_STEPS} captures, got {reducer.steps}"
+        )
+        reducers.append(reducer)
     elapsed = time.time() - t0
 
     n_fit = len(CALIBRATION_PROMPTS) - N_HELDOUT
@@ -324,12 +308,13 @@ def main() -> None:
         "fit_mode": args.fit_mode,
         "signals": {},
         "calibration_prompts": list(CALIBRATION_PROMPTS),
+        "peak_memory_gb": mx.get_peak_memory() / 1024**3,
     }
     for sig in ("A", "B"):
-        branch = "pos"  # signal B branch for the fit; A is branch-independent
+        # Signal B is taken on the positive branch; A is branch-independent.
         fit_x, fit_y, held_x, held_y = [], [], [], []
-        for pi, caps in enumerate(all_caps):
-            xs, ys = _pairs_for(caps, sig, branch=branch)
+        for pi, reducer in enumerate(reducers):
+            xs, ys = reducer.series(sig)
             if pi < n_fit:
                 fit_x += xs
                 fit_y += ys
@@ -357,7 +342,7 @@ def main() -> None:
     out.write_text(json.dumps(report, indent=2))
     print(f"\nCaptured both signals in {elapsed:.1f}s. Wrote {out}")
     print(
-        "Signal SELECTION (A vs B) happens after Phase 3 via sweep_threshold_z_image.py "
+        "Signal SELECTION (A vs B) is done with sweep_threshold_z_image.py "
         "(usable-curve screen + held-out skip-vs-SSIM knee)."
     )
 

@@ -357,3 +357,16 @@ def test_prompt_block_settings_line_says_when_the_text_encoder_was_freed() -> No
     kept = gen._prompt("flux1-dev", _entry_with("SHARED", free_encoders=False), report)
     assert freed.endswith("864×1152, text encoder freed once the prompt is encoded.")
     assert kept.endswith("864×1152.")
+
+
+def test_details_footer_never_renders_a_git_describe_suffix() -> None:
+    """Bug: a comparison report stamped with a git-describe string (tag, commits since, sha, dirty flag)
+    lands on the public page verbatim ("mlx-teacache v0.12.0-3-gabc1234-dirty") instead of crediting the
+    release the build sits on."""
+    report = _report()
+    report["variants"]["flux1-dev"]["provenance"]["mlx_teacache_version"] = "v0.12.0-3-gabc1234-dirty"
+    report["variants"]["flux1-dev"]["provenance"]["git_sha_b"] = "8c3fff5"
+    d = gen.render_blocks(report)["flux1-dev:details"]
+    assert "gabc1234" not in d
+    assert "-dirty" not in d
+    assert "mlx-teacache 0.12.0 (harness at commit `8c3fff5`)" in d

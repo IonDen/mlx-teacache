@@ -1234,3 +1234,41 @@ def test_quality_probe_prints_the_aborted_payloads_own_reason_not_a_hardcoded_on
 
     bc._quality_probe(_qp_args(condition="a"), run_worker=fake_run_worker)
     assert _SIGABRT_REASON in capsys.readouterr().out
+
+
+def test_recorded_version_is_the_installed_package_version_not_git_describe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug: the comparison harness stamping ``git describe`` output (``v0.12.0-3-gabc1234-dirty``) into
+    report.json, which the public comparison page then credits; the page wants the package version.
+    The describe helper is replaced by one that always answers, so the test does not depend on the
+    checkout having a .git directory."""
+    import _bench_telemetry as bt
+
+    import mlx_teacache
+
+    def _describe(*_a: object, **_k: object) -> str:
+        return "v0.12.0-3-gabc1234-dirty"
+
+    monkeypatch.setattr(bt, "teacache_version", _describe)
+    monkeypatch.setattr(bc, "teacache_version", _describe, raising=False)
+    assert bc._mlx_teacache_version() == mlx_teacache.__version__
+
+
+def test_run_generation_records_the_version_from_the_package_version_helper() -> None:
+    """Bug: _run_generation (weights-only, never run in the fast lane) wiring the recorded
+    ``mlx_teacache_version`` back to the git-describe stamp instead of ``_mlx_teacache_version()``."""
+    import ast
+
+    tree = ast.parse(Path(bc.__file__).read_text())
+    values = [
+        v
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Dict)
+        for k, v in zip(node.keys, node.values, strict=True)
+        if isinstance(k, ast.Constant) and k.value == "mlx_teacache_version" and isinstance(v, ast.Call)
+    ]
+    assert len(values) == 1  # the worker's stamp; the aggregate copies it from the chunk
+    call = values[0]
+    assert isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+    assert call.func.id == "_mlx_teacache_version" and not call.args and not call.keywords

@@ -415,6 +415,7 @@ def test_non_finite_rel_l1_from_finite_inputs_is_a_numerical_miss_not_a_skip():
     huge = mx.full((1024,), 3.0e38, dtype=mx.float32)
     state.previous_mod_input = huge
     state.cached_residual = mx.zeros((1,))
+    state.cached_residual_neg = mx.zeros((1,))
     d = gate_step(
         state,
         rel_l1_thresh=0.2,
@@ -428,6 +429,7 @@ def test_non_finite_rel_l1_from_finite_inputs_is_a_numerical_miss_not_a_skip():
     assert d.kind == "numerical-miss"
     assert d.should_compute and not d.should_update_cache
     assert state.cached_residual is None
+    assert state.cached_residual_neg is None  # the CFG negative-branch residual is dropped too
     assert state.accumulated_distance == 0.0
 
 

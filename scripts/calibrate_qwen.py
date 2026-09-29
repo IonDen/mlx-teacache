@@ -9,20 +9,21 @@ noises OUTSIDE the transformer via `QwenImage.compute_guided_noise`. So the
 capturing transformer here fires once per branch; we record per branch and let
 mflux do the CFG combine itself (faithful by construction; see the self-check).
 
-This script captures two candidate gate signals per step per branch and fits a
-degree-4 polynomial for each, so the winner can be chosen later by the held-out
+This script captures two candidate gate signals per step (positive branch) and
+fits a degree-4 polynomial for each, so the winner can be chosen later by the held-out
 skip-vs-SSIM knee (the sweep, run after the variant integration is wired):
 
   Signal A — modulated block-0 image input rel-L1 (the INTEGRATION's gate signal,
              `_qwen_signal_a`: FLUX-canonical modulated block-0 input). This is
              caption-INDEPENDENT — block-0 modulation comes from
              `time_text_embed(timestep, ...)`, which ignores the caption, so
-             signal_A is identical pos/neg every step. (Still recorded per branch
-             for a uniform record shape; the fit uses the positive branch.)
+             signal_A is identical pos/neg every step; the fit uses the
+             positive branch.
   Signal B — first-block image-stream residual rel-L1 (the Z-Image-style fallback:
              `block0_output_image - h_in`). Costs one of the 60 blocks on a skip
              step. Genuinely caption-DEPENDENT (block 0 mixes the encoder stream
-             via attention), so the per-branch values differ.
+             via attention), so the per-branch values differ; the fit uses
+             the positive branch.
 
 Target predicted: per-step rel-L1 of `body_out` (the full 60-block image-stream
 output, `_qwen_run_body`). The runtime cache stores the residual
@@ -38,9 +39,17 @@ re-walked), so it is faithful by construction; the per-branch cosine gate is the
 port guarantee.
 
 Pinned recipe: q4 / 768x768 / 50 steps / guidance 4.0 / seed 42. 50 steps is the
-official Qwen-Image recipe (mflux's 20-step default is a fast-preview value); 768x768
-peaks ~28.5 GB on a 32 GB M1 Max, which fits (the wired cap, not the 24.96 GB Metal
-working-set guideline, is the panic guard).
+official Qwen-Image recipe (mflux's 20-step default is a fast-preview value). Peak
+not yet measured with the online reducer; see the chunk JSON's peak_memory_gb. The
+wired cap only prevents the wired-exhaustion panic; the active+cache memory watchdog
+armed in each worker is what aborts a paging storm.
+
+Memory: each step's taps go to an online reducer that keeps only step t-1's arrays
+(signal A, signal B, body_out per branch) and appends the (t, t-1) rel-L1 floats as
+soon as the step's negative branch returns, so a generation never holds more than
+one previous step. Each worker bounds the MLX cache pool to 1 GiB and frees the
+text encoders once the prompt is encoded (mflux's MemorySaver, built exactly as the
+Qwen sweep and bench build it).
 
 CHUNKED + RESUMABLE (HEAVY — one full vanilla forward per prompt, 20B model, two
 transformer passes per step). Run only on the MAIN THREAD. The orchestrator spawns
@@ -76,6 +85,8 @@ from typing import Any
 
 import mlx.core as mx
 import numpy as np
+from _memory_saver import make_memory_saver
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # reuse the RUNTIME signal fn
 from mlx_teacache.variants.qwen_image.integration import (
@@ -96,10 +107,10 @@ except ImportError:  # pragma: no cover - import-path fallback for the run phase
 
 # --- Pinned recipe. Calibrate + sweep + bench all share it. ---
 SEED = 42
-# 768²/50-step is the official Qwen-Image recipe. 768² peaks ~28.5 GB on the 32 GB
-# M1 Max — it fits (the wired cap bounds non-pageable memory; the excess above it is
-# pageable). The earlier 512²/20-step recipe under-resolved detail (512² < native
-# 1328²) and under-cooked (20 steps); 768²/50 is the in-scope quality recipe.
+# 768²/50-step is the official Qwen-Image recipe. The earlier 512²/20-step recipe
+# under-resolved detail (512² < native 1328²) and under-cooked (20 steps); 768²/50
+# is the in-scope quality recipe. Its calibration peak is recorded per chunk
+# (peak_memory_gb).
 HEIGHT = WIDTH = 768
 NUM_INFERENCE_STEPS = 50
 GUIDANCE = 4.0  # CFG path (two transformer passes per step)
@@ -269,7 +280,7 @@ def _qwen_capture_branch(
 ) -> dict[str, Any]:
     """Re-walk the Qwen transformer for ONE branch, tapping the gate signals.
 
-    Returns dict(signal_A, signal_B, h_in, body_out, noise). `noise` is the
+    Returns dict(signal_A, signal_B, body_out, noise). `noise` is the
     per-branch transformer output (pre-CFG-combine) — must equal the unwrapped
     `QwenTransformer.__call__` for the same inputs (asserted on the first call).
     """
@@ -295,10 +306,65 @@ def _qwen_capture_branch(
     return {
         "signal_A": signal_A,
         "signal_B": signal_B,
-        "h_in": pre.h_in,
         "body_out": body_out,
         "noise": noise,
     }
+
+
+class _QwenPairReducer:
+    """Online consecutive-step reducer: keeps only step t-1's arrays.
+
+    mflux calls the transformer twice per step (positive, then negative). The
+    positive call opens the step with signal A, signal B and body_out (both
+    signals are fitted on the positive branch; A is caption-independent anyway);
+    the negative call adds its body_out and closes the step. Closing reduces
+    (t, t-1) with the runtime's `mean_abs_rel_l1`, x per signal and y = the worst
+    branch's body_out rel-L1, then drops step t-1. A step with no negative call
+    (closed by the next positive call or `finish`) uses its positive body_out for
+    both branches. The same function on the same array pairs as reducing a
+    whole-generation capture afterwards, without holding every step."""
+
+    def __init__(self) -> None:
+        self._prev: dict[str, mx.array] | None = None
+        self._open: dict[str, mx.array] | None = None  # step t, waiting for its negative branch
+        self._xs: dict[str, list[float]] = {"A": [], "B": []}
+        self._ys: list[float] = []
+        self.steps = 0
+
+    def positive(self, *, signal_A: mx.array, signal_B: mx.array, body_out: mx.array) -> None:
+        if self._open is not None:
+            self._close(None)  # the previous step had no negative branch
+        mx.eval(signal_A, signal_B, body_out)
+        self._open = {"signal_A": signal_A, "signal_B": signal_B, "body_out_pos": body_out}
+
+    def negative(self, *, body_out: mx.array) -> None:
+        if self._open is None:
+            raise RuntimeError("negative branch before its positive branch")
+        mx.eval(body_out)
+        self._close(body_out)
+
+    def finish(self) -> None:
+        if self._open is not None:
+            self._close(None)
+
+    def _close(self, body_out_neg: mx.array | None) -> None:
+        step = self._open
+        assert step is not None
+        self._open = None
+        step["body_out_neg"] = step["body_out_pos"] if body_out_neg is None else body_out_neg
+        prev = self._prev
+        if prev is not None:
+            self._xs["A"].append(_rel_l1(step["signal_A"], prev["signal_A"]))
+            self._xs["B"].append(_rel_l1(step["signal_B"], prev["signal_B"]))
+            y_pos = _rel_l1(step["body_out_pos"], prev["body_out_pos"])
+            y_neg = _rel_l1(step["body_out_neg"], prev["body_out_neg"])
+            self._ys.append(max(y_pos, y_neg))  # worst-branch target (flux2/z_image 'worst' policy)
+        self._prev = step
+        self.steps += 1
+
+    def series(self, signal_key: str) -> tuple[list[float], list[float]]:
+        """(x = signal rel-L1, y = worst-branch body_out rel-L1) pairs across steps."""
+        return list(self._xs[signal_key]), list(self._ys)
 
 
 class _CapturingTransformer:
@@ -306,15 +372,15 @@ class _CapturingTransformer:
 
     generate_image calls this once per branch per step (positive then negative;
     qwen_image.py:105-118). We track branch parity with a local counter (even =
-    positive, odd = negative), mirroring CfgBranchPairer, and accumulate one
-    record per step keyed by branch into `captures`. The CFG combine is done by
+    positive, odd = negative), mirroring CfgBranchPairer, and hand each branch's
+    taps to the online reducer. The CFG combine is done by
     mflux's compute_guided_noise on our per-branch outputs — faithful by
     construction; the per-branch cosine self-check is the port guarantee.
     """
 
-    def __init__(self, inner: Any, captures: list[dict[str, Any]], self_check: dict[str, bool]) -> None:
+    def __init__(self, inner: Any, reducer: _QwenPairReducer, self_check: dict[str, bool]) -> None:
         self._inner = inner
-        self._captures = captures
+        self._reducer = reducer
         self._self_check = self_check
         self._call_idx = 0  # even = positive branch, odd = negative branch
 
@@ -356,18 +422,12 @@ class _CapturingTransformer:
             assert cos >= 0.999, f"re-walk diverges from QwenTransformer.__call__: cos={cos:.6f} (port bug)"
             self._self_check["done"] = True
 
-        branch = "pos" if positive else "neg"
-        rec: dict[str, Any] = {
-            f"signal_A_{branch}": cap["signal_A"],
-            f"signal_B_{branch}": cap["signal_B"],
-            f"body_out_{branch}": cap["body_out"],
-            f"h_in_{branch}": cap["h_in"],
-        }
-        if positive:
-            self._captures.append(rec)  # start a new per-step record on the positive call
-        else:
-            self._captures[-1].update(rec)  # fold the negative branch into the current step
-        mx.eval(*[v for v in rec.values() if isinstance(v, mx.array)])
+        if positive:  # opens the step; both signals are fitted on the positive branch
+            self._reducer.positive(
+                signal_A=cap["signal_A"], signal_B=cap["signal_B"], body_out=cap["body_out"]
+            )
+        else:  # closes the step: only the negative body_out enters the worst-branch target
+            self._reducer.negative(body_out=cap["body_out"])
         self._call_idx += 1
         return cap["noise"]
 
@@ -376,11 +436,11 @@ class _CapturingTransformer:
         return getattr(self.__dict__["_inner"], name)
 
 
-def _capture_one_prompt(flux: Any, prompt: str, *, steps: int = NUM_INFERENCE_STEPS) -> list[dict[str, Any]]:
-    captures: list[dict[str, Any]] = []
+def _capture_one_prompt(flux: Any, prompt: str, *, steps: int = NUM_INFERENCE_STEPS) -> _QwenPairReducer:
+    reducer = _QwenPairReducer()
     self_check = {"done": False}
     original_transformer = flux.transformer
-    flux.transformer = _CapturingTransformer(original_transformer, captures, self_check)
+    flux.transformer = _CapturingTransformer(original_transformer, reducer, self_check)
     try:
         flux.generate_image(
             prompt=prompt,
@@ -392,33 +452,31 @@ def _capture_one_prompt(flux: Any, prompt: str, *, steps: int = NUM_INFERENCE_ST
         )
     finally:
         flux.transformer = original_transformer
-    return captures
+    reducer.finish()
+    return reducer
 
 
-def _pairs_for(
-    captures: list[dict[str, Any]], signal_key: str, *, branch: str
-) -> tuple[list[float], list[float]]:
-    """Build (x=signal rel-L1, y=worst-branch body_out rel-L1) pairs across steps.
+def _chunk_from_reducer(
+    reducer: _QwenPairReducer, *, prompt_idx: int, prompt: str, steps: int
+) -> dict[str, Any]:
+    """The per-prompt chunk: both signals' (x, y) series plus the process's MLX peak."""
+    chunk: dict[str, Any] = {
+        "idx": prompt_idx,
+        "prompt": prompt,
+        "num_captures": reducer.steps,
+        "steps": steps,
+    }
+    for sig in ("A", "B"):
+        xs, ys = reducer.series(sig)
+        chunk[f"signal_{sig}"] = {"xs": [float(x) for x in xs], "ys": [float(y) for y in ys]}
+    chunk["peak_memory_gb"] = mx.get_peak_memory() / 1024**3
+    return chunk
 
-    x uses the requested branch. (Signal A is caption-independent, so the branch
-    is moot for it; Signal B is caption-dependent, so the branch matters.) The
-    target y is the worst-branch body_out rel-L1 (matches the flux2/z_image
-    'worst' policy).
-    """
-    xs: list[float] = []
-    ys: list[float] = []
-    for t in range(1, len(captures)):
-        x = _rel_l1(
-            captures[t][f"signal_{signal_key}_{branch}"], captures[t - 1][f"signal_{signal_key}_{branch}"]
-        )
-        y_pos = _rel_l1(captures[t]["body_out_pos"], captures[t - 1]["body_out_pos"])
-        y_neg = _rel_l1(
-            captures[t].get("body_out_neg", captures[t]["body_out_pos"]),
-            captures[t - 1].get("body_out_neg", captures[t - 1]["body_out_pos"]),
-        )
-        xs.append(x)
-        ys.append(max(y_pos, y_neg))  # worst-branch target
-    return xs, ys
+
+def _register_memory_saver(flux: Any, saver_cls: Any) -> None:
+    """Free the Qwen2.5-VL text encoders once the prompt is encoded, with the same
+    MemorySaver the Qwen threshold sweep and bench register (same pinned kwargs)."""
+    flux.callbacks.register(make_memory_saver(flux, saver_cls))
 
 
 def _run_memory_probe() -> None:
@@ -430,6 +488,9 @@ def _run_memory_probe() -> None:
     print(f"[memory-probe] Loading Qwen-Image (quantize={QUANTIZE})...", flush=True)
     flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
     flux.freeze()
+    from mflux.callbacks.instances.memory_saver import MemorySaver
+
+    _register_memory_saver(flux, MemorySaver)  # same setup as the capture worker
     print(
         f"[memory-probe] One generation at {HEIGHT}x{WIDTH}, {NUM_INFERENCE_STEPS} steps, "
         f"guidance {GUIDANCE}, seed {SEED}...",
@@ -486,13 +547,13 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) 
     # working set, BEFORE any model load (the kernel-panic guard).
     from _mlx_caps import install_caps
 
-    install_caps(
-        wired_gb=22, soft_gb=22
-    )  # clamps to 0.85 x the recommended working set; bounds the cache pool
+    # 1 GiB cache pool, as the Qwen bench and sweep use: the recipe's ~26 GiB active
+    # peak plus a 2 GiB pool would crowd the 28 GiB watchdog ceiling.
+    install_caps(wired_gb=22, soft_gb=22, cache_gb=1.0)  # wired cap clamps to 0.85 x the working set
     from _mlx_watchdog import abort_handler, arm_mlx_watchdog
 
-    # This recipe peaks ~26.2 GiB active, above the recommended working set; the
-    # watchdog is the only thing that stops a paging storm.
+    # The generation alone peaks ~26.2 GiB active (vanilla bench), above the
+    # recommended working set; the watchdog is the only thing that stops a paging storm.
     arm_mlx_watchdog(on_abort=abort_handler(f"calibrate_qwen-prompt{prompt_idx}", chunk_dir))
     from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
@@ -500,14 +561,14 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool) 
     print(f"[worker {prompt_idx}] loading Qwen-Image (q{QUANTIZE}) for {prompt!r} ...", flush=True)
     flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
     flux.freeze()
-    caps = _capture_one_prompt(flux, prompt, steps=steps)
-    assert len(caps) == steps, f"expected {steps} captures, got {len(caps)}"
-    chunk = {"idx": prompt_idx, "prompt": prompt, "num_captures": len(caps), "steps": steps}
-    for sig in ("A", "B"):
-        xs, ys = _pairs_for(caps, sig, branch="pos")
-        chunk[f"signal_{sig}"] = {"xs": [float(x) for x in xs], "ys": [float(y) for y in ys]}
+    from mflux.callbacks.instances.memory_saver import MemorySaver
+
+    _register_memory_saver(flux, MemorySaver)
+    reducer = _capture_one_prompt(flux, prompt, steps=steps)
+    assert reducer.steps == steps, f"expected {steps} captures, got {reducer.steps}"
+    chunk = _chunk_from_reducer(reducer, prompt_idx=prompt_idx, prompt=prompt, steps=steps)
     out.write_text(json.dumps(chunk, indent=2))
-    print(f"[worker {prompt_idx}] wrote {out} (peak {mx.get_peak_memory() / 1024**3:.2f} GB)", flush=True)
+    print(f"[worker {prompt_idx}] wrote {out} (peak {chunk['peak_memory_gb']:.2f} GB)", flush=True)
 
 
 def _aggregate_path(chunk_dir: Path, *, dry_run: bool) -> Path:
@@ -548,6 +609,11 @@ def _run_orchestrator(*, steps: int, n_prompts: int, chunk_dir: Path, fit_mode: 
             cmd.append("--dry-run")
         print(f"[orchestrator] -> prompt {idx} ({CALIBRATION_PROMPTS[idx]!r})", flush=True)
         result = subprocess.run(cmd)
+        if result.returncode == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] worker for prompt {idx} was ABORTED by the memory watchdog; lower the recipe "
+                f"before rerunning. Completed chunks in {chunk_dir} are reused."
+            )
         if result.returncode != 0 or not (chunk_dir / _chunk_filename(idx)).exists():
             raise SystemExit(
                 f"[orchestrator] worker for prompt {idx} failed (rc={result.returncode}); chunk not "
@@ -634,9 +700,7 @@ def main() -> None:
     if args.memory_probe:
         from _mlx_caps import install_caps
 
-        install_caps(
-            wired_gb=22, soft_gb=22
-        )  # clamps to 0.85 x the recommended working set; bounds the cache pool
+        install_caps(wired_gb=22, soft_gb=22, cache_gb=1.0)  # same caps as the capture worker
         from _mlx_watchdog import abort_handler, arm_mlx_watchdog
 
         arm_mlx_watchdog(on_abort=abort_handler("calibrate_qwen-memory-probe"))

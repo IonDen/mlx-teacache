@@ -2,6 +2,13 @@
 """Typed exception hierarchy for mlx-teacache. Every error names the parameter
 and actual value; messages include remediation pointers where applicable."""
 
+from typing import Any
+
+
+def _rebuild(cls: type, kwargs: dict[str, Any]) -> Any:
+    """Unpickle helper for exceptions whose constructors are keyword-only."""
+    return cls(**kwargs)
+
 
 class TeaCacheError(Exception):
     """Base class — catch this to catch anything from mlx-teacache."""
@@ -23,6 +30,19 @@ class IncompatibleModelError(TeaCacheError):
         self.actual_model_name = actual_model_name
         self.supported = supported
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (
+                type(self),
+                {
+                    "actual_type": self.actual_type,
+                    "actual_model_name": self.actual_model_name,
+                    "supported": self.supported,
+                },
+            ),
+        )
+
 
 class AlreadyPatchedError(TeaCacheError):
     def __init__(self, *, variant_id: str, rel_l1_thresh: float) -> None:
@@ -34,12 +54,18 @@ class AlreadyPatchedError(TeaCacheError):
         self.variant_id = variant_id
         self.rel_l1_thresh = rel_l1_thresh
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild, (type(self), {"variant_id": self.variant_id, "rel_l1_thresh": self.rel_l1_thresh}))
+
 
 class CalibrationError(TeaCacheError):
     def __init__(self, *, variant_id: str, reason: str) -> None:
         super().__init__(f"Coefficient calibration data for variant {variant_id!r} is invalid: {reason}.")
         self.variant_id = variant_id
         self.reason = reason
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild, (type(self), {"variant_id": self.variant_id, "reason": self.reason}))
 
 
 class TransformerShapeError(TeaCacheError):
@@ -53,6 +79,9 @@ class TransformerShapeError(TeaCacheError):
         self.step_idx = step_idx
         self.expected = expected
         self.actual = actual
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (self.step_idx, self.expected, self.actual))
 
 
 class InvalidStepWindowError(TeaCacheError):
@@ -88,6 +117,17 @@ class InvalidStepWindowError(TeaCacheError):
         self.num_steps = num_steps  # legacy attribute name preserved
         self.nominal_num_inference_steps = nominal_num_inference_steps
         self.active_num_steps = active
+        # Raw constructor inputs, so a round trip re-derives the same message and attributes.
+        self._ctor = {
+            "skip_first": skip_first,
+            "skip_last": skip_last,
+            "num_steps": num_steps,
+            "nominal_num_inference_steps": nominal_num_inference_steps,
+            "active_num_steps": active_num_steps,
+        }
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild, (type(self), dict(self._ctor)))
 
 
 class MissingGenerationContextError(TeaCacheError):
@@ -101,6 +141,10 @@ class MissingGenerationContextError(TeaCacheError):
         if detail:
             msg = f"{msg} (detail: {detail})"
         super().__init__(msg)
+        self.detail = detail
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (self.detail,))
 
 
 class InternalStateError(TeaCacheError):

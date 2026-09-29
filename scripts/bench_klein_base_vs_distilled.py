@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import mlx_version, repo_relative, teacache_version
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
 
@@ -516,19 +517,13 @@ def _mflux_version() -> str:
         return "unknown"
 
 
-def _mlx_version() -> str:
-    try:
-        from importlib.metadata import version
-
-        return version("mlx")
-    except Exception:
-        return "unknown"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _mlx_teacache_version() -> str:
     from mlx_teacache import __version__
 
-    return __version__
+    return teacache_version(REPO_ROOT, fallback=__version__)
 
 
 def _provenance() -> dict[str, str]:
@@ -567,7 +562,7 @@ def _detect_hardware(
         "ram_gb": resolved_ram,
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
-        "mlx_version": _mlx_version(),
+        "mlx_version": mlx_version(),
         "mlx_teacache_version": _mlx_teacache_version(),
         "mflux_version": _mflux_version(),
         "quantize": quantize_label(quantize),
@@ -740,7 +735,7 @@ def _build_report(
         "hardware": hardware,
         "conditions": {cond: aggregate_condition(loaded[cond]) for cond in conditions},
         "ssim": ssim,
-        "images_dir": str(images_dir),
+        "images_dir": repo_relative(images_dir, REPO_ROOT),
     }
 
 

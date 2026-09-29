@@ -97,6 +97,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import mlx_version, repo_relative, teacache_version
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
 
@@ -439,10 +440,17 @@ def _mflux_version() -> str:
         return "unknown"
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
 def _mlx_teacache_version() -> str:
     from mlx_teacache import __version__
 
-    return __version__
+    return teacache_version(REPO_ROOT, fallback=__version__)
+
+
+def _images_dir_field(path: Path) -> str:
+    return repo_relative(path, REPO_ROOT)
 
 
 def _macos_sysctl(key: str) -> str | None:
@@ -485,8 +493,9 @@ def _detect_hardware(*, quantize: int) -> dict[str, Any]:
         "ram_gb": ram_gb,
         "machine": platform.machine(),
         "os": f"{platform.system()} {platform.release()}",
+        "mlx_version": mlx_version(),
         "mlx_teacache_version": _mlx_teacache_version(),
-        **_git_revision(Path(__file__).resolve().parent.parent),
+        **_git_revision(REPO_ROOT),
         "mflux_version": _mflux_version(),
         "quantize": quantize,
         "dtype": "bf16",
@@ -951,7 +960,7 @@ def main() -> None:
             "skipped_counts": skipped_counts,
             "computed_counts": computed_counts,
             **_wrapper_streak_arrays(all_results["wrapper"]),
-            "bench_images_dir": str(bench_dir),
+            "bench_images_dir": _images_dir_field(bench_dir),
             "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
             "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],
             "vanilla_load_peak_memory_gb": _memory_arrays(all_results["vanilla"], "load_peak_memory_gb"),

@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from _bench_telemetry import teacache_version
 from _comparison_recipes import Recipe, prompt_for
 from _comparison_sheet import frame_paths
 from _comparison_steps import medians_by_kind, preview_subtracted_speedup, steady_state_speedup
@@ -539,7 +540,7 @@ def _run_generation(
         "memory": memory,
         "frames": len(preview.saved_paths),
         "released_encoders": released,
-        "mlx_teacache_version": mlx_teacache.__version__,
+        "mlx_teacache_version": teacache_version(REPO, fallback=mlx_teacache.__version__),
     }
     if handle is not None:
         from _bench_telemetry import streak_telemetry

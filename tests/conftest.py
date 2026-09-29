@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
 
@@ -69,11 +69,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @contextlib.contextmanager
-def expect_distilled_warning(variant_id: str) -> Iterator[None]:
+def expect_distilled_warning(variant_id: str, coefficients: Sequence[float] | None = None) -> Iterator[None]:
     """Wrap an `apply_teacache(...)` call site that may touch a distilled
     variant (registry `default_thresh is None` — currently flux2-klein-4b
     and flux2-klein-9b): asserts `TeaCacheNoBenefitWarning` under
     `pytest.warns(...)` for those variants, and is a no-op otherwise.
+
+    Pass the same `coefficients` the call site hands to `apply_teacache`:
+    api.py suppresses the warning when the caller supplies their own tuple,
+    so the warning is expected only when `default_thresh is None and
+    coefficients is None`.
 
     Centralizing this against the live `_REGISTRY` (rather than a hardcoded
     variant-id set) means a parity/slow-lane test parametrized across engaged
@@ -85,7 +90,7 @@ def expect_distilled_warning(variant_id: str) -> Iterator[None]:
     from mlx_teacache.variants import _REGISTRY
 
     entry = _REGISTRY.get(variant_id)
-    if entry is not None and entry["default_thresh"] is None:
+    if entry is not None and entry["default_thresh"] is None and coefficients is None:
         with pytest.warns(TeaCacheNoBenefitWarning, match="distilled"):
             yield
     else:

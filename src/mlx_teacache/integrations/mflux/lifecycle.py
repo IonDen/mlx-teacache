@@ -25,6 +25,8 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
+from mlx_teacache.errors import InternalStateError
+
 
 @dataclass
 class GenerationContext:
@@ -232,14 +234,29 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
             cache = getattr(handle._state, "cache", None)
             if cache is not None:
                 cache.release_arrays()
-            if completed and handle._pending_finalize is not None:
+            stats = handle._state.stats
+            if getattr(stats, "_frozen", False):
+                # restore() ran while this generation was in flight (e.g. from an
+                # after-loop callback). Stats are frozen by design; there is
+                # nothing to commit or discard, and the caller's result must
+                # still be returned.
+                pass
+            elif completed and handle._pending_finalize is not None:
                 pf: PendingFinalize = handle._pending_finalize
-                handle._state.stats.finalize_last_generation(
-                    num_inference_steps=pf.num_inference_steps,
-                    cfg_was_active=pf.cfg_was_active,
-                )
+                try:
+                    stats.finalize_last_generation(
+                        num_inference_steps=pf.num_inference_steps,
+                        cfg_was_active=pf.cfg_was_active,
+                    )
+                except InternalStateError as exc:
+                    # The image is finished; a bookkeeping mismatch must not replace it.
+                    warnings.warn(
+                        f"TeaCache stats for this generation were discarded: {exc}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
             else:
-                handle._state.stats.discard_current_generation()
+                stats.discard_current_generation()
             handle._pending_finalize = None
 
     flux.generate_image = wrapped

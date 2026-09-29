@@ -133,7 +133,8 @@ def test_capture_forward_taps_on_the_runtime_prelude():
     measured from the full body instead of layer 0, or main_out missing a main layer.
 
     The fake prelude is the identity, so unified_in = concat(latents=1, caption=7);
-    layers add 1, 10, 100 (see tests/test_forward_z_image_fake.py)."""
+    layers add 1, then 10 plus the caption mean it sees (8), then 100, so the body
+    adds 119 (see tests/test_forward_z_image_fake.py)."""
     transformer = _FakeZImageTransformer()
     out = cz._zimage_capture_forward(
         transformer,
@@ -144,10 +145,10 @@ def test_capture_forward_taps_on_the_runtime_prelude():
     assert mx.array_equal(out["signal_A"], mx.full((1, _X_SEQ, _DIM), 1.0)).item()
     assert mx.array_equal(out["signal_B"], mx.full((1, _X_SEQ + _CAP_SEQ, _DIM), 1.0)).item()
     main_expected = mx.concatenate(
-        [mx.full((1, _X_SEQ, _DIM), 112.0), mx.full((1, _CAP_SEQ, _DIM), 118.0)], axis=1
+        [mx.full((1, _X_SEQ, _DIM), 120.0), mx.full((1, _CAP_SEQ, _DIM), 126.0)], axis=1
     )
     assert mx.array_equal(out["main_out"], main_expected).item()
-    assert mx.array_equal(out["noise"], mx.full((_X_SEQ, _DIM), -112.0)).item()
+    assert mx.array_equal(out["noise"], mx.full((_X_SEQ, _DIM), -120.0)).item()
 
 
 def test_calibrators_do_not_reimplement_the_forward_or_the_gate_signal():

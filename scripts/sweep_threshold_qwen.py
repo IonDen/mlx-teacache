@@ -231,7 +231,8 @@ def _run_worker(
         # Showcase quality: mixed-precision (q8 edge blocks + bf16 embeddings) clears the
         # uniform-q4 grain. mlx-teacache stays quant-agnostic; this is a construction-time
         # choice. Peaks ~30.4 GB, above the watchdog ceiling on a 32 GB Mac; --plain-q4 is
-        # the shipped recipe (the one bench_speedup measures) and the one the default
+        # mflux's 4-bit build (uniform on mflux < 0.19, image-stream modulation layers at 8-bit from
+        # 0.19; the recipe bench_speedup measures) and the one the default
         # threshold is chosen on.
         from qwen_mixed_precision import enable_qwen_mixed_precision
 
@@ -401,7 +402,7 @@ def main() -> None:
         "--plain-q4",
         action="store_true",
         dest="plain_q4",
-        help="sweep the shipped uniform-q4 build (the bench recipe) instead of the mixed-precision showcase build",
+        help="sweep mflux's 4-bit build (the bench recipe; uniform on mflux < 0.19, image-stream modulation layers at 8-bit from 0.19) instead of the mixed-precision showcase build",
     )
     parser.add_argument(
         "--thresholds",

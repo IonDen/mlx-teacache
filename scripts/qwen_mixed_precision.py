@@ -1,6 +1,6 @@
 """Mixed-precision quantization for Qwen-Image (DEV TOOLING — NOT shipped).
 
-Stock uniform q4 over-quantizes Qwen-Image's quantization-sensitive layers and
+Stock q4 (uniform on mflux < 0.19; image-stream modulation layers (`img_mod_linear`) at 8-bit from 0.19) over-quantizes Qwen-Image's quantization-sensitive layers and
 produces a grainy "low-res JPEG" texture on a 32 GB Mac. Protecting the first/last
 transformer blocks (q8) plus the embeddings + final projection (bf16) clears the
 artifact while still fitting 32 GB (~+1.9 GB over uniform q4). Edge-block sensitivity

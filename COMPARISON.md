@@ -104,14 +104,14 @@ This page skips two kinds of runs. `flux1-schnell` and the distilled FLUX.2 Klei
 
 ## Reproduce
 
-Every run on this page used mflux 0.20.0 in a Python 3.12 environment; this repository's own lock resolves an older mflux, so set one up on its own:
+Every run on this page used mflux 0.20.0, MLX 0.32.2 and mlx-taef 0.8.3 in a Python 3.12 environment. The repository's `test-mflux` group includes scikit-image, so build the environment from the lock, then pin those three versions; the lock moves with dependency updates and may resolve newer ones:
 
 ```bash
-uv venv --python 3.12
-uv pip install "mflux==0.20.0" "mlx-taef==0.8.3" scikit-image -e .
+uv sync --locked --group test-mflux --python 3.12
+uv pip install "mflux==0.20.0" "mlx==0.32.2" "mlx-taef==0.8.3"
 ```
 
-Run every command below with `--no-sync`. Plain `uv run` re-syncs to this repository's own lock file first, which can quietly downgrade mlx underneath the venv you just built; CI's own newest-mflux job runs with `--no-sync` for the same reason.
+Run every command below with `--no-sync` so uv leaves that environment as it is.
 
 The worker subprocesses run offline, so download every checkpoint first — `hf download black-forest-labs/FLUX.1-dev`, `hf download black-forest-labs/FLUX.1-Krea-dev`, `hf download black-forest-labs/FLUX.2-klein-base-4B`, `hf download Tongyi-MAI/Z-Image`, `hf download black-forest-labs/FLUX.2-klein-base-9B`, and `hf download Qwen/Qwen-Image`. Three of those sit behind the FLUX Non-Commercial click-through — FLUX.1 [dev], FLUX.1 Krea [dev], and FLUX.2 [klein] base 9B — so accept the license on each model's Hugging Face page before downloading it.
 

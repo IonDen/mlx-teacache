@@ -7,6 +7,11 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- The Qwen-Image bench, sweep and calibration scripts and the Qwen parity test load `Qwen/Qwen-Image` by name. On mflux 0.19 and later the `qwen-image` alias is Qwen-Image-2512, which the shipped coefficients were not fitted on.
+- `scripts/calibrate_qwen.py --model` calibrates another Qwen-Image checkpoint, for example `Qwen/Qwen-Image-2512`. It writes its chunks and fit under `scripts/_calib_qwen_chunks/<model>/`, never the committed calibration.
+- The development lock moved to mflux 0.20.0, MLX 0.32.2 and mlx-taef 0.8.3. Benchmarks keep the mflux version they were measured on.
+
 ## [0.12.1] — 2026-09-29
 
 Hardening patch. `apply_teacache` now refuses pipelines it cannot gate, a finished generation keeps its image when you restore inside a callback, and bad arguments fail at the call. Skip decisions, default thresholds, coefficients and generated images are unchanged for every supported model, and there are no new speedup measurements in this release.

@@ -23,6 +23,8 @@ On the comparison page's single run at 672×896, q4, the wrapper took the genera
 
 ## Image quality on consumer memory
 
+Every number on this page is a uniform 4-bit build on mflux 0.18.0. From mflux 0.19, mflux's 4-bit Qwen build keeps every block's `img_mod_linear` modulation layer at 8 bits, which costs about 1.8 GB more memory. TeaCache leaves that as mflux ships it, so a q4 run on a newer mflux is not the recipe measured here, and the gate's input now comes from 8-bit modulation layers that the shipped coefficients were not fitted on.
+
 Stock uniform 4-bit quantization over-quantizes Qwen-Image's quantization-sensitive layers and produces a grainy, low-detail skin texture on a 32 GB Mac — a Qwen + q4 limitation, independent of TeaCache (the wrapper faithfully reproduces whatever the base model generates). The earlier comparison page used a mixed-precision build that keeps the first/last transformer blocks at 8-bit and the embeddings + final projection at bf16, which clears the artifact at a higher peak (~30.4 GB); the current page uses stock 4-bit instead (17.6 GiB peak), so its portrait keeps a light speckle where the mixed-precision build would not. mlx-teacache stays quantization-agnostic; this is a model-construction choice. To reproduce the mixed-precision build's quality, install the predicate before constructing the model:
 
 ```python

@@ -342,7 +342,7 @@ def main() -> None:
     out.write_text(json.dumps(report, indent=2))
     print(f"\nCaptured both signals in {elapsed:.1f}s. Wrote {out}")
     print(
-        "Signal SELECTION (A vs B) happens after Phase 3 via sweep_threshold_z_image.py "
+        "Signal SELECTION (A vs B) is done with sweep_threshold_z_image.py "
         "(usable-curve screen + held-out skip-vs-SSIM knee)."
     )
 

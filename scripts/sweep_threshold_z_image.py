@@ -6,15 +6,14 @@ vanilla at each. DEFAULT_THRESH is set at the visible knee where SSIM holds the
 FLUX.2-comparable high bar (>= ~0.97-0.99 measured, not the 0.85 test floor).
 
 The committed z-image-base variant uses Signal B (first-main-layer residual);
-Signal A was rejected at calibration (R^2=0.069 vs B's 0.400 — see the
-2026-05-31 calibration findings). So this sweeps the one committed signal; there
+Signal A was rejected at calibration (R^2=0.069 vs B's 0.400). So this sweeps the one committed signal; there
 is no A/B selector. This run also serves as the skip-path quality validation at
 the VALID recipe: at low thresholds (few skips) SSIM should stay high; if even a
 handful of skips crater SSIM, that signals a reconstruction bug to debug.
 
-SEQUENCING: RUNS only AFTER Phase 3 — it calls `apply_teacache(flux, ...)`,
-which requires the registered z-image-base variant. (Calibration, by contrast,
-monkeypatches `_predict` directly and does not need the variant.)
+The sweep calls `apply_teacache(flux, ...)`, so it needs the registered
+z-image-base variant. (Calibration, by contrast, monkeypatches `_predict`
+directly and does not need the variant.)
 
 Run (HEAVY — vanilla baseline + one wrapped generation per threshold at
 ~150-220s each; skips speed the higher thresholds up):

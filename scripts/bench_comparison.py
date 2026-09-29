@@ -1,6 +1,6 @@
 """COMPARISON.md harness (schema 2): one tennis scene, A = TeaCache off, B = on, per-step taef previews.
 
-Run from the py3.12 scratch venv (mflux 0.20):
+Needs mflux 0.20 and mlx-taef installed:
 
     python scripts/bench_comparison.py --probe --only klein-base-9b          # memory probe (writes no chunk)
     python scripts/bench_comparison.py --only flux1-dev --max-workers 1       # one worker = one condition

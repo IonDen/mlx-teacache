@@ -1,41 +1,36 @@
-"""One-shot validation that flux2-klein-base-9b's reused base-4b coefficients
-work at the canonical 50-step CFG recipe.
+"""Historical release check from v0.5.0: does flux2-klein-base-9b's reused base-4b
+coefficient tuple work at the canonical 50-step CFG recipe? The current SSIM
+record is `_artifacts/v0.12.0_klein_base_ssim.json`.
 
 Generates one fixed prompt at seed 42, 1024x768, num_inference_steps=50,
 guidance=4.0, both vanilla and wrapped via apply_teacache. Decodes through
 the VAE, computes SSIM, writes _artifacts/validation_klein_base_9b.json.
-Exits non-zero if SSIM < 0.95.
+Exits non-zero if SSIM < 0.95. It is a one-off check, not a benchmark.
+Heavy generation; expect ~30-90 min on an M1 Max.
 
-This is a release-gate run for v0.5.0 — not a generic benchmark. Run once
-before tagging. Heavy generation; expect ~30-90 min on M1 Max.
+Memory
+------
 
-## Memory guardrails (see CLAUDE.md "Memory guardrails for heavy generations on 32 GB")
+Two crashes happened while this script was written: a jetsam OOM when vanilla
+and wrapper ran in one process (python peak 25.8 GB), and a kernel panic with
+only the advisory `mx.set_memory_limit` at 24 GB. The script now combines:
 
-Two crashes happened during this script's development:
-- **2026-05-17**: same-process vanilla-then-wrapper triggered a jetsam OOM
-  (python peak 25.8 GB).
-- **2026-05-19**: separate subprocesses with the advisory memory limit at 24 GB
-  triggered a kernel watchdog panic anyway, because `set_memory_limit` is a
-  soft guideline and does NOT bound wired (non-pageable Metal) memory.
-
-This version uses three guardrails together:
-
-1. **Subprocess-per-condition.** Vanilla and wrapper each run in a fresh
-   subprocess (`--worker --condition {vanilla,wrapper}`). MLX's lazy
-   allocator releases everything on process exit.
-2. **HARD wired-memory cap** via `mx.set_wired_limit` set BEFORE the model
-   loads. This is the cap that actually prevents kernel panics — wired
-   memory is non-pageable, so the OS can't recover from over-allocation
-   except by panicking. Set to `(--mlx-memory-cap-gb - 2)` GB.
-3. **Soft memory cap** via `mx.set_memory_limit` as a secondary signal at
-   the `--mlx-memory-cap-gb` value (default 22 GB → 20 GB wired cap on a
-   32 GB Max → ~12 GB OS headroom).
-4. **Vanilla image persisted to disk** between subprocesses (the
-   SSIM-comparison loop in the orchestrator reloads both PNGs).
+1. Subprocess per condition. Vanilla and wrapper each run in a fresh
+   subprocess (`--worker --condition {vanilla,wrapper}`), so MLX's lazy
+   allocator releases everything on exit.
+2. Device-clamped caps through `install_caps`: a wired cap of
+   `--mlx-memory-cap-gb` minus 2 GB and a soft cap at the `--mlx-memory-cap-gb`
+   value (default 22 GB). The wired cap bounds only wired (non-pageable) Metal
+   memory; `mx.set_memory_limit` is advisory.
+3. The active+cache memory watchdog (`arm_mlx_watchdog`). Pageable GPU
+   over-allocation runs into a paging storm instead of failing, and only the
+   watchdog stops it.
+4. The vanilla image is written to disk between subprocesses so the
+   orchestrator can reload both PNGs for SSIM.
 
 Usage:
   uv run python scripts/validate_klein_base_9b.py
-  uv run python scripts/validate_klein_base_9b.py --mlx-memory-cap-gb 24  # only if you raised sysctl iogpu.wired_limit_mb first
+  uv run python scripts/validate_klein_base_9b.py --mlx-memory-cap-gb 24  # only after raising sysctl iogpu.wired_limit_mb
 """
 
 from __future__ import annotations
@@ -323,11 +318,10 @@ def main() -> int:
         type=int,
         default=22,
         help=(
-            "Soft MLX memory cap (mx.set_memory_limit). The worker also sets a "
-            "HARD wired-memory cap via mx.set_wired_limit at (cap - 2) GB. The "
-            "wired cap is what actually prevents kernel panics from Metal pinned "
-            "memory exceeding system headroom (mx.set_memory_limit alone is "
-            "advisory). Default 22 GB → 20 GB wired cap → ~12 GB OS headroom on "
+            "Soft MLX memory cap (mx.set_memory_limit, advisory). The worker also "
+            "sets a wired cap at (cap - 2) GB, which bounds only wired Metal "
+            "memory, and arms the active+cache memory watchdog that aborts a "
+            "paging storm. Default 22 GB → 20 GB wired cap → ~12 GB OS headroom on "
             "a 32 GB Max. The 2026-05-19 kernel panic happened at 24 GB cap; do "
             "not raise back without raising sysctl iogpu.wired_limit_mb."
         ),

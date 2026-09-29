@@ -1,7 +1,7 @@
 """Threshold-sweep reproducer for flux2-klein-base-4b's per-variant default.
 
-This is the script that was used to choose `Provenance.default_thresh=0.17`
-for `flux2-klein-base-4b` in v0.4.0. It generates a vanilla baseline at the
+This is the script that chose `DEFAULT_THRESH` (0.17) in the
+`flux2-klein-base-4b` variant config. It generates a vanilla baseline at the
 calibrated 25-step schedule, then sweeps the wrapper across a list of
 `rel_l1_thresh` values, measuring skip count + wall-clock + SSIM-vs-vanilla
 at each. The 0.17 default sits on the visible knee of the curve.
@@ -40,10 +40,12 @@ SSIM (the metric that actually picks the threshold knee) is unaffected.
 Memory safety
 -------------
 
-Each worker subprocess sets a hard wired-memory cap (`mx.set_wired_limit`)
-and a soft cap (`mx.set_memory_limit`) BEFORE constructing the model, taken
-from flux2-klein-base-4b's `META["memory_cap_hint_gb"]` in the mlx-teacache
-variant registry when present, else a 20 GB wired / 22 GB soft fallback.
+Each worker subprocess installs device-clamped caps (`install_caps`) before
+constructing the model, taken from flux2-klein-base-4b's
+`META["memory_cap_hint_gb"]` in the mlx-teacache variant registry when present,
+else a 20 GB wired / 22 GB soft fallback. The wired cap bounds only wired Metal
+memory; the active+cache memory watchdog armed in each worker is what aborts a
+paging storm.
 """
 
 import argparse

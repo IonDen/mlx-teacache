@@ -8,8 +8,14 @@ none of the edit aliases equals "qwen-image" or "qwen" as a list element, so the
 edit model correctly falls through to IncompatibleModelError.
 """
 
+from mlx_teacache.variants._pipeline_class import is_foreign_mflux_pipeline
+
+_ALLOWED = frozenset({"QwenImage"})
+
 
 def matches(flux: object) -> bool:
+    if is_foreign_mflux_pipeline(flux, _ALLOWED):
+        return False
     model_config = getattr(flux, "model_config", None)
     if model_config is None:
         return False

@@ -12,11 +12,14 @@ warranted.
 
 For each calibration prompt:
 - Patch `flux._predict` with a capturing wrapper that runs the full vanilla
-  forward (no skipping) and records `mod_in` and `body_out_concat` per step.
+  forward (no skipping) and hands `mod_in` and `body_out_concat` to an online
+  reducer each step.
 - Run `flux.generate_image(...)` at the target inference budget.
-- Compute, for every consecutive step pair (t-1, t), the relative-L1 deltas:
-    x_t = ||mod_in_t   - mod_in_{t-1}||_1   / ||mod_in_{t-1}||_1
-    y_t = ||body_out_t - body_out_{t-1}||_1 / ||body_out_{t-1}||_1
+- The reducer computes, for every consecutive step pair (t-1, t), the
+  relative-L1 deltas with the runtime gate's `mean_abs_rel_l1`, then drops
+  step t-1 (only one previous step is ever held):
+    x_t = mean|mod_in_t   - mod_in_{t-1}|   / mean|mod_in_{t-1}|
+    y_t = mean|body_out_t - body_out_{t-1}| / mean|body_out_{t-1}|
 - Aggregate (x_t, y_t) pairs across all prompts and fit a degree-4 polynomial
   with `numpy.polyfit` (returns coefficients high-to-low, matching the
   `poly_eval` convention used at runtime in `mlx_teacache.gate`).
@@ -62,6 +65,7 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 
+from mlx_teacache._kernel.gate import mean_abs_rel_l1  # the RUNTIME gate signal fn
 from mlx_teacache.variants.flux2_klein_base_4b.integration import (
     _flux2_extract_mod_input,
     _flux2_run_body,
@@ -248,31 +252,74 @@ def _aggregate_path(chunk_dir: Path, variant: str, *, dry_run: bool) -> Path:
     return chunk_dir / output_json
 
 
-def _rel_l1(curr: mx.array, prev: mx.array) -> float:
-    """Relative-L1 distance, matching mflux's runtime gate signal."""
-    curr_f = curr.astype(mx.float32)
-    prev_f = prev.astype(mx.float32)
-    num = mx.sum(mx.abs(curr_f - prev_f))
-    den = mx.sum(mx.abs(prev_f)) + 1e-12
-    return float(num / den)
+class _Flux2PairReducer:
+    """Online consecutive-step reducer: keeps only step t-1's arrays.
+
+    Each `push` reduces (t, t-1) with the runtime gate's `mean_abs_rel_l1`
+    (x from mod_in; y from body_out, per branch under CFG), then drops step
+    t-1. The same function on the same array pairs as reducing a
+    whole-generation capture afterwards, without holding every step's
+    activations until `generate_image` returns."""
+
+    def __init__(self, *, cfg: bool) -> None:
+        self._cfg = cfg
+        self._prev: tuple[mx.array, ...] | None = None
+        self._xs: list[float] = []
+        self._ys_pos: list[float] = []
+        self._ys_neg: list[float] = []
+        self.steps = 0
+
+    def push(self, mod_in: mx.array, body_out: mx.array, body_out_neg: mx.array | None = None) -> None:
+        """One denoising step. `body_out` is the positive branch under CFG."""
+        if self._cfg != (body_out_neg is not None):
+            raise ValueError(f"cfg={self._cfg} reducer got body_out_neg={body_out_neg is not None}")
+        step = (mod_in, body_out) if body_out_neg is None else (mod_in, body_out, body_out_neg)
+        mx.eval(*step)
+        if self._prev is not None:
+            self._xs.append(mean_abs_rel_l1(step[0], self._prev[0]))
+            self._ys_pos.append(mean_abs_rel_l1(step[1], self._prev[1]))
+            if self._cfg:
+                self._ys_neg.append(mean_abs_rel_l1(step[2], self._prev[2]))
+        self._prev = step
+        self.steps += 1
+
+    def chunk_series(self) -> dict[str, list[float]]:
+        """The chunk's rel-L1 series: xs + ys, or xs + ys_pos + ys_neg under CFG
+        (the fit-branch policy is applied at aggregation time)."""
+        if self._cfg:
+            return {"xs": list(self._xs), "ys_pos": list(self._ys_pos), "ys_neg": list(self._ys_neg)}
+        return {"xs": list(self._xs), "ys": list(self._ys_pos)}
 
 
-def _build_capturing_predict_factory(captures: list[dict[str, Any]]) -> Any:
+def _chunk_from_reducer(reducer: _Flux2PairReducer, *, idx: int, prompt: str) -> dict[str, Any]:
+    """The per-prompt chunk: the rel-L1 series plus the process's MLX peak. Per-branch
+    series only under CFG; the fit-branch policy is applied at aggregation time (see
+    _accumulate_chunks / _select_y)."""
+    return {
+        "idx": idx,
+        "prompt": prompt,
+        "num_captures": reducer.steps,
+        **reducer.chunk_series(),
+        "peak_memory_gb": mx.get_peak_memory() / 1024**3,
+    }
+
+
+def _build_capturing_predict_factory(reducer: _Flux2PairReducer) -> Any:
     """Return a function assignable to `flux._predict`. mflux calls it as
     `predict = self._predict(self.transformer)` once per generation, then
     invokes the returned closure per step. The closure mirrors
     `flux2_forward_with_gate`'s slow path math (no gating, no caching) and
-    appends per-step `(mod_in, body_out_concat)` arrays to `captures`."""
+    pushes each step's `(mod_in, body_out_concat)` to the online reducer."""
     from mflux.models.common.config.model_config import ModelConfig
 
     def factory(transformer: Any) -> Any:
         inner = transformer
-        return _make_capturing_closure(inner, captures, ModelConfig)
+        return _make_capturing_closure(inner, reducer, ModelConfig)
 
     return factory
 
 
-def _make_capturing_closure(inner: Any, captures: list[dict[str, Any]], ModelConfig: Any) -> Any:
+def _make_capturing_closure(inner: Any, reducer: _Flux2PairReducer, ModelConfig: Any) -> Any:
     def predict(
         latents: mx.array,
         latent_ids: mx.array,
@@ -320,8 +367,7 @@ def _make_capturing_closure(inner: Any, captures: list[dict[str, Any]], ModelCon
             temb_mod_params_txt,
             concat_rotary_emb,
         )
-        mx.eval(mod_in, body_out_concat)
-        captures.append({"mod_in": mod_in, "body_out": body_out_concat})
+        reducer.push(mod_in, body_out_concat)
 
         out = body_out_concat[:, encoder_hs.shape[1] :, ...]
         out = inner.norm_out(out, temb)
@@ -331,11 +377,11 @@ def _make_capturing_closure(inner: Any, captures: list[dict[str, Any]], ModelCon
     return predict
 
 
-def _make_cfg_capturing_closure(inner: Any, captures: list[dict[str, Any]], ModelConfig: Any) -> Any:
+def _make_cfg_capturing_closure(inner: Any, reducer: _Flux2PairReducer, ModelConfig: Any) -> Any:
     """CFG-aware capture (v0.4.1). Runs BOTH branches per step, returns
     CFG-combined noise to the scheduler so the next latent follows the
-    real g>1 trajectory, captures the shared mod_in plus per-branch
-    body_out_concat."""
+    real g>1 trajectory, and pushes the shared mod_in plus per-branch
+    body_out_concat to the online reducer."""
 
     def predict(
         latents: mx.array,
@@ -394,8 +440,7 @@ def _make_cfg_capturing_closure(inner: Any, captures: list[dict[str, Any]], Mode
             inner, body_in, enc_neg, temb, temb_mod_params_img, temb_mod_params_txt, concat_rot_neg
         )
 
-        mx.eval(mod_in, body_out_pos, body_out_neg)
-        captures.append({"mod_in": mod_in, "body_out_pos": body_out_pos, "body_out_neg": body_out_neg})
+        reducer.push(mod_in, body_out_pos, body_out_neg)
 
         # Tail + CFG combine for the scheduler.
         noise_pos = body_out_pos[:, enc_pos.shape[1] :, ...]
@@ -409,25 +454,25 @@ def _make_cfg_capturing_closure(inner: Any, captures: list[dict[str, Any]], Mode
     return predict
 
 
-def _build_cfg_capturing_predict_factory(captures: list[dict[str, Any]]) -> Any:
+def _build_cfg_capturing_predict_factory(reducer: _Flux2PairReducer) -> Any:
     from mflux.models.common.config.model_config import ModelConfig
 
     def factory(transformer: Any) -> Any:
-        return _make_cfg_capturing_closure(transformer, captures, ModelConfig)
+        return _make_cfg_capturing_closure(transformer, reducer, ModelConfig)
 
     return factory
 
 
 def _capture_one_prompt(
     flux: Any, prompt: str, *, num_inference_steps: int, guidance: float
-) -> list[dict[str, Any]]:
-    captures: list[dict[str, Any]] = []
+) -> _Flux2PairReducer:
+    reducer = _Flux2PairReducer(cfg=guidance > 1.0)
     had_instance_attr = "_predict" in vars(flux)
     original = flux._predict if had_instance_attr else None
     if guidance > 1.0:
-        flux._predict = _build_cfg_capturing_predict_factory(captures)
+        flux._predict = _build_cfg_capturing_predict_factory(reducer)
     else:
-        flux._predict = _build_capturing_predict_factory(captures)
+        flux._predict = _build_capturing_predict_factory(reducer)
     try:
         flux.generate_image(
             prompt=prompt,
@@ -442,7 +487,7 @@ def _capture_one_prompt(
             flux._predict = original
         else:
             del flux._predict
-    return captures
+    return reducer
 
 
 # ---------------------------------------------------------------------------
@@ -509,32 +554,12 @@ def _run_worker(
     flux = Flux2Klein(quantize=4, model_config=variant_cfg["model_config_factory"]())
     flux.freeze()
 
-    capture = _capture_one_prompt(flux, prompt, num_inference_steps=num_inference_steps, guidance=guidance)
-    assert len(capture) == num_inference_steps, f"expected {num_inference_steps} captures, got {len(capture)}"
+    reducer = _capture_one_prompt(flux, prompt, num_inference_steps=num_inference_steps, guidance=guidance)
+    assert reducer.steps == num_inference_steps, (
+        f"expected {num_inference_steps} captures, got {reducer.steps}"
+    )
 
-    xs: list[float] = []
-    ys: list[float] = []
-    ys_pos: list[float] = []
-    ys_neg: list[float] = []
-    for t in range(1, len(capture)):
-        x = _rel_l1(capture[t]["mod_in"], capture[t - 1]["mod_in"])
-        if cfg_capture:
-            y_pos = _rel_l1(capture[t]["body_out_pos"], capture[t - 1]["body_out_pos"])
-            y_neg = _rel_l1(capture[t]["body_out_neg"], capture[t - 1]["body_out_neg"])
-            ys_pos.append(y_pos)
-            ys_neg.append(y_neg)
-        else:
-            ys.append(_rel_l1(capture[t]["body_out"], capture[t - 1]["body_out"]))
-        xs.append(x)
-
-    chunk: dict[str, Any] = {"idx": idx, "prompt": prompt, "num_captures": len(capture), "xs": xs}
-    if cfg_capture:
-        # Per-branch series only; the fit-branch policy is applied at
-        # aggregation time (see _accumulate_chunks / _select_y).
-        chunk["ys_pos"] = ys_pos
-        chunk["ys_neg"] = ys_neg
-    else:
-        chunk["ys"] = ys
+    chunk = _chunk_from_reducer(reducer, idx=idx, prompt=prompt)
     out.write_text(json.dumps(chunk, indent=2))
     print(f"[worker {idx}] wrote {out} (peak {mx.get_peak_memory() / 1024**3:.2f} GB)", flush=True)
 

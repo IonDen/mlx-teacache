@@ -197,6 +197,10 @@ class _ZImagePairReducer:
         self._prev = step
         self.steps += 1
 
+    def finish(self) -> None:
+        """Drop the last step's arrays once the prompt is over; the pair floats stay."""
+        self._prev = None
+
     def series(self, signal_key: str) -> tuple[list[float], list[float]]:
         """(x = signal rel-L1, y = worst-branch main_out rel-L1) pairs across steps."""
         return list(self._xs[signal_key]), list(self._ys)
@@ -252,6 +256,7 @@ def _capture_one_prompt(flux: Any, prompt: str) -> _ZImagePairReducer:
             flux._predict = original
         else:
             del flux._predict
+        reducer.finish()  # also on an interrupted prompt: keep the floats, not the arrays
     return reducer
 
 

@@ -7,6 +7,7 @@ NOT added to conftest._MFLUX_FILES — runs in the pure-core lane.
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import mlx.core as mx
 import numpy as np
@@ -160,3 +161,60 @@ def test_calibrators_do_not_reimplement_the_forward_or_the_gate_signal():
             if needle in text:
                 offenders.append(f"{path.name}: {needle}")
     assert offenders == []
+
+
+class _CallableFakeZImage(_FakeZImageTransformer):
+    """The fake plus the vanilla forward the capture's first-step self-check compares
+    against: identity prelude, layers adding 111 in total, negated image part."""
+
+    def __call__(self, *, timestep: Any, x: mx.array, cap_feats: mx.array, sigmas: mx.array) -> mx.array:
+        return -(x + 111.0)
+
+
+class _FakeZImageFlux:
+    """Drives `flux._predict` the way ZImage.generate_image does: one factory call per
+    generation, then one predict call per step (positive + negative encodings)."""
+
+    def __init__(self, *, raise_at_step: int | None = None) -> None:
+        self.transformer = _CallableFakeZImage()
+        self._raise_at_step = raise_at_step
+
+    def generate_image(self, **kw: Any) -> None:
+        predict = self._predict(self.transformer)
+        for step in range(kw["num_inference_steps"]):
+            if step == self._raise_at_step:
+                raise RuntimeError("interrupted")
+            predict(
+                mx.full((_X_SEQ, _DIM), float(step + 1)),
+                mx.array([0.5]),
+                mx.array([1.0, 0.0]),
+                mx.full((_CAP_SEQ, _DIM), 7.0),
+                mx.full((_CAP_SEQ, _DIM), -7.0),
+                kw["guidance"],
+            )
+
+
+@pytest.mark.parametrize("raise_at_step", [None, 3], ids=["completed", "raised-mid-capture"])
+def test_capture_releases_the_last_step_after_the_prompt(monkeypatch, raise_at_step):
+    """bug caught: a finished (or interrupted) prompt's reducer still holding its last
+    step's signals and main outputs, so main()'s list of reducers keeps 10 prompts x 4
+    arrays alive until the report is written. Only the pair floats may survive."""
+    made: list[Any] = []
+
+    class _Recording(cz._ZImagePairReducer):
+        def __init__(self) -> None:
+            super().__init__()
+            made.append(self)
+
+    monkeypatch.setattr(cz, "_ZImagePairReducer", _Recording)
+    flux = _FakeZImageFlux(raise_at_step=raise_at_step)
+    if raise_at_step is None:
+        cz._capture_one_prompt(flux, "p")
+    else:
+        with pytest.raises(RuntimeError, match="interrupted"):
+            cz._capture_one_prompt(flux, "p")
+    (reducer,) = made
+    expected_steps = cz.NUM_INFERENCE_STEPS if raise_at_step is None else raise_at_step
+    assert reducer.steps == expected_steps
+    assert len(reducer.series("B")[0]) == expected_steps - 1  # the pair floats are kept
+    assert _held_arrays(reducer) == 0

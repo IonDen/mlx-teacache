@@ -62,7 +62,7 @@ def apply(
 
     import contextlib
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation raises after the first, all preceding mutations are reversed.
     _rollbacks_so_far: list[Any] = []
 
@@ -92,7 +92,7 @@ def apply(
         raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
-    #    callback + restores generate_image. NO stats finalize call (audit F2).
+    #    callback + restores generate_image. No stats finalize call.
     def _restore_transformer() -> None:
         flux.transformer = original_transformer
 
@@ -113,7 +113,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

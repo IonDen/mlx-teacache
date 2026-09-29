@@ -13,7 +13,7 @@ from typing import Any
 # Our `poly_eval` uses the same high-to-low convention (see gate.py). The
 # earlier version of this constant had coefficients c3..c0 transcribed
 # incorrectly (predicted distances ~10x too large), which prevented the
-# default rel_l1_thresh=0.25 from ever skipping a step on FLUX.1-dev. Fixed
+# default rel_l1_thresh=0.20 from ever skipping a step on FLUX.1-dev. Fixed
 # 2026-05-15; verified via the test_image_quality_flux1.py SSIM gate that
 # the cache now engages at the documented threshold.
 #

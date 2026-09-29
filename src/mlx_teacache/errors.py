@@ -90,13 +90,13 @@ class InvalidStepWindowError(TeaCacheError):
         *,
         skip_first: int,
         skip_last: int,
-        num_steps: int,  # legacy alias for active count
+        num_steps: int,  # accepted alias of active_num_steps; the built-in callers still pass this
         nominal_num_inference_steps: int | None = None,
         active_num_steps: int | None = None,
     ) -> None:
-        # Resolve which value represents the "active" denoising step count.
-        # New callers may pass active_num_steps explicitly; old callers pass it
-        # via the legacy `num_steps` keyword.
+        # active_num_steps is the preferred keyword for the active denoising step
+        # count; num_steps is accepted as an alias and is what the built-in callers
+        # pass today.
         active = num_steps if active_num_steps is None else active_num_steps
 
         if nominal_num_inference_steps is not None and nominal_num_inference_steps != active:
@@ -114,7 +114,7 @@ class InvalidStepWindowError(TeaCacheError):
         super().__init__("skip_first_n_steps + skip_last_n_steps must be < active denoising steps" + tail)
         self.skip_first = skip_first
         self.skip_last = skip_last
-        self.num_steps = num_steps  # legacy attribute name preserved
+        self.num_steps = num_steps  # the value passed as num_steps
         self.nominal_num_inference_steps = nominal_num_inference_steps
         self.active_num_steps = active
         # Raw constructor inputs, so a round trip re-derives the same message and attributes.
@@ -132,14 +132,13 @@ class InvalidStepWindowError(TeaCacheError):
 
 class MissingGenerationContextError(TeaCacheError):
     def __init__(self, detail: str | None = None) -> None:
-        msg = (
-            "FLUX.2 generation started but no fresh generation context was captured. "
+        # A detail comes from a raiser whose text already carries the remedy.
+        msg = detail or (
+            "A generation started but no fresh generation context was captured. "
             "This usually means flux.callbacks was replaced or cleared after apply_teacache(), "
-            "or a previous generation crashed before lifecycle cleanup completed. "
+            "or a previous generation crashed before cleanup. "
             "Call handle.restore() and apply_teacache() again."
         )
-        if detail:
-            msg = f"{msg} (detail: {detail})"
         super().__init__(msg)
         self.detail = detail
 

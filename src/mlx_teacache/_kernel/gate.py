@@ -47,8 +47,8 @@ def poly_eval(coeffs: tuple[float, float, float, float, float], x: float) -> flo
 def mean_abs_rel_l1(current: mx.array, previous: mx.array) -> float:
     """Mean absolute relative L1 distance: mean(|current - previous|) / mean(|previous|).
 
-    The element-wise difference stays in the inputs' dtype (bf16 in every shipped
-    variant); the two reductions return float32 scalars. ``mx.mean`` on a bf16
+    The element-wise difference stays in the inputs' dtype (bf16 for FLUX.2 / Z-Image;
+    fp32 for FLUX.1 / Krea / Qwen-Image, where the cast is a no-op); the two reductions return float32 scalars. ``mx.mean`` on a bf16
     array accumulates in float32 but rounds its result back to bf16, up to half
     a bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 %
     on their ratio; that rounding is not something a polynomial calibrated on

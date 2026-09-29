@@ -1,5 +1,5 @@
 # src/mlx_teacache/integrations/mflux/lifecycle.py
-"""Lifecycle helpers for both FLUX.1 and FLUX.2:
+"""Lifecycle helpers shared by every variant family:
 
 1. _GenerationContextCallback — registered on flux.callbacks. Implements all
    three protocols (BeforeLoopCallback, AfterLoopCallback, InterruptCallback)
@@ -7,19 +7,12 @@
 
 2. wrap_generate_image — replaces flux.generate_image with a try/finally
    wrapper that clears handle._gen_ctx and discards/commits in-progress stats
-   based on completion status (per spec §4.5 + §5.5 v2.5).
+   based on completion status.
 
 Both signatures match mflux/callbacks/callback.py exactly. Extra **kwargs are
 accepted for forward-compat with future mflux releases that add new keyword
 arguments (e.g., kontext_image).
-
-v0.4.1 changes:
-- Dropped the flux2_cfg_fallback warning-suppression block in call_before_loop.
-  The CFG path is now gated (Task 4/5), so skipping is achievable even at
-  guidance > 1.0; the old suppression was masking legitimate no-benefit warnings.
-- call_after_loop now reads cfg_was_active from
-  _staging.cfg_was_active (set by the predict closure on first CFG branch entry)
-  instead of the obsolete cfg_fallback > 0 derivation."""
+"""
 
 import warnings
 from dataclasses import dataclass
@@ -150,9 +143,8 @@ class GenerationContextCallback:
             # discard stats.
             active_num_steps = _active_step_count(config)
 
-        # v0.4.1+: cfg_was_active is set by the predict closure on first CFG branch entry.
-        # The old cfg_fallback>0 derivation is obsolete because production no longer
-        # records "cfg-fallback" decisions.
+        # cfg_was_active is set by the predict closure on first CFG branch entry
+        # (no "cfg-fallback" decisions are recorded any more).
         self._handle._pending_finalize = PendingFinalize(
             num_inference_steps=active_num_steps,
             cfg_was_active=self._handle._state.stats._staging.cfg_was_active,
@@ -186,7 +178,7 @@ class GenerationContextCallback:
 
 def wrap_generate_image(flux: Any, handle: Any) -> None:
     """Replace flux.generate_image with a try/finally wrapper that:
-    - Verifies our lifecycle callback is still registered (per audit medium #4).
+    - Verifies our lifecycle callback is still registered.
     - On natural completion: finalizes staged stats via _pending_finalize.
     - On any other exit: discards staged stats so failed runs leave no trace.
     - Always clears _gen_ctx so context can't leak across runs.
@@ -202,7 +194,7 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
     original = flux.generate_image  # bound regardless of source
 
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        # Per audit medium #4: verify our lifecycle callback is still registered
+        # Verify our lifecycle callback is still registered
         # BEFORE the generation runs. If the user replaced or cleared
         # flux.callbacks after apply_teacache(), we must fail loudly rather than
         # silently disable img2img rejection / stats finalization.

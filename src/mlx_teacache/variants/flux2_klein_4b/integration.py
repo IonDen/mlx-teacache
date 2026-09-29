@@ -78,7 +78,7 @@ def apply(
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation after callback registration raises, preceding mutations
     # are reversed. Start with the callback unregister.
     from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
@@ -115,7 +115,7 @@ def apply(
     # No try needed: _predict assignment is the last mutation; fall through.
 
     # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
-    #    Finalizer unsubscribes the callback. NO stats finalize (audit F2).
+    #    Finalizer unsubscribes the callback. No stats finalize.
     def _restore_predict() -> None:
         if _predict_was_instance_attr:
             flux._predict = _original_predict
@@ -133,7 +133,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

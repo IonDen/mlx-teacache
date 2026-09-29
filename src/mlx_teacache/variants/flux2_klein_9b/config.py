@@ -14,9 +14,8 @@ from typing import Any
 # Note: at the package default rel_l1_thresh=0.20 these coefficients do
 # not trigger any skips on Klein 9B's 8-step distilled schedule — the
 # empirical y range starts at 0.25 (every adjacent-step body_out change
-# exceeds the threshold). Apply does not raise or warn at this state;
-# the wrapper is still useful through `mx.compile` avoidance on chips
-# that compile `_predict`.
+# exceeds the threshold). apply_teacache warns at apply time
+# (TeaCacheNoBenefitWarning) unless you pass coefficients.
 #
 # Stored verbatim; do not hand-edit. New calibrations bump revision.
 COEFFICIENTS: tuple[float, float, float, float, float] = (

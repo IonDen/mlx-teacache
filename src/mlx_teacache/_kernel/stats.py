@@ -1,5 +1,5 @@
 # src/mlx_teacache/_kernel/stats.py
-"""Canonical home for stats types (extracted in v0.6.0).
+"""Canonical home for the stats types.
 
 Public stats with a private staging buffer.
 
@@ -7,18 +7,17 @@ Public counters (computed_count, forced_count, skipped_count, numerical_miss_cou
 cfg_fallback_steps, generations, last_generation) reflect only committed
 generations. record() updates a staging buffer; finalize_last_generation()
 commits + snapshots; discard_current_generation() zeroes the staging buffer
-(called by the generate_image try/finally when a run does not complete naturally,
-per spec §4.5 v2.5). This makes "failed runs leave no trace in public stats"
+(called by the generate_image try/finally when a run does not complete naturally).
+This makes "failed runs leave no trace in public stats"
 mechanical rather than aspirational.
 
-v0.4.1 changes:
-- _Staging.cfg_was_active (bool): set directly by the predict closure on first
-  CFG branch entry. The lifecycle reads this flag at after_loop time to populate
-  GenerationStats.cfg_was_active. Replaces the old derivation from
-  cfg_fallback_steps > 0, which is no longer meaningful in v0.4.1+.
-- cfg_fallback_steps: deprecated since v0.4.1; always 0. The cfg-fallback
-  decision kind has been retired. Use GenerationStats.cfg_was_active instead.
-  Slated for removal in v1.0."""
+_Staging.cfg_was_active (bool) is set directly by the predict closure on first
+CFG branch entry; the lifecycle reads it at after_loop time to populate
+GenerationStats.cfg_was_active.
+
+cfg_fallback_steps is deprecated and always 0 (the cfg-fallback decision kind
+no longer exists). Use GenerationStats.cfg_was_active instead. Slated for
+removal in v1.0."""
 
 from dataclasses import dataclass, field
 from typing import Literal
@@ -80,7 +79,8 @@ class TeaCacheStats:
     forced_count: int = 0
     skipped_count: int = 0
     numerical_miss_count: int = 0
-    cfg_fallback_steps: int = 0  # Deprecated since v0.4.1; always 0. Use GenerationStats.cfg_was_active. Slated for removal in v1.0.
+    # Deprecated; always 0. Use GenerationStats.cfg_was_active. Slated for removal in v1.0.
+    cfg_fallback_steps: int = 0
     last_generation: GenerationStats | None = None
     _staging: _Staging = field(default_factory=_Staging)
     _frozen: bool = False

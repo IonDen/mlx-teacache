@@ -37,15 +37,12 @@ class TeaCacheState:
         """Clear all per-generation fields. Called by:
         - ``GenerationContextCallback.call_before_loop`` (in
           ``integrations/mflux/lifecycle.py``) — the sole owner of per-generation
-          cache reset as of v0.2.0. Previously this was called from FLUX.1's
-          forward (`if t == 0:`) and FLUX.2's predict closure (`if not
-          context_consumed:`); both call sites were removed when lifecycle took
-          exclusive ownership so img2img generations (which start at `t > 0`)
-          reset correctly.
+          cache reset. The forwards do not reset on `t == 0`, so img2img
+          generations (which start at `t > 0`) reset correctly.
 
         Clears both ``cached_residual`` (positive branch) and
         ``cached_residual_neg`` (negative branch) to prevent cross-generation
-        pollution under CFG (v0.4.1+).
+        pollution under CFG.
         """
         self.step_counter = 0
         self.previous_mod_input = None

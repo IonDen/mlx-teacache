@@ -1,7 +1,7 @@
-"""FLUX.1 dev integration. Byte-for-byte port from v0.5.x:
-- src/mlx_teacache/integrations/mflux/flux1.py::ProxyFlux1Transformer
-- src/mlx_teacache/integrations/mflux/forward.py FLUX.1 forward block
-- src/mlx_teacache/api.py::apply_teacache FLUX.1 branch
+"""FLUX.1 dev integration, shared by the other FLUX.1 variants:
+- ProxyFlux1Transformer: an nn.Module standing in for flux.transformer.
+- flux1_forward_with_gate: the FLUX.1 forward with the gate between body and tail.
+- apply(): installs the proxy and the lifecycle hooks.
 
 mflux is imported only inside this module. The package registry loads
 this lazily, after detect.matches() wins.
@@ -78,7 +78,7 @@ class _InternalHandle:
         self._callback_instance: Any = None
 
 
-# ----- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/flux1.py -----
+# ----- Proxy transformer -----
 
 
 class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
@@ -164,8 +164,7 @@ class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
             return getattr(inner, name)
 
 
-# ----- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/forward.py -----
-# FLUX.1 block only.
+# ----- Gated FLUX.1 forward -----
 
 from mlx_teacache.errors import (  # noqa: E402
     InternalStateError,
@@ -280,7 +279,7 @@ def flux1_forward_with_gate(
     """Replacement for mflux.models.flux.model.flux_transformer.transformer.Transformer.__call__
     with TeaCache gating inserted between body and tail.
 
-    img2img is supported as of v0.2.0. The forward path uses state.step_counter
+    img2img is supported. The forward path uses state.step_counter
     (0-based, per-generation) rather than the scheduler's absolute `t` for gate
     indexing, so img2img runs starting mid-schedule still index correctly.
 
@@ -460,7 +459,7 @@ def apply(
 
     import contextlib
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation raises after the first, all preceding mutations are reversed.
     _rollbacks_so_far: list[Any] = []
 
@@ -494,7 +493,7 @@ def apply(
         raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
-    #    callback + restores generate_image. NO stats finalize call (audit F2).
+    #    callback + restores generate_image. No stats finalize call.
     def _restore_transformer() -> None:
         flux.transformer = original_transformer
 
@@ -515,7 +514,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

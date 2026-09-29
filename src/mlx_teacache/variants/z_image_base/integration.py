@@ -36,7 +36,7 @@ from mlx_teacache.integrations.mflux.lifecycle import (
     wrap_generate_image,
 )
 
-from .config import COEFFICIENTS, DEFAULT_THRESH
+from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
 
 _PROVENANCE = Provenance(
     source="builtin",
@@ -84,6 +84,7 @@ class _InternalHandle:
         coefficients: tuple[float, float, float, float, float],
         skip_first_n_steps: int,
         skip_last_n_steps: int,
+        calibrated_range: tuple[float, float] | None = None,
     ) -> None:
         self._state = _InternalHandleState()
         self._gen_ctx = _GenerationContext()
@@ -91,6 +92,8 @@ class _InternalHandle:
         self.coefficients = coefficients
         self.skip_first_n_steps = skip_first_n_steps
         self.skip_last_n_steps = skip_last_n_steps
+        # (min, max) rel_l1 the coefficients were fitted on; None = evaluate the raw delta.
+        self.calibrated_range = calibrated_range
         self._generate_image_was_instance_attr: bool = False
         self._original_generate_image: Any = None
         self._pending_finalize: Any = None
@@ -272,6 +275,7 @@ def zimage_forward_with_gate(
         num_steps=handle._gen_ctx.active_num_steps,
         step_idx=state.step_counter,
         mod_in=signal_b,
+        calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
     state.last_timestep = timestep_val
@@ -352,6 +356,7 @@ def zimage_cfg_forward_with_gate(
         num_steps=handle._gen_ctx.active_num_steps,
         step_idx=state.step_counter,
         mod_in=signal_b,
+        calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
     state.last_timestep = timestep_val
@@ -490,6 +495,8 @@ def apply(
     internal = _InternalHandle(
         rel_l1_thresh=resolved_thresh,
         coefficients=resolved_coeffs,
+        # The clamp belongs to this variant's fit, never to caller-supplied coefficients.
+        calibrated_range=CALIBRATED_RANGE if coefficients is None else None,
         skip_first_n_steps=skip_first_n_steps,
         skip_last_n_steps=skip_last_n_steps,
     )

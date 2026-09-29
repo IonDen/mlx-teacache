@@ -14,6 +14,8 @@ Every model draws the same scene with seed 42. The exact prompt each one ran wit
 
 FLUX.1 [dev] and FLUX.1 Krea [dev] render at 768×1024. FLUX.2 [klein] base 4B and Z-Image render at 864×1152, about one megapixel, in 8-bit weights. FLUX.2 [klein] base 9B runs 8-bit too, but at 576×768: at 864×1152 its first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 its three-step memory probe failed the harness's 20 % host-free check, with other apps open on the Mac at the time. Qwen-Image renders at 672×896, the size its memory probe allowed.
 
+These pairs were rendered with mlx-teacache 0.11.1. In 0.12.0 the gate stopped pricing an input change smaller than anything in its calibration as almost no change. That only touches the FLUX.2 [klein] base, Z-Image and Qwen-Image B columns, and only on steps whose change falls outside that range: for the Klein base 4B run below, a replay of its gate predicts 10 skipped steps instead of 11. The Z-Image, Klein base 9B and Qwen-Image runs were not traced.
+
 ## FLUX.1 [dev]
 
 <!-- COMPARISON:flux1-dev:summary START -->
@@ -51,7 +53,7 @@ On this run: 1.62× faster (1.64× with preview decoding left out) · SSIM 0.87 
 On this run: 1.27× faster (1.27× with preview decoding left out) · SSIM 0.94 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_klein_base_4b.json) · [More details →](docs/comparison/klein-base-4b.md)
 <!-- COMPARISON:klein-base-4b:summary END -->
 
-At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this variant's 1.22× multi-run speedup into 1.20× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead.
+At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead.
 
 ## Z-Image
 

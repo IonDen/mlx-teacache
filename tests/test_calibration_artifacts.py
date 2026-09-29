@@ -187,3 +187,46 @@ def test_krea_config_coefficients_match_the_committed_fit() -> None:
     assert _isclose_seq(COEFFICIENTS, fit, rel_tol=1e-9, abs_tol=1e-12), (
         f"config {COEFFICIENTS} != scripts/_calibration_flux1_krea_dev.json {fit}"
     )
+
+
+# --- CALIBRATED_RANGE: the x-range each origin-constrained fit was fitted on (backlog 0094) ---------------------
+
+
+@pytest.mark.parametrize(
+    ("variant", "calibration", "signal"),
+    [
+        ("flux2_klein_base_4b", "_calibration_flux2_klein_base_4b.json", None),
+        ("z_image_base", "_calibration_z_image.json", "B"),
+        ("qwen_image", "_calibration_qwen.json", "A"),
+    ],
+)
+def test_calibrated_range_is_the_x_range_of_the_fit_the_coefficients_came_from(
+    variant: str, calibration: str, signal: str | None
+) -> None:
+    """Bug: CALIBRATED_RANGE copied from the wrong signal (z-image ships signal B), from another variant, or
+    hand-edited, so the gate clamps deltas into a range its coefficients were never fitted on."""
+    data = json.loads((_REPO_ROOT / "scripts" / calibration).read_text())
+    fit = data if signal is None else data["signals"][signal]
+    config = importlib.import_module(f"mlx_teacache.variants.{variant}.config")
+    assert (fit["x_min"], fit["x_max"]) == config.CALIBRATED_RANGE
+
+
+def test_klein_base_9b_reuses_base_4b_calibrated_range() -> None:
+    """Bug: base-9b reuses base-4b's coefficients but not their range (or a stale copy of it)."""
+    from mlx_teacache.variants.flux2_klein_base_4b.config import CALIBRATED_RANGE as BASE_4B
+    from mlx_teacache.variants.flux2_klein_base_9b.config import CALIBRATED_RANGE as BASE_9B
+
+    assert BASE_9B is BASE_4B
+
+
+def test_only_the_origin_constrained_in_repo_fits_declare_a_calibrated_range() -> None:
+    """Bug: the clamp spreads to FLUX.1 dev/schnell (upstream tuples, no recorded domain), to Krea (a
+    free-intercept fit whose extrapolation below its data prices more change, not less) or to the distilled
+    Klein fits, without a deliberate decision."""
+    declared = []
+    for _, subname, ispkg in pkgutil.iter_modules(_variants_pkg.__path__):
+        if ispkg:
+            config = importlib.import_module(f"mlx_teacache.variants.{subname}.config")
+            if hasattr(config, "CALIBRATED_RANGE"):
+                declared.append(config.META["variant_id"])
+    assert sorted(declared) == ["flux2-klein-base-4b", "flux2-klein-base-9b", "qwen-image", "z-image-base"]

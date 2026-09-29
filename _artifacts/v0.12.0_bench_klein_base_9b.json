@@ -1,0 +1,173 @@
+{
+  "schema_version": 3,
+  "isolation": "subprocess-per-rep",
+  "chunk_order": "rep-outer",
+  "memory_saver": false,
+  "variant": "klein-base-9b",
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 27.0.0",
+    "mlx_teacache_version": "0.11.2.dev1+g992128837.d20260925",
+    "git_commit": "ec4d110d2bdc41fc10fa4ea6148bf58043680933",
+    "git_dirty": false,
+    "mflux_version": "0.18.0",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "vanilla_seconds": [
+    517.3241779169766,
+    517.3778243750567,
+    517.2314928339329
+  ],
+  "wrapper_seconds": [
+    377.52254116605036,
+    377.4529914580053,
+    387.5040170419961
+  ],
+  "vanilla_median": 517.3241779169766,
+  "wrapper_median": 377.52254116605036,
+  "speedup_median": 1.3703133495529094,
+  "skipped_counts": [
+    13,
+    13,
+    13
+  ],
+  "computed_counts": [
+    35,
+    35,
+    35
+  ],
+  "skip_patterns": [
+    "CCCSCSCCCSCCCSCSCSCCCCSCSCSCSCCSCSCCCCCCCCCCCCCCSC",
+    "CCCSCSCCCSCCCSCSCSCCCCSCSCSCSCCSCSCCCCCCCCCCCCCCSC",
+    "CCCSCSCCCSCCCSCSCSCCCCSCSCSCSCCSCSCCCCCCCCCCCCCCSC"
+  ],
+  "max_consecutive_skips": [
+    1,
+    1,
+    1
+  ],
+  "bench_images_dir": "tests/_artifacts/bench_images_0094/klein-base-9b",
+  "vanilla_peak_memory_gb": [
+    21.967418724671006,
+    21.97706493549049,
+    21.97647073864937
+  ],
+  "wrapper_peak_memory_gb": [
+    9.90528755262494,
+    9.842802811414003,
+    9.842802811414003
+  ],
+  "vanilla_load_peak_memory_gb": [
+    8.73953104019165e-06,
+    8.73953104019165e-06,
+    8.73953104019165e-06
+  ],
+  "vanilla_loop_peak_memory_gb": [
+    21.967418724671006,
+    21.97706493549049,
+    21.97647073864937
+  ],
+  "wrapper_load_peak_memory_gb": [
+    8.73953104019165e-06,
+    8.73953104019165e-06,
+    8.73953104019165e-06
+  ],
+  "wrapper_loop_peak_memory_gb": [
+    9.90528755262494,
+    9.842802811414003,
+    9.842802811414003
+  ],
+  "vanilla_cache_memory_gb": [
+    2.1104784701019526,
+    2.116992035880685,
+    2.1052608881145716
+  ],
+  "wrapper_cache_memory_gb": [
+    2.1030579153448343,
+    2.112657593563199,
+    2.120823923498392
+  ],
+  "chunk_timestamps": {
+    "vanilla": [
+      [
+        "2026-09-28T18:50:56.184054+00:00",
+        "2026-09-28T18:59:35.933089+00:00"
+      ],
+      [
+        "2026-09-28T19:14:30.475647+00:00",
+        "2026-09-28T19:23:10.025733+00:00"
+      ],
+      [
+        "2026-09-28T20:00:29.646952+00:00",
+        "2026-09-28T20:09:08.816913+00:00"
+      ]
+    ],
+    "wrapper_nogate": [
+      [
+        "2026-09-28T18:59:36.752455+00:00",
+        "2026-09-28T19:08:07.363062+00:00"
+      ],
+      [
+        "2026-09-28T19:23:10.955812+00:00",
+        "2026-09-28T19:31:41.517964+00:00"
+      ],
+      [
+        "2026-09-28T20:09:09.845542+00:00",
+        "2026-09-28T20:17:42.214729+00:00"
+      ]
+    ],
+    "wrapper": [
+      [
+        "2026-09-28T19:08:07.743758+00:00",
+        "2026-09-28T19:14:27.626578+00:00"
+      ],
+      [
+        "2026-09-28T19:31:41.851169+00:00",
+        "2026-09-28T19:38:01.262449+00:00"
+      ],
+      [
+        "2026-09-28T20:17:42.567171+00:00",
+        "2026-09-28T20:24:12.057540+00:00"
+      ]
+    ]
+  },
+  "nogate_seconds": [
+    508.2013849579962,
+    508.25265766703524,
+    510.0634266670095
+  ],
+  "nogate_median": 508.25265766703524,
+  "compile_avoidance_ratio": 1.0178484462660387,
+  "gating_ratio": 1.3462842671518367,
+  "combined_ratio": 1.3703133495529094,
+  "nogate_peak_memory_gb": [
+    9.842802811414003,
+    10.005993653088808,
+    9.697755329310894
+  ],
+  "nogate_load_peak_memory_gb": [
+    8.73953104019165e-06,
+    8.73953104019165e-06,
+    8.73953104019165e-06
+  ],
+  "nogate_loop_peak_memory_gb": [
+    9.842802811414003,
+    10.005993653088808,
+    9.697755329310894
+  ],
+  "nogate_cache_memory_gb": [
+    2.1058063972741365,
+    2.1099291313439608,
+    2.099742963910103
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "schema_version": 3,
+  "isolation": "subprocess-per-rep",
+  "chunk_order": "rep-outer",
+  "memory_saver": false,
+  "variant": "klein-base-4b",
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 27.0.0",
+    "mlx_teacache_version": "0.11.2.dev1+g992128837.d20260925",
+    "git_commit": "ec4d110d2bdc41fc10fa4ea6148bf58043680933",
+    "git_dirty": false,
+    "mflux_version": "0.18.0",
+    "quantize": 4,
+    "dtype": "bf16"
+  },
+  "vanilla_seconds": [
+    238.61335129197687,
+    237.45589062490035,
+    235.53702029190026
+  ],
+  "wrapper_seconds": [
+    206.11014312505722,
+    197.82583020895254,
+    194.9930170419393
+  ],
+  "vanilla_median": 237.45589062490035,
+  "wrapper_median": 197.82583020895254,
+  "speedup_median": 1.2003280379214825,
+  "skipped_counts": [
+    8,
+    8,
+    8
+  ],
+  "computed_counts": [
+    40,
+    40,
+    40
+  ],
+  "skip_patterns": [
+    "CCCSCSCSCCCCSCSCSCCCCCCSCCCCCCCCCCCCCCCCCCCCCCCSCC",
+    "CCCSCSCSCCCCSCSCSCCCCCCSCCCCCCCCCCCCCCCCCCCCCCCSCC",
+    "CCCSCSCSCCCCSCSCSCCCCCCSCCCCCCCCCCCCCCCCCCCCCCCSCC"
+  ],
+  "max_consecutive_skips": [
+    1,
+    1,
+    1
+  ],
+  "bench_images_dir": "tests/_artifacts/bench_images_0094/klein-base-4b",
+  "vanilla_peak_memory_gb": [
+    10.666642690077424,
+    10.729184182360768,
+    10.729157332330942
+  ],
+  "wrapper_peak_memory_gb": [
+    5.540696144104004,
+    5.478209011256695,
+    5.540739059448242
+  ],
+  "vanilla_load_peak_memory_gb": [
+    8.009374141693115e-06,
+    8.009374141693115e-06,
+    8.009374141693115e-06
+  ],
+  "vanilla_loop_peak_memory_gb": [
+    10.666642690077424,
+    10.729184182360768,
+    10.729157332330942
+  ],
+  "wrapper_load_peak_memory_gb": [
+    8.009374141693115e-06,
+    8.009374141693115e-06,
+    8.009374141693115e-06
+  ],
+  "wrapper_loop_peak_memory_gb": [
+    5.540696144104004,
+    5.478209011256695,
+    5.540739059448242
+  ],
+  "vanilla_cache_memory_gb": [
+    2.023898648098111,
+    2.0902738962322474,
+    2.1155586633831263
+  ],
+  "wrapper_cache_memory_gb": [
+    2.0059231016784906,
+    2.116003092378378,
+    2.117961023002863
+  ],
+  "chunk_timestamps": {
+    "vanilla": [
+      [
+        "2026-09-28T17:55:35.955935+00:00",
+        "2026-09-28T17:59:36.840421+00:00"
+      ],
+      [
+        "2026-09-28T18:07:03.175595+00:00",
+        "2026-09-28T18:11:02.625904+00:00"
+      ],
+      [
+        "2026-09-28T18:18:20.201794+00:00",
+        "2026-09-28T18:22:17.739758+00:00"
+      ]
+    ],
+    "wrapper_nogate": [
+      [
+        "2026-09-28T17:59:37.348244+00:00",
+        "2026-09-28T18:03:33.959612+00:00"
+      ],
+      [
+        "2026-09-28T18:11:03.074457+00:00",
+        "2026-09-28T18:14:59.393505+00:00"
+      ],
+      [
+        "2026-09-28T18:22:18.141769+00:00",
+        "2026-09-28T18:26:12.917636+00:00"
+      ]
+    ],
+    "wrapper": [
+      [
+        "2026-09-28T18:03:34.435088+00:00",
+        "2026-09-28T18:07:02.822366+00:00"
+      ],
+      [
+        "2026-09-28T18:14:59.782130+00:00",
+        "2026-09-28T18:18:19.839371+00:00"
+      ],
+      [
+        "2026-09-28T18:26:13.269083+00:00",
+        "2026-09-28T18:29:30.310641+00:00"
+      ]
+    ]
+  },
+  "nogate_seconds": [
+    234.30639849998988,
+    234.21600966597907,
+    232.69861941691488
+  ],
+  "nogate_median": 234.21600966597907,
+  "compile_avoidance_ratio": 1.0138328757438133,
+  "gating_ratio": 1.1839505964341945,
+  "combined_ratio": 1.2003280379214825,
+  "nogate_peak_memory_gb": [
+    5.540701866149902,
+    5.54068660736084,
+    5.540703289210796
+  ],
+  "nogate_load_peak_memory_gb": [
+    8.009374141693115e-06,
+    8.009374141693115e-06,
+    8.009374141693115e-06
+  ],
+  "nogate_loop_peak_memory_gb": [
+    5.540701866149902,
+    5.54068660736084,
+    5.540703289210796
+  ],
+  "nogate_cache_memory_gb": [
+    2.12256295979023,
+    2.115009356290102,
+    2.1149015855044127
+  ]
+}

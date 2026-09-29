@@ -31,7 +31,7 @@ from mlx_teacache.integrations.mflux.lifecycle import (
 # at the integration level (just carries state, gen_ctx, lifecycle hooks).
 from mlx_teacache.variants.flux1_dev.integration import _InternalHandle
 
-from .config import COEFFICIENTS, DEFAULT_THRESH
+from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
 
 _PROVENANCE = Provenance(
     source="builtin",
@@ -246,6 +246,7 @@ def flux2_forward_with_gate(
         num_steps=handle._gen_ctx.active_num_steps,
         step_idx=state.step_counter,
         mod_in=mod_in,
+        calibrated_range=handle.calibrated_range,
     )
 
     # 5. Stats record.
@@ -398,6 +399,7 @@ def flux2_cfg_forward_with_gate(
         num_steps=handle._gen_ctx.active_num_steps,
         step_idx=state.step_counter,
         mod_in=mod_in,
+        calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
     state.last_timestep = timestep_val
@@ -589,6 +591,8 @@ def apply(
     internal = _InternalHandle(
         rel_l1_thresh=resolved_thresh,
         coefficients=resolved_coeffs,
+        # The clamp belongs to this variant's fit, never to caller-supplied coefficients.
+        calibrated_range=CALIBRATED_RANGE if coefficients is None else None,
         skip_first_n_steps=skip_first_n_steps,
         skip_last_n_steps=skip_last_n_steps,
     )

@@ -19,23 +19,23 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_9b())
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 - `memory_cap_hint_gb: 24` — 32 GB unified memory headroom
 
-At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps, bf16, q4, mflux 0.18.0, v0.10.0 bench, 2026-08-15):
+At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps interleaved rep-outer, bf16, q4, mflux 0.18.0, v0.12.0 bench, 2026-09-28):
 
 | Condition | Median wall-clock | Peak memory |
 |---|---|---|
-| vanilla | 520.6 s | ~22 GB |
-| wrapper, no gate (compile-avoidance only) | 509.8 s | ~9.5 GB |
-| wrapper, gated (full TeaCache) | 379.1 s | ~9.5 GB |
+| vanilla | 517.3 s | ~22 GB |
+| wrapper, no gate (compile-avoidance only) | 508.3 s | ~9.8 GB |
+| wrapper, gated (full TeaCache) | 377.5 s | ~9.8 GB |
 
-- **Combined speedup: 1.37×** (v0.6.0 measured 1.36× at the same recipe; unchanged to within noise)
-- **Gating contribution (v0.4.1 effect): 1.34×**
+- **Combined speedup: 1.37×** (v0.10.0 measured 1.37× and v0.6.0 1.36× at the same recipe)
+- **Gating contribution (v0.4.1 effect): 1.35×**
 - **`mx.compile`-path avoidance (v0.4 effect): 1.02×** — small on this recipe/chip
-- Skip count stable across reps: 13 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row (max consecutive-skip streak 1)
-- SSIM 0.986 vs vanilla (carried over from v0.5.0 validation; visually equivalent)
+- Skip count stable across reps: 13 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row (max consecutive-skip streak 1), the same steps as before 0.12.0's calibrated-range clamp, which changes nothing at this recipe (the bench ran before the rule that always computes a change above the range was added; that rule was not traced on 9B)
+- SSIM 0.993 vs vanilla at this recipe (`_artifacts/v0.12.0_klein_base_ssim.json`)
 
-> **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. That measurement was inflated by same-process MLX state leakage in the v0.5.x bench harness: vanilla ran cold while the wrapper inherited warm MLX allocator state from it, so the wall-clock difference conflated the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness makes every condition cold and exposes the honest 1.36×; the v0.10.0 re-measurement lands at 1.37×.
+> **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. That measurement was inflated by same-process MLX state leakage in the v0.5.x bench harness: vanilla ran cold while the wrapper inherited warm MLX allocator state from it, so the wall-clock difference conflated the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness makes every condition cold and exposes the honest 1.36×; the v0.10.0 and v0.12.0 re-measurements land at 1.37×.
 
-Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.10.0_bench_klein_base_9b.json` (v0.6.0's at `_artifacts/v0.6.0_bench_klein_base_9b.json`); regenerate side-by-side images with `scripts/bench_comparison.py`.
+Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.12.0_bench_klein_base_9b.json` (v0.10.0's and v0.6.0's sit alongside it); regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 ## Coefficient provenance — intentional reuse
 

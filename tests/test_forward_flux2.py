@@ -134,6 +134,7 @@ def _make_handle(*, rel_l1_thresh: float, num_inference_steps: int = 4) -> Any:
     return SimpleNamespace(
         rel_l1_thresh=rel_l1_thresh,
         coefficients=coefficients,
+        calibrated_range=None,  # the real bridge's default: no clamp
         skip_first_n_steps=0,
         skip_last_n_steps=0,
         _state=state,

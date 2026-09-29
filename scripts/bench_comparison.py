@@ -130,6 +130,7 @@ def quality_probe_record(
         "prompt": prompt_for(recipe),
         "negative_prompt": recipe.negative_prompt,
         "negative_used": negative_used_for(recipe),
+        "gate_trace": result.get("gate_trace"),
         "generation_seconds": result["generation_seconds"],
         "peaks": {
             "mlx_peak_load_bytes": result["mlx_peak_load_bytes"],
@@ -420,7 +421,7 @@ def _run_generation(
         release_text_encoders,
     )
     from _comparison_recipes import SEED, prompt_for, teacache_kwargs
-    from _comparison_steps import decision_kinds, register_stamped_preview, split_steps
+    from _comparison_steps import decision_kinds, gate_trace, register_stamped_preview, split_steps
     from mlx_taef.integrations.mflux import LivePreviewCallback
 
     import mlx_teacache
@@ -549,6 +550,7 @@ def _run_generation(
             computed=kinds.count("computed"),
             max_consecutive_skips=telemetry["max_consecutive_skips"],
             skip_pattern=telemetry["skip_pattern"],
+            gate_trace=gate_trace(handle.stats.last_generation.decisions, steps),
         )
         handle.restore()
     return result

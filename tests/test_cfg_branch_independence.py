@@ -169,6 +169,7 @@ def _make_cfg_handle(*, num_inference_steps: int = 2) -> Any:
     return SimpleNamespace(
         rel_l1_thresh=1.0,
         coefficients=zero_coeffs,
+        calibrated_range=None,  # the real bridge's default: no clamp
         skip_first_n_steps=0,
         skip_last_n_steps=0,
         _state=state,

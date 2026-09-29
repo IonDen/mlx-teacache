@@ -33,3 +33,10 @@ def test_main_parses_through_the_validating_helper_exactly_once() -> None:
     # refusals in real use while their helper tests stay green.
     text = SCRIPT.read_text()
     assert text.count("args = _parse_and_validate()") == 1
+
+
+def test_run_generation_records_the_gate_trace_exactly_once() -> None:
+    # bug caught: the worker stops passing the committed decisions through gate_trace, so every probe record
+    # carries gate_trace=None and a threshold-independent skip is untraceable again (backlog 0094's question).
+    text = SCRIPT.read_text()
+    assert text.count("gate_trace=gate_trace(handle.stats.last_generation.decisions, steps)") == 1

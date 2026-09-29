@@ -460,6 +460,40 @@ def test_quality_probe_record_carries_the_condition_and_b_skip_telemetry() -> No
     assert a["teacache"] is None
 
 
+def test_quality_probe_record_carries_b_per_step_gate_trace() -> None:
+    """Bug: the probe record keeps only the S/C pattern, so a skip that happens at every threshold cannot be
+    traced back to the rel_l1 the gate measured on that step without re-running the model."""
+    recipe = cr.recipe_for("klein-base-4b")
+    base = {
+        "generation_seconds": 1.0,
+        "mlx_peak_load_bytes": 0,
+        "mlx_peak_encode_bytes": 0,
+        "mlx_peak_generation_bytes": 0,
+        "memory": {"peak_resident_bytes": 0, "peak_footprint_bytes": 0, "min_host_free_pct": 50.0},
+    }
+    trace = [
+        {"step": 0, "timestep": 1000.0, "kind": "forced", "rel_l1": None, "accumulated_distance": 0.0},
+        {"step": 1, "timestep": 997.2, "kind": "skipped", "rel_l1": 0.0071, "accumulated_distance": 0.049},
+    ]
+    b_result = {
+        **base,
+        "condition": "b",
+        "rel_l1_thresh": 0.08,
+        "skipped": 1,
+        "computed": 1,
+        "max_consecutive_skips": 1,
+        "skip_pattern": "CS",
+        "gate_trace": trace,
+    }
+    b = bc.quality_probe_record("K1t08", recipe, overrides={}, result=b_result, versions=V)
+    assert b["gate_trace"] == [
+        {"step": 0, "timestep": 1000.0, "kind": "forced", "rel_l1": None, "accumulated_distance": 0.0},
+        {"step": 1, "timestep": 997.2, "kind": "skipped", "rel_l1": 0.0071, "accumulated_distance": 0.049},
+    ]
+    a = bc.quality_probe_record("K1t08", recipe, overrides={}, result={**base, "condition": "a"}, versions=V)
+    assert a["gate_trace"] is None
+
+
 def test_quality_probe_record_negative_used_true_for_a_real_negative_that_reaches_the_model() -> None:
     """Bug: negative_used is hardcoded False, or true even when mflux would drop the negative."""
     recipe = cr.apply_overrides(cr.recipe_for("z-image-base"), negative_prompt="watermark")

@@ -6,7 +6,10 @@ from typing import Any
 
 
 def _rebuild(cls: type, kwargs: dict[str, Any]) -> Any:
-    """Unpickle helper for exceptions whose constructors are keyword-only."""
+    """Unpickle helper for exceptions whose constructors are keyword-only.
+
+    Each ``__reduce__`` below also returns the instance ``__dict__`` as state, so
+    ``add_note`` notes and attributes set after construction survive the round trip."""
     return cls(**kwargs)
 
 
@@ -41,6 +44,7 @@ class IncompatibleModelError(TeaCacheError):
                     "supported": self.supported,
                 },
             ),
+            self.__dict__,
         )
 
 
@@ -55,7 +59,11 @@ class AlreadyPatchedError(TeaCacheError):
         self.rel_l1_thresh = rel_l1_thresh
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (_rebuild, (type(self), {"variant_id": self.variant_id, "rel_l1_thresh": self.rel_l1_thresh}))
+        return (
+            _rebuild,
+            (type(self), {"variant_id": self.variant_id, "rel_l1_thresh": self.rel_l1_thresh}),
+            self.__dict__,
+        )
 
 
 class CalibrationError(TeaCacheError):
@@ -65,7 +73,7 @@ class CalibrationError(TeaCacheError):
         self.reason = reason
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (_rebuild, (type(self), {"variant_id": self.variant_id, "reason": self.reason}))
+        return (_rebuild, (type(self), {"variant_id": self.variant_id, "reason": self.reason}), self.__dict__)
 
 
 class TransformerShapeError(TeaCacheError):
@@ -81,7 +89,7 @@ class TransformerShapeError(TeaCacheError):
         self.actual = actual
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (type(self), (self.step_idx, self.expected, self.actual))
+        return (type(self), (self.step_idx, self.expected, self.actual), self.__dict__)
 
 
 class InvalidStepWindowError(TeaCacheError):
@@ -127,7 +135,7 @@ class InvalidStepWindowError(TeaCacheError):
         }
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (_rebuild, (type(self), dict(self._ctor)))
+        return (_rebuild, (type(self), dict(self._ctor)), self.__dict__)
 
 
 class MissingGenerationContextError(TeaCacheError):
@@ -143,7 +151,7 @@ class MissingGenerationContextError(TeaCacheError):
         self.detail = detail
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (type(self), (self.detail,))
+        return (type(self), (self.detail,), self.__dict__)
 
 
 class InternalStateError(TeaCacheError):

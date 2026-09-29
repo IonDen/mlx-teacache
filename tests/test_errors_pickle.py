@@ -67,3 +67,26 @@ def test_public_attributes_survive_the_round_trip() -> None:
         pickle.dumps(E.IncompatibleModelError(actual_type="X", actual_model_name="m", supported=["a"]))
     )
     assert (model.actual_type, model.actual_model_name, model.supported) == ("X", "m", ["a"])
+
+
+def _add_note(exc: BaseException, note: str) -> None:
+    # BaseException.add_note is 3.11+; on 3.10 the note list is a plain attribute.
+    if hasattr(exc, "add_note"):
+        exc.add_note(note)
+    else:
+        exc.__notes__ = [*getattr(exc, "__notes__", []), note]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("exc", CASES, ids=lambda e: f"{type(e).__name__}-{CASES.index(e)}")
+def test_notes_and_extra_attributes_survive_pickle_and_copy(exc) -> None:
+    """Bug caught: a custom __reduce__ returns no state, so add_note() notes and
+    attributes a caller or subclass set after construction vanish in a worker
+    process or a copy."""
+    fresh = pickle.loads(pickle.dumps(exc))
+    message = str(fresh)
+    _add_note(fresh, "while loading model A")
+    fresh.request_id = "r-17"
+    for clone in (pickle.loads(pickle.dumps(fresh)), copy.copy(fresh)):
+        assert clone.__notes__ == ["while loading model A"]
+        assert clone.request_id == "r-17"
+        assert str(clone) == message

@@ -40,7 +40,8 @@ CALIBRATED_RANGE: tuple[float, float] = (0.027887196237753466, 0.259141208835676
 # SSIM holds >= 0.99 through 0.12 (15/48 steps skipped, SSIM 0.9913) then cliffs
 # to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first default — just before
 # the cliff, near-indistinguishable from vanilla. Skip counts are deterministic;
-# the headline speedup is the 3-rep bench (scripts/_bench_z_image_*.json).
+# the headline speedup is the 3-rep bench (_artifacts/v0.10.0_bench_z_image.json;
+# the earlier v0.7.0 report is _artifacts/_bench_z_image_v0_7_0.json).
 DEFAULT_THRESH: float = 0.12
 
 RECIPES: dict[str, dict[str, Any]] = {

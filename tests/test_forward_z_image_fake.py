@@ -2,15 +2,21 @@
 
 The fake keeps the whole prelude an identity (patchify returns the latents and
 caption features as-is, embedders and pad masks are no-ops, no refiner layers),
-so `unified_in` is exactly `concat([latents, cap_feats])`. Main layer i adds a
-constant c_i = 1, 10, 100, so layer 0's output h1 differs from unified_in by 1
-and the full body residual `main_out - unified_in` is 111 everywhere. The tail
-is identity plus the vanilla negation, so a branch's noise is
+so `unified_in` is exactly `concat([latents, cap_feats])` along the sequence.
+Main layers 0 and 2 add the constants 1 and 100. Layer 1 adds 10 plus the mean of
+the caption slice of its input, so the body residual depends on the caption:
+with caption features +7 layer 1 sees a caption mean of 8 and the residual
+`main_out - unified_in` is 1 + 18 + 100 = 119 everywhere; with -7 it sees -6 and
+the residual is 1 + 4 + 100 = 105. Layer 0's output h1 differs from unified_in by
+1. The tail is identity plus the vanilla negation, so a branch's noise is
 `-main_out[:x_len]`.
 
-These pin the residual base of both forwards: the cache must store
-`main_out - unified_in`, and a skip must rebuild `unified_in + cached`, never
-from h1. Real-weights numerical parity lives in tests/test_parity_z_image.py.
+These pin the residual base of both forwards (the cache stores
+`main_out - unified_in`, a skip rebuilds `unified_in + cached`, never from h1),
+and, because the two CFG branches now differ, the CFG forward's branch wiring:
+the negative branch must skip on its own cached residual and the combine must
+start from the positive noise. Real-weights numerical parity lives in
+tests/test_parity_z_image.py.
 """
 
 from typing import Any
@@ -41,6 +47,14 @@ class _AddLayer:
         return x + self.c
 
 
+class _AddCaptionMeanLayer(_AddLayer):
+    """Adds c plus the mean of the caption rows of the stream, so a branch's residual
+    depends on its caption and the positive and negative branches differ."""
+
+    def __call__(self, *, x: mx.array, attn_mask: Any, freqs_cis: Any, t_emb: Any) -> mx.array:
+        return x + self.c + mx.mean(x[:, _X_SEQ:, :])
+
+
 class _FakeZImageTransformer:
     patch_size = 2
     f_patch_size = 1
@@ -55,7 +69,7 @@ class _FakeZImageTransformer:
         self.cap_embedder = [_identity, _identity]
         self.noise_refiner: list[Any] = []
         self.context_refiner: list[Any] = []
-        self.layers = [_AddLayer(1.0), _AddLayer(10.0), _AddLayer(100.0)]
+        self.layers = [_AddLayer(1.0), _AddCaptionMeanLayer(10.0), _AddLayer(100.0)]
 
     def t_embedder(self, t: mx.array) -> mx.array:
         return t
@@ -84,9 +98,9 @@ class _FakeZImageTransformer:
         return x
 
 
-def _handle() -> _InternalHandle:
+def _handle(rel_l1_thresh: float = 0.5) -> _InternalHandle:
     handle = _InternalHandle(
-        rel_l1_thresh=0.5,
+        rel_l1_thresh=rel_l1_thresh,
         coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ every gated step after the seed skips
         skip_first_n_steps=0,
         skip_last_n_steps=1,
@@ -104,12 +118,12 @@ def _decisions(handle: _InternalHandle) -> list[str]:
 
 
 def test_non_cfg_forward_caches_body_residual_and_rebuilds_from_unified_in():
-    """Bug caught: z_image_base/integration.py:292 `pre.unified_in + cached` -> `h1 + cached`,
-    or :286 `main_out - pre.unified_in` -> `main_out - h1`, stays green today.
+    """Bug caught: zimage_forward_with_gate rebuilding a skip as `h1 + cached` instead of
+    `pre.unified_in + cached`, or caching `main_out - h1` instead of `main_out - pre.unified_in`.
 
-    Seed at latents 1.0 caches residual 111; the forced skip at latents 2.0 must give
-    noise -(2 + 111) = -113 (h1 as the skip base gives -114, h1 as the residual base
-    gives a residual of 110 and -112)."""
+    Seed at latents 1.0 caches residual 119; the forced skip at latents 2.0 must give
+    noise -(2 + 119) = -121 (h1 as the skip base gives -122, h1 as the residual base
+    gives a residual of 118 and -120)."""
     transformer = _FakeZImageTransformer()
     handle = _handle()
 
@@ -125,23 +139,26 @@ def test_non_cfg_forward_caches_body_residual_and_rebuilds_from_unified_in():
 
     seed_out = step(1.0)
     assert mx.array_equal(
-        handle._state.cache.cached_residual, _full((1, _X_SEQ + _CAP_SEQ, _DIM), 111.0)
+        handle._state.cache.cached_residual, _full((1, _X_SEQ + _CAP_SEQ, _DIM), 119.0)
     ).item()
     skip_out = step(2.0)
 
     assert _decisions(handle) == ["computed", "skipped"]
-    assert mx.array_equal(seed_out, _full((_X_SEQ, _DIM), -112.0)).item()
-    assert mx.array_equal(skip_out, _full((_X_SEQ, _DIM), -113.0)).item()
+    assert mx.array_equal(seed_out, _full((_X_SEQ, _DIM), -120.0)).item()
+    assert mx.array_equal(skip_out, _full((_X_SEQ, _DIM), -121.0)).item()
 
 
 def test_cfg_forward_caches_both_body_residuals_and_rebuilds_from_unified_in():
-    """Bug caught: z_image_base/integration.py:382 `pre_pos.unified_in + cached` -> `h1_pos + cached`,
-    or :373/:374 `main_out_{pos,neg} - pre_{pos,neg}.unified_in` -> `- h1_{pos,neg}`, stays green today.
+    """Bug caught, in zimage_cfg_forward_with_gate: the negative branch skipping on the
+    positive `cached_residual` instead of `cached_residual_neg`; the combine starting from
+    `noise_neg` instead of `noise_pos`; a skip rebuilt as `h1_pos + cached`; a residual
+    cached as `main_out_{pos,neg} - h1_{pos,neg}`.
 
-    Both branches share the latents, so with correct residuals (111 each) the two
-    noises match and the CFG combine pos + 4 * (pos - neg) reduces to the positive
-    noise: -(2 + 111) = -113 on the skip step. Any residual or skip-base swap on one
-    branch shifts that branch by 1 and the combine by 4 or 5."""
+    Residuals are 119 (pos, caption +7) and 105 (neg, caption -7). Seed at latents 1.0:
+    noises -120 / -106, combine -120 + 4 * (-120 + 106) = -176. Skip at latents 2.0:
+    -121 / -107, combine -177. The neg skip on the pos residual gives -121 (the
+    branches cancel); a combine from noise_neg gives -162 on the seed; h1_pos as the
+    skip base gives -182; an h1-based pos or neg residual gives -172 or -181."""
     transformer = _FakeZImageTransformer()
     handle = _handle()
 
@@ -158,11 +175,33 @@ def test_cfg_forward_caches_both_body_residuals_and_rebuilds_from_unified_in():
         )
 
     seed_out = step(1.0)
-    expected_residual = _full((1, _X_SEQ + _CAP_SEQ, _DIM), 111.0)
-    assert mx.array_equal(handle._state.cache.cached_residual, expected_residual).item()
-    assert mx.array_equal(handle._state.cache.cached_residual_neg, expected_residual).item()
+    residual_shape = (1, _X_SEQ + _CAP_SEQ, _DIM)
+    assert mx.array_equal(handle._state.cache.cached_residual, _full(residual_shape, 119.0)).item()
+    assert mx.array_equal(handle._state.cache.cached_residual_neg, _full(residual_shape, 105.0)).item()
     skip_out = step(2.0)
 
     assert _decisions(handle) == ["computed", "skipped"]
-    assert mx.array_equal(seed_out, _full((_X_SEQ, _DIM), -112.0)).item()
-    assert mx.array_equal(skip_out, _full((_X_SEQ, _DIM), -113.0)).item()
+    assert mx.array_equal(seed_out, _full((_X_SEQ, _DIM), -176.0)).item()
+    assert mx.array_equal(skip_out, _full((_X_SEQ, _DIM), -177.0)).item()
+
+
+def test_cfg_forward_with_gating_off_combines_from_the_positive_noise():
+    """Bug caught: the threshold-0 path of zimage_cfg_forward_with_gate combining as
+    `noise_neg + g * (pos - neg)` instead of `noise_pos + g * (pos - neg)`.
+
+    Both bodies run in full: noises -120 (pos) and -106 (neg), combine
+    -120 + 4 * (-14) = -176; starting from noise_neg gives -162."""
+    transformer = _FakeZImageTransformer()
+    handle = _handle(rel_l1_thresh=0.0)
+    out = zimage_cfg_forward_with_gate(
+        transformer,
+        handle,
+        latents=_full((_X_SEQ, _DIM), 1.0),
+        timestep=mx.array([0.5]),
+        sigmas=mx.array([1.0, 0.5, 0.0]),
+        cap_feats_pos=_full((_CAP_SEQ, _DIM), 7.0),
+        cap_feats_neg=_full((_CAP_SEQ, _DIM), -7.0),
+        guidance=4.0,
+    )
+    assert _decisions(handle) == ["computed"]
+    assert mx.array_equal(out, _full((_X_SEQ, _DIM), -176.0)).item()

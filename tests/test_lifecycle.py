@@ -12,9 +12,12 @@ from mlx_teacache.integrations.mflux.lifecycle import (
     GenerationContext,
     GenerationContextCallback,
     PendingFinalize,
+    _callback_present_by_identity,
+    _remove_callback_by_identity,
     wrap_generate_image,
 )
 from mlx_teacache.stats import StepDecision, TeaCacheStats
+from tests._fakes import FaithfulCallbackRegistry
 
 
 @dataclass
@@ -210,23 +213,13 @@ def test_wrap_callback_replacement_raises_missing_context():
     from mlx_teacache.errors import MissingGenerationContextError
 
     handle = _FakeHandle()
-    # Pretend a callback was registered on the original registry.
-    cb_sentinel = object()
-    handle._callback_instance = cb_sentinel  # type: ignore[attr-defined]
+    # Register a hook-bearing callback on the original registry, as mflux does.
+    original = FaithfulCallbackRegistry()
+    cb = SimpleNamespace(call_before_loop=lambda **_: None)
+    original.register(cb)
+    handle._callback_instance = cb  # type: ignore[attr-defined]
 
-    class _RegistryWithCb:
-        before_loop_callbacks = [cb_sentinel]
-        in_loop_callbacks: list = []
-        after_loop_callbacks: list = []
-        interrupt_callbacks: list = []
-
-    class _ReplacedRegistry:
-        before_loop_callbacks: list = []
-        in_loop_callbacks: list = []
-        after_loop_callbacks: list = []
-        interrupt_callbacks: list = []
-
-    flux = SimpleNamespace(callbacks=_RegistryWithCb())
+    flux = SimpleNamespace(callbacks=original)
     flux.generate_image = lambda: "ok"
     wrap_generate_image(flux, handle)
 
@@ -234,7 +227,7 @@ def test_wrap_callback_replacement_raises_missing_context():
     assert flux.generate_image() == "ok"
 
     # Now replace callbacks (user does this)
-    flux.callbacks = _ReplacedRegistry()
+    flux.callbacks = FaithfulCallbackRegistry()
     with pytest.raises(MissingGenerationContextError):
         flux.generate_image()
 
@@ -276,3 +269,34 @@ def test_wrapper_releases_cached_arrays_when_generation_raises():
         flux.generate_image(prompt="x")
     assert cache.cached_residual is None
     assert cache.previous_mod_input is None
+
+
+_HOOKS = ("call_before_loop", "call_in_loop", "call_after_loop", "call_interrupt")
+_LISTS = ("before_loop", "in_loop", "after_loop", "interrupt")
+
+
+def test_remove_callback_by_identity_clears_all_four_lists():
+    """bug caught: restore() leaving the lifecycle callback registered on one
+    of mflux's four lists (e.g. after_loop), so it fires on the unpatched model."""
+    reg = FaithfulCallbackRegistry()
+    cb = SimpleNamespace(**{h: (lambda **_: None) for h in _HOOKS})
+    other = SimpleNamespace(**{h: (lambda **_: None) for h in _HOOKS})
+    reg.register(cb)
+    reg.register(other)
+
+    assert _remove_callback_by_identity(reg, cb) is True
+
+    for name in _LISTS:
+        assert getattr(reg, name) == [other], name
+
+
+@pytest.mark.parametrize("hook, list_name", list(zip(_HOOKS, _LISTS, strict=True)))
+def test_callback_present_by_identity_sees_each_list(hook, list_name):
+    """bug caught: the wrapper's registration check ignoring one of mflux's four
+    lists, so a callback registered only there reads as missing."""
+    reg = FaithfulCallbackRegistry()
+    cb = SimpleNamespace(**{hook: lambda **_: None})
+    reg.register(cb)
+    assert getattr(reg, list_name) == [cb]
+    assert _callback_present_by_identity(reg, cb) is True
+    assert _callback_present_by_identity(reg, SimpleNamespace()) is False

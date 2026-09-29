@@ -203,3 +203,116 @@ def test_positive_threshold_first_step_seeds_cache():
     _run_one_step(handle)
     assert handle._state.cache.cached_residual is not None
     assert handle._state.cache.previous_mod_input is not None
+
+
+# ---------------------------------------------------------------------------
+# Residual-carrying fake: skip reconstruction and CFG dispatch
+# ---------------------------------------------------------------------------
+
+
+class _MixingFlux2Block(_FakeFlux2Block):
+    """Joint block whose image stream picks up the mean of the text stream, so the
+    positive and negative prompts give different image outputs."""
+
+    def __call__(
+        self,
+        hidden_states: mx.array,
+        encoder_hidden_states: mx.array,
+        temb_mod_params_img: Any,
+        temb_mod_params_txt: Any,
+        image_rotary_emb: Any,
+    ) -> tuple[mx.array, mx.array]:
+        return encoder_hidden_states, hidden_states + mx.mean(encoder_hidden_states)
+
+
+class _AddFlux2SingleBlock:
+    """Single block that adds 3.0 to the whole concatenated stream."""
+
+    def __call__(
+        self,
+        hidden_states: mx.array,
+        temb_mod_params: Any,
+        image_rotary_emb: Any,
+    ) -> mx.array:
+        return hidden_states + 3.0
+
+
+class _ResidualFlux2Inner(_FakeFlux2Inner):
+    """Embedders pass their inputs through, so the body has a nonzero residual:
+    image stream += mean(text) + 3.0, text stream += 3.0."""
+
+    def __init__(self) -> None:
+        super().__init__(text_seq=2, img_seq=4, dim=8)
+        self.transformer_blocks = [_MixingFlux2Block()]
+        self.single_transformer_blocks = [_AddFlux2SingleBlock()]
+
+    def x_embedder(self, hidden_states: mx.array) -> mx.array:
+        return hidden_states
+
+    def context_embedder(self, encoder_hidden_states: mx.array) -> mx.array:
+        return encoder_hidden_states
+
+
+def _zero_coefficient_handle() -> Any:
+    from mlx_teacache.variants.flux1_dev.integration import _InternalHandle
+
+    handle = _InternalHandle(
+        rel_l1_thresh=0.5,
+        coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ every gated step after the seed skips
+        skip_first_n_steps=0,
+        skip_last_n_steps=1,
+    )
+    handle._gen_ctx.active_num_steps = 4
+    return handle
+
+
+def test_skip_step_adds_cached_residual_to_current_input():
+    """Bug caught: integration.py:282 `body_in_concat + state.cached_residual` -> `body_in_concat` stays green today.
+
+    Seed at hidden 1.0 with text 0.5 caches an image-stream residual of 0.5 + 3.0;
+    the forced skip at hidden 2.0 must return 2.0 + 3.5 = 5.5."""
+    inner = _ResidualFlux2Inner()
+    handle = _zero_coefficient_handle()
+
+    def step(hidden: float) -> mx.array:
+        return flux2_forward_with_gate(
+            inner,
+            handle,
+            hidden_states=mx.full((1, 4, 8), hidden),
+            encoder_hidden_states=mx.full((1, 2, 8), 0.5),
+            timestep=mx.array([1000.0]),
+            img_ids=mx.zeros((4, 3)),
+            txt_ids=mx.zeros((2, 3)),
+        )
+
+    seed_out = step(1.0)
+    skip_out = step(2.0)
+    assert [d.decision for d in handle._state.stats._staging.decisions] == ["computed", "skipped"]
+    assert mx.array_equal(seed_out, mx.full((1, 4, 8), 4.5)).item()
+    assert mx.array_equal(skip_out, mx.full((1, 4, 8), 5.5)).item()
+
+
+def test_predict_with_negative_prompt_runs_cfg_forward():
+    """Bug caught: integration.py:517 `cfg_active = <negative inputs present>` -> `cfg_active = False` stays green today.
+
+    With a negative prompt and guidance 4.0 the closure must mark CFG active and
+    return the CFG combine neg + 4 * (pos - neg): hidden 1.0, positive text 1.0,
+    negative text 0.25 gives 4.25 + 4 * 0.75 = 7.25. The non-CFG forward would
+    return 1.0 + 1.0 + 3.0 = 5.0."""
+    from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_predict_factory
+
+    handle = _zero_coefficient_handle()
+    handle._gen_ctx.token = 1
+    predict = make_teacache_predict_factory(handle)(_ResidualFlux2Inner())
+    out = predict(
+        mx.full((1, 4, 8), 1.0),  # latents
+        mx.zeros((4, 3)),  # latent_ids
+        mx.full((1, 2, 8), 1.0),  # prompt_embeds
+        mx.zeros((2, 3)),  # text_ids
+        mx.full((1, 2, 8), 0.25),  # negative_prompt_embeds
+        mx.zeros((2, 3)),  # negative_text_ids
+        4.0,  # guidance
+        mx.array([1000.0]),  # timestep
+    )
+    assert handle._state.stats._staging.cfg_was_active is True
+    assert mx.array_equal(out, mx.full((1, 4, 8), 7.25)).item()

@@ -6,6 +6,8 @@ skip_first_n_steps, skip_last_n_steps) is preserved exactly from v0.5.x.
 Each variant's apply() accepts all four; the dispatcher forwards them.
 """
 
+import numbers
+import operator
 import warnings
 from collections.abc import Sequence
 from typing import Any
@@ -31,6 +33,27 @@ def _release_cache_arrays(handle: Any) -> None:
     release = getattr(cache, "release_arrays", None)
     if callable(release):
         release()
+
+
+def _validate_window(name: str, value: object) -> int:
+    if isinstance(value, bool):
+        raise TeaCacheValueError(f"{name} must be a non-negative int, got {value!r}")
+    try:
+        as_int = operator.index(value)  # type: ignore[arg-type]
+    except TypeError:
+        raise TeaCacheValueError(f"{name} must be a non-negative int, got {value!r}") from None
+    if as_int < 0:
+        raise TeaCacheValueError(f"{name} must be >= 0, got {as_int}")
+    return as_int
+
+
+def _validate_thresh(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TeaCacheValueError(f"rel_l1_thresh must be a real number in [0.0, 1.0], got {value!r}")
+    as_float = float(value)
+    if not (0.0 <= as_float <= 1.0):  # also rejects NaN
+        raise TeaCacheValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {value}")
+    return as_float
 
 
 def apply_teacache(
@@ -69,14 +92,12 @@ def apply_teacache(
     Returns a TeaCacheHandle (context-manager compatible; handle.restore()
     undoes the patch)."""
     # --- Static validation (model-independent) ---
-    if skip_first_n_steps < 0:
-        raise TeaCacheValueError(f"skip_first_n_steps must be >= 0, got {skip_first_n_steps}")
-    if skip_last_n_steps < 0:
-        raise TeaCacheValueError(f"skip_last_n_steps must be >= 0, got {skip_last_n_steps}")
+    skip_first_n_steps = _validate_window("skip_first_n_steps", skip_first_n_steps)
+    skip_last_n_steps = _validate_window("skip_last_n_steps", skip_last_n_steps)
     if coefficients is not None:
         coefficients = validate_custom(coefficients)
-    if rel_l1_thresh is not None and not (0.0 <= rel_l1_thresh <= 1.0):
-        raise TeaCacheValueError(f"rel_l1_thresh must be in [0.0, 1.0], got {rel_l1_thresh}")
+    if rel_l1_thresh is not None:
+        rel_l1_thresh = _validate_thresh(rel_l1_thresh)
     if rel_l1_thresh == 0.0:
         warnings.warn(
             "rel_l1_thresh=0.0 disables TeaCache caching (every step computes; "

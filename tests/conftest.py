@@ -13,11 +13,16 @@ running a marker-misfiltered parity test (e.g. `pytest tests/ -m "not
 slow"`) loads a real FLUX model whose wired peak crosses the system
 wired limit and panics the kernel watchdog — observed on this 32 GB
 M1 Max as crashes on 2026-05-17, 2026-05-19, and 2026-05-20. The
-session cap means even a misrouted heavy test runs slow (or fails
-cleanly with an MLX allocation error) instead of taking the machine
-down. See CLAUDE.md "Memory guardrails for heavy generations" and
-ml-explore/mlx-lm #883 for the upstream confirmation that wired
-memory — not the soft `set_memory_limit` — is the root cause."""
+wired cap prevents only wired exhaustion: pageable GPU memory can still
+grow past the working set into a paging storm, which has also panicked
+this machine. So when a session selects parity tests it arms the
+active+cache watchdog (scripts/_mlx_watchdog.py, abort at memory_size minus
+4 GiB) and a wall backstop (PYTEST_PARITY_WALL_S, default 3 h); a trip
+writes tests/_artifacts/watchdog_aborts/pytest-parity.aborted.json and
+exits with code 4. The fast lane arms neither. See CLAUDE.md "Memory
+guardrails for heavy generations" and ml-explore/mlx-lm #883 for the
+upstream confirmation that wired memory, not the soft `set_memory_limit`,
+is the root cause."""
 
 from __future__ import annotations
 
@@ -29,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from tests._lanes import is_mflux_file
-from tests._memory_guard import apply_mlx_memory_caps
+from tests._memory_guard import apply_mlx_memory_caps, arm_parity_guard
 
 
 def _install_mlx_memory_caps() -> None:
@@ -52,6 +57,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         rel_path = Path(item.path).resolve().relative_to(_TESTS_DIR).as_posix()
         if is_mflux_file(rel_path):
             item.add_marker(pytest.mark.mflux)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Arm the parity watchdog and wall backstop from the final (post -m) item list."""
+    arm_parity_guard(session.items)
 
 
 @contextlib.contextmanager

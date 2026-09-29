@@ -6,32 +6,37 @@ import re
 import subprocess
 import sys
 
+EXPECTED_ALL = {
+    "__version__",
+    "apply_teacache",
+    "TeaCacheHandle",
+    "TeaCacheStats",
+    "GenerationStats",
+    "StepDecision",
+    "StatsFrozenError",
+    "Provenance",
+    "TeaCacheError",
+    "TeaCacheValueError",
+    "TeaCacheDisabledWarning",
+    "TeaCacheNoBenefitWarning",
+    "TeaCacheUncalibratedCheckpointWarning",
+    "IncompatibleModelError",
+    "AlreadyPatchedError",
+    "CalibrationError",
+    "TransformerShapeError",
+    "InternalStateError",
+    "InvalidStepWindowError",
+    "MissingGenerationContextError",
+}
 
-def test_root_package_exports() -> None:
+
+def test_all_is_exactly_the_public_surface() -> None:
+    """Bug caught: dropping TeaCacheUncalibratedCheckpointWarning from __init__ passes the hasattr list."""
     import mlx_teacache
 
-    for name in [
-        "__version__",
-        "apply_teacache",
-        "TeaCacheHandle",
-        "TeaCacheStats",
-        "GenerationStats",
-        "StepDecision",
-        "Provenance",
-        "TeaCacheError",
-        "TeaCacheValueError",
-        "AlreadyPatchedError",
-        "CalibrationError",
-        "IncompatibleModelError",
-        "InternalStateError",
-        "InvalidStepWindowError",
-        "MissingGenerationContextError",
-        "StatsFrozenError",
-        "TeaCacheDisabledWarning",
-        "TeaCacheNoBenefitWarning",
-        "TransformerShapeError",
-    ]:
-        assert hasattr(mlx_teacache, name), f"missing public export: {name}"
+    assert set(mlx_teacache.__all__) == EXPECTED_ALL
+    for name in EXPECTED_ALL:
+        getattr(mlx_teacache, name)
 
 
 def test_stats_submodule_paths() -> None:

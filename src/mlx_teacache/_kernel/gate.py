@@ -11,6 +11,8 @@ from typing import Literal
 
 import mlx.core as mx
 
+from mlx_teacache.errors import TeaCacheValueError
+
 GateKind = Literal["computed", "forced", "skipped", "numerical-miss"]
 
 MAX_CONSECUTIVE_SKIPS = 8
@@ -88,6 +90,9 @@ def gate_step(  # type: ignore[no-untyped-def]
     change. A delta above the range always computes. The decision still reports
     the measured rel_l1. None (the default, and always for caller-supplied
     coefficients) evaluates the raw delta."""
+    if calibrated_range is not None and calibrated_range[0] > calibrated_range[1]:
+        raise TeaCacheValueError(f"calibrated_range must be (lo, hi) with lo <= hi, got {calibrated_range}")
+
     # Hard short-circuit: threshold <= 0 ⇒ always compute, never cache.
     # At non-positive threshold no future step can ever be skipped, so the
     # cache can never be consumed. Setting should_update_cache=False avoids

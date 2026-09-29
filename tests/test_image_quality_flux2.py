@@ -71,7 +71,8 @@ PR_TIME_PROMPT = "a red apple on a wooden table"
 _SSIM_BASE_4B_TXT2IMG: float | None = 0.95  # measured 0.9927
 _SSIM_BASE_9B_TXT2IMG: float | None = 0.95  # measured 0.9920
 _SSIM_SLOW_FLOOR = 0.80  # documented slow-suite variance floor (5-prompt suite)
-_SSIM_CFG_BASE_4B = 0.85  # pre-existing CFG PR-gate floor (unchanged)
+_SSIM_CFG_BASE_4B = 0.95  # _artifacts/v0.12.0_klein_base_ssim.json: measured 0.985 at 8/48 skips
+_SKIP_BAND_CFG_BASE_4B = (4, 14)  # _artifacts/v0.12.0_klein_base_ssim.json: measured 8 skips
 _SSIM_CFG_BASE_9B = 0.95  # _artifacts/validation_klein_base_9b.json: 0.986 measured, 12 skips
 
 
@@ -251,6 +252,8 @@ def test_default_threshold_ssim_klein_pr_gate(
         vanilla_latent = _capture(flux, **kw)
         with apply_teacache(flux) as h:  # uses package default rel_l1_thresh
             wrapper_latent = _capture(flux, **kw)
+            # txt2img uses 25 steps (default), not the CFG recipe's 50 steps,
+            # so the skip band is not applicable here; only check engagement.
             assert h.stats.skipped_count >= 1, (
                 f"Expected >= 1 skip for {variant_id} txt2img at default threshold; "
                 f"got {h.stats.skipped_count}. Cache is not engaging — check coefficients."
@@ -300,11 +303,11 @@ def test_ssim_pr_gate_cfg_klein_base_4b() -> None:
     vanilla_latent = _capture(flux, **kw)
     with apply_teacache(flux) as h:  # uses per-variant default rel_l1_thresh=0.17
         wrapped_latent = _capture(flux, **kw)
-        assert h.stats.skipped_count >= 1, (
-            f"Expected >=1 skip under CFG; got {h.stats.skipped_count}. "
-            f"If this fires reliably, fall into the 0-skip contingency: "
-            f"run CFG-aware calibration via scripts/calibrate_flux2.py "
-            f"--guidance 4.0 --num-inference-steps 50."
+        lo, hi = _SKIP_BAND_CFG_BASE_4B
+        assert lo <= h.stats.skipped_count <= hi, (
+            f"Expected skips in [{lo}, {hi}] under CFG; got {h.stats.skipped_count}. "
+            f"The measured value at 50 steps + guidance 4.0 is 8 skips "
+            f"(_artifacts/v0.12.0_klein_base_ssim.json)."
         )
     vanilla_img = _decode_to_uint8(flux, vanilla_latent, height=kw["height"], width=kw["width"])
     wrapped_img = _decode_to_uint8(flux, wrapped_latent, height=kw["height"], width=kw["width"])

@@ -128,7 +128,8 @@ def apply_teacache(
                     TeaCacheNoBenefitWarning(
                         f"variant {variant_id!r} runs a distilled few-step schedule where the "
                         "polynomial gate does not engage; apply_teacache adds per-step gate "
-                        "overhead and any wall-clock benefit comes from bypassing mx.compile, "
+                        "overhead, and any wall-clock difference comes from bypassing mx.compile "
+                        "on Macs where mflux compiles the prediction step (not base or Pro M1/M2), "
                         "not from step-skipping"
                     ),
                     stacklevel=2,

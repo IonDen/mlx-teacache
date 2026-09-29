@@ -57,6 +57,18 @@ def test_apply_on_distilled_variant_warns_no_benefit(alias: str) -> None:
     handle.restore()
 
 
+def test_distilled_warning_ties_compile_avoidance_to_hardware() -> None:
+    """Bug: the warning says any wall-clock gain comes from bypassing mx.compile on every Mac, though base and
+    Pro M1/M2 run mflux's eager path (mflux's is_m1_or_m2 is true for both)."""
+    flux = _fake_klein_distilled("flux2-klein-4b")
+    with pytest.warns(TeaCacheNoBenefitWarning) as caught:
+        handle = apply_teacache(flux)
+    handle.restore()
+    message = str(caught[0].message)
+    assert "on Macs where mflux compiles the prediction step (not base or Pro M1/M2)" in message
+    assert "any wall-clock benefit comes from bypassing" not in message
+
+
 def test_apply_on_engaged_variant_does_not_warn() -> None:
     import warnings
 

@@ -2,8 +2,8 @@
 
 Expected output: writes `flux1_teacache.webp` next to this script.
 Prints the TeaCache skip counts at the end so users can see the
-gate actually firing (FLUX.1-dev at 25 steps + default threshold
-skips ~6 of 25 steps for a measured 1.46× wall-clock on M1 Max).
+gate actually firing. For measured speedups and skip counts, see the
+README benchmarks.
 
 Run with:
     uv run python examples/mflux_teacache_flux1.py
@@ -42,7 +42,7 @@ def main() -> None:
         f"wrote {out_path}\n"
         f"TeaCache stats: skipped={handle.stats.skipped_count} / "
         f"computed={handle.stats.computed_count} (of 25 transformer calls)\n"
-        f"variant: {getattr(handle, 'variant_id', 'unknown')}"
+        f"variant: {handle.variant_id}"
     )
 
 

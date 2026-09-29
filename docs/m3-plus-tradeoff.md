@@ -27,19 +27,24 @@ both fall on the eager side:
 graph. This means Python-side gating logic in our predict closure would NOT run
 after step 1.
 
-To keep TeaCache's gating live on every chip where mflux compiles, `mlx-teacache`
-replaces `flux._predict` with an **uncompiled** eager-Python closure. Users on
-those chips lose mflux's compile gain on this code path. The tradeoff: when the
-gate actually engages we skip ~25% of steps, which more than compensates on
-M1 Max / M1 Ultra / M2 Max / M2 Ultra (measured 1.57× on FLUX.1-dev / 25 steps
-on M1 Max, 2026-08-15). The magnitude of the compile-loss tax grows on newer
-hardware.
+To keep TeaCache's gating live, `mlx-teacache` replaces `flux._predict` with an
+**uncompiled** eager-Python closure. Base and Pro M1/M2 already run mflux's
+eager path, so nothing changes there. On M1/M2 Max and Ultra and on every M3
+and newer chip, mflux compiles `_predict` and the wrapper gives that up.
 
-On chips that mflux already runs eager (base + Pro M1/M2), the wrapper does
-not gain anything from compile avoidance — it only helps when the gate fires.
+On an M1 Max the measured cost of giving it up is nil. The v0.12.0 bench
+reports for the 50-step CFG recipes time the wrapper with its gate turned off
+against vanilla mflux (`compile_avoidance_ratio` in
+`_artifacts/v0.12.0_bench_klein_base_4b.json` and
+`_artifacts/v0.12.0_bench_klein_base_9b.json`): 1.01× on Klein base 4B, which
+is noise, and a small 1.02× on Klein base 9B. The eager path was no slower, and
+nearly all of the speedup on those recipes comes from skipped steps. M3 and
+newer chips have not been measured here.
+
 For FLUX.2 Klein at the distilled 4-8 step defaults the gate does not fire at
-all, so Klein on M1/M2 base + Pro with mlx-teacache is approximately neutral or
-slightly slower than vanilla.
+all, so Klein 4B/9B with mlx-teacache is roughly neutral against vanilla. On
+base and Pro M1/M2 it adds only the gate's per-step overhead; on the other
+chips any difference comes from running eager instead of compiled.
 
 ## M5 specifically: Neural Accelerators
 

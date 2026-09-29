@@ -19,7 +19,7 @@ The detector matches `model_config.aliases` containing `"qwen-image"` or `"qwen"
 - Default `rel_l1_thresh`: **0.30** (per-variant default, set from the threshold sweep)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-On the comparison page's single run at 672×896, q4, the wrapper took the generation from 693.6 s to 336.7 s (2.06× on this run, preview decoding included), skipping 26 of 50 steps at SSIM 0.92 against vanilla. See [the comparison page](../comparison/qwen-image.md) for the images and the step-by-step preview sheets.
+On the comparison page's single run at 672×896, q4, the wrapper took the generation from 693.6 s to 336.7 s (2.06× on this run, preview decoding included), skipping 26 of 50 steps at SSIM 0.92 against vanilla. See [the comparison page](https://github.com/IonDen/mlx-teacache/blob/main/docs/comparison/qwen-image.md) for the images and the step-by-step preview sheets.
 
 ## Image quality on consumer memory
 

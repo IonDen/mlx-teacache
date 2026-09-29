@@ -38,12 +38,12 @@ Seed 42, 50 steps, guidance 4.0, q8, 864×1152.
 
 Speedup on this run: 1.27× wall clock, 1.27× with preview decoding left out, 1.28× per step after the first. SSIM of B against A: 0.940, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `black-forest-labs/FLUX.2-klein-base-4B`; preview decoder `taef2`. mlx-teacache 0.11.1 (harness at commit `3b6f5e0`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_klein_base_4b.json).
+Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `black-forest-labs/FLUX.2-klein-base-4B`; preview decoder `taef2`. mlx-teacache 0.11.1 (harness at commit `3b6f5e0`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.12.0_bench_klein_base_4b.json).
 <!-- COMPARISON:klein-base-4b:details END -->
 
 ### Notes
 
-At its matching 512² recipe, footnote ⁴ splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein base 4B's prediction step compiled; the wrapper runs it eagerly instead. This run didn't include a no-gate condition, so the MLX peak-generation difference below (14.7 GiB vs 12.5 GiB) can't be pinned on the eager path versus the gate.
+At its matching 512² recipe, footnote ³ splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein base 4B's prediction step compiled; the wrapper runs it eagerly instead. This run didn't include a no-gate condition, so the MLX peak-generation difference below (14.7 GiB vs 12.5 GiB) can't be pinned on the eager path versus the gate.
 
 On this run the gate skips 11 of 50 steps, most of them in the first half of the schedule. The scene holds, down to the shoes and laces, but two things change in B: she squints with her eyes nearly closed, and a second ball appears beside the racket. Both come from steps skipped at the library's default threshold (0.17), which is what this page shows.
 

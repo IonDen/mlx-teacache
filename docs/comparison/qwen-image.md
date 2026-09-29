@@ -45,7 +45,7 @@ Recipe: 50 steps, guidance 4.0, q4, 672×896, seed 42, text encoder freed once t
 
 ### Notes
 
-Footnote ⁷ in the README measured this variant's 2.68× multi-run speedup as step-skipping: mflux doesn't compile Qwen's prediction step, so there's no compile effect to separate out. The no-gate wrapper's 1.04× there sits inside the spread between vanilla reps, closer to noise than to a second mechanism.
+Footnote ⁶ in the README measured this variant's 2.68× multi-run speedup as step-skipping: mflux doesn't compile Qwen's prediction step, so there's no compile effect to separate out. The no-gate wrapper's 1.04× there sits inside the spread between vanilla reps, closer to noise than to a second mechanism.
 
 On this run the gate skips 26 of 50 steps. Unlike the other models on this page, a few of those skips come two in a row through the middle of the schedule, though never more than two consecutive. A and B keep the same player, pose, sun and court; B redraws the court lines and drops the second net post behind her. The stock 4-bit build leaves a light speckle, sweat-like texture on her shoulder, not the heavier grain the variant page describes at its default recipe.
 

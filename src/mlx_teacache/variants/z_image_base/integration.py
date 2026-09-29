@@ -13,7 +13,7 @@ forward, depending only on the model-agnostic _kernel/, the public handle, and
 the shared mflux lifecycle helpers. mflux is imported lazily — the registry
 loads this module only after detect.matches() wins.
 
-Vanilla Z-Image wraps `_predict` in `mx.compile` (eager on base M1/M2 only). We
+Vanilla Z-Image wraps `_predict` in `mx.compile` (eager on base and Pro M1/M2). We
 replace `_predict` with an eager factory so the per-step gate runs every step;
 threshold=0 parity vs vanilla is therefore cosine, not bit-exact (see
 tests/test_parity_z_image.py).

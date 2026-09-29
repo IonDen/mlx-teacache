@@ -11,7 +11,7 @@ The whole library is one idea applied per model: run the expensive transformer b
 1. Validate the keyword arguments statically (threshold range, coefficient shape, skip-window ints).
 2. Check the already-patched sentinel (`flux._teacache_handle`). A second apply on a patched model raises rather than nesting.
 3. Walk the variant registry and take the first entry whose `detect.matches(flux)` returns True. No match raises `IncompatibleModelError`.
-4. Warn at apply time if the matched variant has no built-in default threshold (the distilled Klein variants) and the caller passed no coefficients: the dispatcher raises `TeaCacheNoBenefitWarning`. Under `filterwarnings = error` it raises as an error, so parity-lane apply sites wrap it.
+4. Warn at apply time if the matched variant has no built-in default threshold (the distilled Klein variants) and the caller passed no coefficients: the dispatcher emits `TeaCacheNoBenefitWarning`. Under `filterwarnings = error` that warning becomes an error, so parity-lane apply sites wrap it.
 5. Lazily import the winning variant's `integration.py` and call its `apply()`. A variant can emit its own warning here — `qwen-image` raises `TeaCacheUncalibratedCheckpointWarning` once when the model was loaded from a checkpoint its coefficients were not calibrated on (Qwen-Image-2512 on mflux 0.19 and 0.20).
 6. Attach `variant_id` and a rollback that clears the sentinel, and hand back a `TeaCacheHandle`.
 
@@ -29,7 +29,7 @@ Every model is a three-file subpackage under `src/mlx_teacache/variants/<id>/`:
 
 ## `_kernel/` is canonical; the top-level modules are shims
 
-The pure-math primitives — `gate_step`, `TeaCacheState`, `Provenance`, `TeaCacheStats` — live in `src/mlx_teacache/_kernel/` and import only `mlx.core`, never mflux. The top-level `gate.py`, `cache.py`, `coefficients.py`, and `stats.py` are thin re-export shims kept for API stability (they were extracted into `_kernel/` in v0.6.0). Edit the `_kernel/` copy; the shims just forward.
+The pure-math primitives — `gate_step`, `TeaCacheState`, `Provenance`, `TeaCacheStats` — live in `src/mlx_teacache/_kernel/` and import only `mlx.core`, never mflux. The top-level `gate.py`, `cache.py`, `coefficients.py`, and `stats.py` are thin compatibility re-exports (they were extracted into `_kernel/` in v0.6.0); the re-exports stay at least until 1.0. Edit the `_kernel/` copy; the shims just forward.
 
 ## The gate
 
@@ -52,7 +52,7 @@ The three families differ in where mflux exposes a seam, so the wrapper hooks ea
 
 **FLUX.1** (`variants/flux1_*`, including Krea). Swap `flux.transformer` for a `ProxyFlux1Transformer` (an `nn.Module`) whose `__call__` runs `flux1_forward_with_gate`, inserting the gate between the transformer body and the norm/projection tail. The real module is held as `_inner` through `object.__setattr__`, so MLX's `parameters()` filter does not recurse into it — which is why `flux.parameters()` at the parent level can miss transformer parameters while the wrapper is active (use `flux.transformer.parameters()` or `restore()` first).
 
-**FLUX.2 Klein and Z-Image** (`variants/flux2_*`, `variants/z_image_base`). Replace `flux._predict` with an instance-level eager closure. This deliberately bypasses mflux's `mx.compile` of `_predict`, which is what keeps per-step gating live (a compiled `_predict` would trace the Python gate once and never run it again). It is also the source of the separate "compile-avoidance" wall-clock effect, which the docs keep attributed apart from step-skipping. Under CFG the closure keeps two cached residuals (positive and negative branch) and shares one gate decision per step.
+**FLUX.2 Klein and Z-Image** (`variants/flux2_*`, `variants/z_image_base`). Replace `flux._predict` with an instance-level eager closure. This deliberately bypasses mflux's `mx.compile` of `_predict`, which is what keeps per-step gating live (a compiled `_predict` would trace the Python gate once and never run it again). On Macs where mflux compiles `_predict` (not base or Pro M1/M2, where it already runs eager), this is also the source of a separate "compile-avoidance" wall-clock effect, which the docs keep attributed apart from step-skipping. Under CFG the closure keeps two cached residuals (positive and negative branch) and shares one gate decision per step.
 
 **Qwen-Image** (`variants/qwen_image`). Like FLUX.1 it proxies `flux.transformer` (`ProxyQwenTransformer` running `qwen_forward_with_gate`), because Qwen has no `_predict` factory and no `mx.compile`. But mflux's Qwen `generate_image` calls the transformer twice per step — positive then negative caption, combined outside the transformer — so the forward threads a `CfgBranchPairer` (`pairing.py`): the gate decision is computed once on the positive branch and reused on the negative, with a cached residual per branch. Sharing one decision is exact rather than approximate, because the gate signal depends on the latents and timestep, not the caption.
 

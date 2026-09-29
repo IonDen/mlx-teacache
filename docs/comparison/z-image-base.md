@@ -47,7 +47,7 @@ Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `Tongyi-MAI/Z
 
 ### Notes
 
-Footnote ⁶ measured this variant's 1.31× multi-run speedup as entirely step-skipping: the wrapper timed at vanilla speed with the gate turned off, so avoiding a compiled step buys nothing here on wall clock. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation, so A and B both peak at 14.7 GiB in the table above.
+Footnote ⁵ measured this variant's 1.31× multi-run speedup as entirely step-skipping: the wrapper timed at vanilla speed with the gate turned off, so avoiding a compiled step buys nothing here on wall clock. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation, so A and B both peak at 14.7 GiB in the table above.
 
 On this run the gate skips 14 of 50 steps, alternating through the middle of the schedule. Pose, racket, ball and court stay put. B turns her head a little further toward the camera and laughs wider, and the court lines by her feet shift; those changes are most of why SSIM lands at 0.85.
 

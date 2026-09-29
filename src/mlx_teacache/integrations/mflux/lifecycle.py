@@ -242,6 +242,9 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
                     )
                 except InternalStateError as exc:
                     # The image is finished; a bookkeeping mismatch must not replace it.
+                    # Clear first: under an error-level warnings filter (test
+                    # configurations only) the warning below escalates and raises.
+                    handle._pending_finalize = None
                     warnings.warn(
                         f"TeaCache stats for this generation were discarded: {exc}",
                         RuntimeWarning,

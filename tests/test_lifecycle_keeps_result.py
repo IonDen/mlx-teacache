@@ -2,6 +2,8 @@
 """The generate_image wrapper must hand back the finished image even when TeaCache
 cannot commit the generation's stats."""
 
+import warnings
+
 import pytest
 
 from mlx_teacache import apply_teacache
@@ -85,3 +87,17 @@ def test_step_count_mismatch_warns_and_returns_the_image() -> None:
         image = flux.generate_image(seed=0, prompt="p", num_inference_steps=6, _extra_transformer_calls=1)
     assert image == "image"
     assert handle.stats.generations == 0
+
+
+def test_step_count_mismatch_clears_pending_finalize_under_an_error_filter() -> None:
+    """Bug caught: the mismatch branch clears the pending finalize only after
+    warnings.warn, so under an error-level filter the escalated warning leaves
+    a stale PendingFinalize on the handle."""
+    flux = make_flux1_fake()
+    apply_teacache(flux, rel_l1_thresh=0.2)
+    internal = flux.callbacks.before_loop[0]._handle
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(RuntimeWarning, match="expected 6 step decisions, got 7"):
+            flux.generate_image(seed=0, prompt="p", num_inference_steps=6, _extra_transformer_calls=1)
+    assert internal._pending_finalize is None

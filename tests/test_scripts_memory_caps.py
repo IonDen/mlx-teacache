@@ -236,6 +236,16 @@ def assigned_int_names(source: str, value: int) -> list[str]:
     return names
 
 
+def compares_against_name(source: str, name: str) -> bool:
+    """True when some comparison (``==``, ``!=``, ``in`` ...) in ``source`` has ``name`` as an operand."""
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Compare):
+            operands = [node.left, *node.comparators]
+            if any(isinstance(o, ast.Name) and o.id == name for o in operands):
+                return True
+    return False
+
+
 def test_exit_scanner_flags_a_literal_three_and_accepts_a_named_constant() -> None:
     # bug caught: a scanner that never fires (the repository test below would then pass on anything)
     assert literal_exit_offenders("import sys\nsys.exit(3)\n", 3) == [2]
@@ -268,11 +278,27 @@ def test_partial_is_three_and_never_four() -> None:
                 assert _is_int(node.value, 3), (path.name, node.lineno)
 
 
+def test_compare_scanner_needs_a_comparison_not_just_the_name() -> None:
+    # bug caught: a scanner satisfied by the name appearing anywhere (an import or an unused
+    # assignment), so an orchestrator that dropped its abort check would still pass below
+    assert compares_against_name("x = WATCHDOG_EXIT_CODE\n", "WATCHDOG_EXIT_CODE") is False
+    assert (
+        compares_against_name("from _mlx_watchdog import WATCHDOG_EXIT_CODE\n", "WATCHDOG_EXIT_CODE") is False
+    )
+    assert compares_against_name("if rc == 4:\n    pass\n", "WATCHDOG_EXIT_CODE") is False
+    assert compares_against_name("if rc == WATCHDOG_EXIT_CODE:\n    pass\n", "WATCHDOG_EXIT_CODE") is True
+    assert (
+        compares_against_name("if WATCHDOG_EXIT_CODE != proc.returncode:\n    pass\n", "WATCHDOG_EXIT_CODE")
+        is True
+    )
+
+
 def test_orchestrators_compare_against_the_watchdog_constant() -> None:
-    """Bug: an orchestrator that recognises a worker abort by a literal, so a changed code goes unnoticed."""
-    missing = []
-    for name in ORCHESTRATORS:
-        names = {n.id for n in ast.walk(ast.parse((SCRIPTS / name).read_text())) if isinstance(n, ast.Name)}
-        if "WATCHDOG_EXIT_CODE" not in names:
-            missing.append(name)
+    """Bug: an orchestrator that recognises a worker abort by a literal (or no longer checks for
+    one at all), so a changed code goes unnoticed."""
+    missing = [
+        name
+        for name in ORCHESTRATORS
+        if not compares_against_name((SCRIPTS / name).read_text(), "WATCHDOG_EXIT_CODE")
+    ]
     assert missing == [], missing

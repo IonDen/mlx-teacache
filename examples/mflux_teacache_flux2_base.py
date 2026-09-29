@@ -4,9 +4,8 @@ Target search query: "FLUX.2 Klein base speedup", "FLUX.2 mflux
 faster", "non-distilled FLUX.2 Apple Silicon".
 
 Expected output: writes `flux2_base_teacache.webp` next to this
-script. Prints the TeaCache skip counts. On M1 Max under v0.6.0's
-subprocess-per-rep harness, klein-base-4b at 50 steps + g=4.0
-skips ~9 / 50 steps for a measured 1.23× wall-clock.
+script. Prints the TeaCache skip counts. For measured speedups and
+skip counts at this recipe, see the README benchmarks.
 
 Run with:
     uv run python examples/mflux_teacache_flux2_base.py
@@ -50,7 +49,7 @@ def main() -> None:
         f"wrote {out_path}\n"
         f"TeaCache stats: skipped={handle.stats.skipped_count} / "
         f"computed={handle.stats.computed_count} (of 50 transformer calls)\n"
-        f"variant: {getattr(handle, 'variant_id', 'unknown')}"
+        f"variant: {handle.variant_id}"
     )
 
 

@@ -5,7 +5,7 @@ This recipe verifies the latest PyPI release, matching the CHANGELOG's top
 entry — pin the installed version explicitly:
 
 ```bash
-uv pip install "mlx-teacache[mflux]==0.12.0"
+uv pip install "mlx-teacache[mflux]==0.12.1"
 ```
 
 ## Shared capture helper

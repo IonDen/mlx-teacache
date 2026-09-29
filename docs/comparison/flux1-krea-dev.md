@@ -43,7 +43,7 @@ Recipe: 28 steps, guidance 4.5, q4, 768×1024, seed 42. Checkpoint `black-forest
 
 ### Notes
 
-Footnote ⁸ credits about 1.57× of this variant's 1.62× multi-run speedup to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder above that figure is run-to-run noise, not compile avoidance. Like FLUX.1 [dev], Krea's CLIP-L text encoder reads only the first 77 prompt tokens, while T5 reads the whole prompt.
+Footnote ⁷ credits about 1.57× of this variant's 1.62× multi-run speedup to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder above that figure is run-to-run noise, not compile avoidance. Like FLUX.1 [dev], Krea's CLIP-L text encoder reads only the first 77 prompt tokens, while T5 reads the whole prompt.
 
 On this run the gate skips 11 of 28 steps, alternating from step 4 through step 24. A and B read as close to the same photo: the ball sits a touch differently in the air and one court line shifts slightly, and little else moves. The model again drew its own sportswear logo on the visor and top in both frames, on its own.
 

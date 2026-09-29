@@ -34,13 +34,11 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 
 Until 0.12.0 the gate also skipped step 6 here (9 of 48, one run of 2). That step's input change was smaller than any step in this variant's calibration, and the polynomial, which is forced through zero, priced it as almost no change. 0.12.0 holds the change to the calibrated range (0.0283 to 0.2198) before evaluating the polynomial, so a change that small is priced at 0.144, the lowest the fit gives inside that range. With a floor that high, at the 0.17 default the gate can never skip two steps in a row. On an 864×1152 run the same effect had been skipping three early steps at every threshold down to 0.08.
 
-At the 25-step `low_step` recipe (`guidance=1.0`) the gate skips 3/25 with **1.41× wall-clock** and SSIM > 0.99 (v0.4.0 same-process measurement; not re-bench'd under subprocess-per-rep yet).
-
 > **Note on the v0.4.1 claim.** v0.4.1 reported 1.26× combined on this variant, decomposed as 1.16× gating × 1.09× compile-avoidance. The 1.26× combined number was honest within day-to-day noise; the subprocess-per-rep harness landed 1.23× (v0.6.0) and 1.22× (v0.10.0), a difference of a few percent that sits inside any reasonable measurement band. The *decomposition* is what needed correcting. With subprocess isolation, gating is doing essentially all the work (1.20–1.22×) and compile-avoidance is at noise level (1.01×). The v0.4.1 same-process harness had the wrapper inheriting warm allocator state, which got attributed to compile-avoidance.
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.12.0_bench_klein_base_4b.json` (v0.10.0's and v0.6.0's sit alongside it); regenerate side-by-side images with `scripts/bench_comparison.py`.
 
-The 0.17 default was chosen because the polynomial R² is low (0.106) and the engagement window is narrow:
+The 0.17 default was chosen because the polynomial R² is low (0.106) and the engagement window is narrow. The v0.4.0 sweep (before the 0.10 gate change) at 25 steps showed it:
 - At 0.20 (package default): 19/25 skips, SSIM ~0.76 — visibly degraded.
 - At **0.17**: 3/25 skips, SSIM 0.99 — indistinguishable from vanilla.
 - At 0.175: 14/25 skips, SSIM ~0.78 — sharp cliff.

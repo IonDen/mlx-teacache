@@ -7,7 +7,44 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.12.0] — 2026-09-28
+## [0.12.1] — 2026-09-29
+
+Hardening patch. `apply_teacache` now refuses pipelines it cannot gate, a finished generation keeps its image when you restore inside a callback, and bad arguments fail at the call. Skip decisions, default thresholds, coefficients and generated images are unchanged for every supported model, and there are no new speedup measurements in this release.
+
+### Fixed
+- Detection checks the mflux pipeline class as well as the model alias. mflux builds its edit, concept, in-context, redux, kontext, fill, depth and ControlNet pipelines on the same model configs as text-to-image. `apply_teacache` used to patch them anyway, and they either failed on the first step (Klein Edit calls the prediction step with arguments TeaCache doesn't handle) or ran at a threshold nobody had checked. They now raise `IncompatibleModelError` before anything is patched. A class you define yourself outside mflux is still matched by its alias.
+- Calling `handle.restore()` from an after-loop callback, for example to free TeaCache before the VAE decode, used to raise `StatsFrozenError` and lose the finished image. It now returns the image, and callbacks registered after yours still run. If the number of recorded step decisions ever disagrees with the step count, TeaCache drops that generation's stats and emits a `RuntimeWarning` instead of raising.
+- The proxy transformer that FLUX.1 and Qwen-Image use now passes `load_weights`, `update`, `set_dtype`, `eval()` and `nn.quantize` through to the wrapped transformer. Before, `flux.transformer.load_weights(...)` after `apply_teacache` succeeded and loaded nothing. Quantizing or updating the parent `flux` object still doesn't reach the proxied transformer, as before.
+- `MissingGenerationContextError` no longer tells FLUX.1 and Qwen-Image users that a "FLUX.2 generation started".
+- The typed exceptions can be pickled, which matters when `apply_teacache` runs in a worker process.
+- `handle.provenance.default_thresh` is filled in for every variant.
+- Two variant packages that declare the same id now fail at import instead of one silently replacing the other.
+
+### Changed
+- Input validation is stricter. `skip_first_n_steps` and `skip_last_n_steps` must be non-negative integers; numpy integers are fine. NaN, floats (including `1.0`), `None` and bools now raise `TeaCacheValueError`. NaN used to get through, and it could make the gate skip the final denoising step. `rel_l1_thresh` must be a real number between 0 and 1, so a `Decimal` is rejected too. `gate_step` rejects a calibrated range given as (hi, lo).
+- numpy is no longer a runtime dependency of the package. It is still used by the calibration scripts and the tests.
+- The sdist no longer ships `docs/papers/`.
+- The memory watchdog in the bench, sweep and calibration scripts now exits with code 4. Exit 3 means only "partial, run again". If you wrap these scripts in a retry loop keyed on exit 3, a memory abort no longer looks like progress.
+- A pytest session that selects parity tests now arms the same active-plus-cache memory watchdog and a wall-clock limit (`PYTEST_PARITY_WALL_S`, default 3 hours). `PYTEST_PARITY_HEADROOM_GIB` sets the memory headroom. A trip writes an `.aborted.json` record (`pytest-parity`) under the watchdog-aborts folder of the tests' artifacts directory and exits 4.
+- The calibration scripts reduce each denoising step to a few numbers as they go instead of keeping every step's activations. The Qwen-Image calibrator held several GB of arrays for a full run and could not finish under its own watchdog. The fitted values come out the same on the same inputs, and the calibrators now reuse the library's own gate-signal and forward code.
+- `tests/generate_references.py` sets memory caps and arms the watchdog like the other heavy scripts.
+- Bench reports record the MLX version, a git-describe version of this repo, and repo-relative image paths. Two old bench reports moved from `scripts/` to `_artifacts/`, with the README links updated.
+- The release workflow now starts with a `verify` job. It checks that the tagged commit is on `main` and waits up to 30 minutes for CI's push run on that commit, and it fails the release unless that run succeeded. PyPI publishing still uses the pinned PyPI publish action; only the GitHub Release step now uses the GitHub CLI instead of a third-party release action. Every workflow action is pinned by commit SHA.
+- The `TeaCacheNoBenefitWarning` that `apply_teacache` emits for the distilled Klein models has new wording: it now says that any wall-clock difference comes from bypassing `mx.compile`, and only on Macs where mflux compiles the prediction step. Update any code that matches the old message, such as a warnings filter keyed on its text.
+- The combined mlx-teacache + mlx-taef example now runs FLUX.1-dev at 25 steps with TAEF1 previews, instead of Klein base 4B at 4 steps.
+- Docs corrections: numbers and benchmark rows that had no current measurement are removed, the Klein base vs distilled comparison in the README now states its recipes (4B at 768×1024 with 3 reps, 9B at 512×512 with 2 reps), and README links are absolute so they also work on the PyPI page.
+
+### Internal
+- New fakes for the Qwen-Image, FLUX.2 and Z-Image forwards make one-line bugs fail in the fast test suite instead of only in the multi-hour real-weights tests. Examples: the negative CFG branch reusing the positive branch's cached residual, a skipped step that reuses nothing, and Klein base's CFG path falling back to the non-CFG forward.
+- The pure-core CI job now runs the mflux-free detection tests under `tests/variants/`; a basename match had been marking all of them as mflux tests and skipping them.
+- A real-weights test that could never pass for the distilled Klein models is fixed: its helper expected a warning that `apply_teacache` deliberately suppresses when you pass your own coefficients.
+- The mflux drift check also pins the upstream block code that the gate signal copies (the FLUX.2 block and modulation, the Qwen-Image block and its `_modulate` helper) across mflux 0.17.5 to 0.20.0.
+- The Klein base CFG quality gates assert the measured SSIM (0.95 floor) and a skip-count range instead of "at least one skip".
+- Tests pin the public surface (`__all__` and the `apply_teacache` signature) and run apply, restore and provenance checks across all nine variants.
+- CI: the combined coverage floor rises from 58% to 92%. A dependency audit job reports advisories without blocking merges, Dependabot proposes GitHub Actions and uv updates, every `uv sync` runs with `--locked`, and workflows get least-privilege permissions with `persist-credentials: false` on every checkout.
+- Packaging: the build backend is pinned (hatchling 1.32.4, hatch-vcs 0.5.0), the sdist smoke check also looks for dead links and paths that must not ship, and the development lockfile is refreshed (transformers, torch, pillow and others).
+
+## [0.12.0] — 2026-09-29
 
 A gate fix for the FLUX.2 [klein] base, Z-Image and Qwen-Image variants, and the rebuilt comparison page. No change to the public API. At the committed bench recipes one number moves: Klein base 4B now skips 8 of 48 active steps instead of 9 and runs 1.20× faster instead of 1.22×. Klein base 9B (benched with the range clamp, before the rule for changes above the range was added) and the Z-Image and Qwen-Image replays skip exactly the steps they skipped before.
 

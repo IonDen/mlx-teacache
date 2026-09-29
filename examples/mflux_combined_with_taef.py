@@ -11,14 +11,14 @@ Run with:
     uv run python examples/mflux_combined_with_taef.py
 
 Requires both libraries: `pip install mlx-teacache[mflux] mlx-taef`.
-Symmetric to the mlx-taef example of the same name — same body,
-lives in this repo for discoverability from the teacache side.
+FLUX.1-dev at 25 steps is a schedule where the gate skips steps, so
+TeaCache and the previews both have something to show. For measured
+speedups and skip counts, see the README benchmarks.
 """
 
 from pathlib import Path
 
-from mflux.models.common.config.model_config import ModelConfig
-from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+from mflux.models.flux.variants.txt2img.flux import Flux1
 from mlx_taef.integrations.mflux import LivePreviewCallback
 
 from mlx_teacache import apply_teacache
@@ -27,16 +27,16 @@ OUT_DIR = Path(__file__).resolve().parent
 
 
 def main() -> None:
-    print("loading Flux2Klein base 4B (quantize=4)...")
-    model = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
+    print("loading Flux1 dev (quantize=4)...")
+    model = Flux1.from_name("dev", quantize=4)
 
     print("wrapping with mlx-teacache...")
     handle = apply_teacache(model)
 
     callback = LivePreviewCallback(
         flux=model,
-        variant="taef2",
-        every=1,
+        variant="taef1",
+        every=5,
         numbered_frames=True,
         save_to=OUT_DIR / "combined.png",
         latent_height=32,
@@ -44,14 +44,14 @@ def main() -> None:
     )
     model.callbacks.register(callback)
 
-    print("generating: 'a red apple on a wooden table', 4 steps + TeaCache + TAEF2, seed=42...")
+    print("generating: 'a red apple on a wooden table', 25 steps + TeaCache + TAEF1, seed=42...")
     generated = model.generate_image(
         seed=42,
         prompt="a red apple on a wooden table",
-        num_inference_steps=4,
+        num_inference_steps=25,
         width=512,
         height=512,
-        guidance=1.0,
+        guidance=3.5,
     )
 
     final_path = OUT_DIR / "combined_final.webp"
@@ -61,7 +61,7 @@ def main() -> None:
         f"wrote {len(callback.saved_paths)} preview frames + {final_path}\n"
         f"TeaCache stats: skipped={handle.stats.skipped_count} / "
         f"computed={handle.stats.computed_count}\n"
-        f"variant: {getattr(handle, 'variant_id', 'unknown')}"
+        f"variant: {handle.variant_id}"
     )
 
 

@@ -1,6 +1,7 @@
 """Comparison page generator: numbers come from the report, prose stays hand-written (pure-core lane)."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -88,6 +89,19 @@ def test_summary_rows_put_each_condition_in_its_own_column() -> None:
     assert "On this run: 1.20× faster (1.21× with" in s
     assert "SSIM 0.97" in s and "(docs/comparison/flux1-dev.md)" in s
     assert "(_artifacts/v0.10.0_bench_flux1_dev.json)" in s
+
+
+def test_klein_base_pages_link_the_v0_12_0_bench_reports() -> None:
+    """Bug: the Klein base 4B/9B summary rows and detail pages still citing the v0.10.0 bench reports
+    after the v0.12.0 gate was re-benched, so the linked numbers disagree with the README table."""
+    blocks = gen.render_blocks(json.loads(gen.REPORT.read_text()))
+    for slug, path in (
+        ("klein-base-4b", "_artifacts/v0.12.0_bench_klein_base_4b.json"),
+        ("klein-base-9b", "_artifacts/v0.12.0_bench_klein_base_9b.json"),
+    ):
+        assert f"[bench report]({path})" in blocks[f"{slug}:summary"]
+        assert f"[bench report](../../{path})" in blocks[f"{slug}:details"]
+    assert "[bench report](_artifacts/v0.10.0_bench_flux1_dev.json)" in blocks["flux1-dev:summary"]
 
 
 def test_machine_line_reports_the_macos_marketing_version_not_the_kernel() -> None:
@@ -240,17 +254,20 @@ def test_committed_pages_match_the_committed_report() -> None:
 
 
 def test_committed_report_image_and_bench_paths_all_exist() -> None:
-    """Bug: an image or bench-report path in the committed report points at a file that was never
-    committed, or was moved or deleted after the report was written."""
+    """Bug: an image path in the committed report, or a bench-report link the generator renders from it
+    onto the comparison pages, points at a file that was never committed, or was moved or deleted."""
     report = json.loads(gen.REPORT.read_text())
+    blocks = gen.render_blocks(report)
     missing = []
     for slug, v in report["variants"].items():
         for key, rel in v["images"].items():
             if not (gen.REPO / rel).exists():
                 missing.append(f"{slug}.images.{key} -> {rel}")
-        if not (gen.REPO / v["bench_report"]).exists():
-            missing.append(f"{slug}.bench_report -> {v['bench_report']}")
-    assert not missing, f"report paths do not exist on disk: {missing}"
+        for block, page_dir in ((f"{slug}:summary", gen.REPO), (f"{slug}:details", gen.SUB_DIR)):
+            (link,) = re.findall(r"\[bench report\]\(([^)]+)\)", blocks[block])
+            if not (page_dir / link).resolve().exists():
+                missing.append(f"{block} bench report -> {link}")
+    assert not missing, f"paths do not exist on disk: {missing}"
 
 
 def _entry_with(prompt_text: str, **extra: object) -> dict:

@@ -98,7 +98,7 @@ class InvalidStepWindowError(TeaCacheError):
         *,
         skip_first: int,
         skip_last: int,
-        num_steps: int,  # accepted alias of active_num_steps; the built-in callers still pass this
+        num_steps: int,  # accepted alias of active_num_steps; the built-in callers pass this
         nominal_num_inference_steps: int | None = None,
         active_num_steps: int | None = None,
     ) -> None:

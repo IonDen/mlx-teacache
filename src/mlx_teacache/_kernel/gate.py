@@ -48,15 +48,14 @@ def poly_eval(coeffs: tuple[float, float, float, float, float], x: float) -> flo
 def mean_abs_rel_l1(current: mx.array, previous: mx.array) -> float:
     """Mean absolute relative L1 distance: mean(|current - previous|) / mean(|previous|).
 
-    The element-wise difference stays in the inputs' dtype (bf16 for FLUX.2 / Z-Image;
-    fp32 for FLUX.1 / Krea / Qwen-Image, where the cast is a no-op); the two reductions return float32 scalars. ``mx.mean`` on a bf16
-    array accumulates in float32 but rounds its result back to bf16, up to half
-    a bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 %
-    on their ratio; that rounding is not something a polynomial calibrated on
-    one trace can absorb. The casts cost one extra pass and a transient float32
-    buffer per reduction, immaterial next to a transformer step. Both scalars
-    are evaluated in one sync. Guards against division by zero with a small
-    epsilon."""
+    The element-wise difference stays in the inputs' dtype; both reductions run in
+    float32 (the cast is a no-op when the inputs already are float32). ``mx.mean`` on a
+    bf16 array accumulates in float32 but rounds its result back to bf16, up to half a
+    bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 % on their
+    ratio; that rounding is not something a polynomial calibrated on one trace can
+    absorb. The casts cost one extra pass and a transient float32 buffer per reduction,
+    immaterial next to a transformer step. Both scalars are evaluated in one sync.
+    Guards against division by zero with a small epsilon."""
     num_arr = mx.mean(mx.abs(current - previous).astype(mx.float32))
     denom_arr = mx.mean(mx.abs(previous).astype(mx.float32))
     mx.eval(num_arr, denom_arr)

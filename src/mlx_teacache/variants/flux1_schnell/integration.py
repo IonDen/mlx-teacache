@@ -1,5 +1,5 @@
-"""FLUX.1 schnell integration. Reuses FLUX.1 dev's proxy + forward
-verbatim; same transformer architecture. Only the public-facing
+"""FLUX.1 schnell integration. Uses FLUX.1 dev's proxy and forward; the code
+is shared (same transformer architecture). Only the public-facing
 metadata (provenance) and the apply() defaults differ.
 """
 
@@ -9,7 +9,7 @@ from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import wrap_generate_image
 
-# Reuse the verbatim port from flux1_dev — identical forward code.
+# Uses flux1_dev's proxy and forward; the code is shared.
 from mlx_teacache.variants.flux1_dev.integration import (
     ProxyFlux1Transformer,
     _InternalHandle,

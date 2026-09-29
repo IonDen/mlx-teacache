@@ -1,5 +1,5 @@
-"""FLUX.1 Krea [dev] integration. Reuses FLUX.1 dev's proxy + forward
-verbatim; Krea is a FLUX.1-dev-architecture finetune, so the transformer,
+"""FLUX.1 Krea [dev] integration. Uses FLUX.1 dev's proxy and forward; the
+code is shared. Krea is a FLUX.1-dev-architecture finetune, so the transformer,
 the gate signal and the patch strategy are the same. Only the metadata
 (provenance, recipe, default threshold) differs.
 """
@@ -10,7 +10,7 @@ from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import wrap_generate_image
 
-# Reuse the verbatim port from flux1_dev — identical forward code.
+# Uses flux1_dev's proxy and forward; the code is shared.
 from mlx_teacache.variants.flux1_dev.integration import (
     ProxyFlux1Transformer,
     _InternalHandle,

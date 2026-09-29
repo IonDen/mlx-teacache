@@ -56,6 +56,7 @@ from typing import Any
 
 import mlx.core as mx
 import numpy as np
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
@@ -293,6 +294,11 @@ def _run_orchestrator(*, chunk_dir: Path, dry_run: bool) -> None:
             cmd.append("--dry-run")
         print(f"[orchestrator] -> {unit}", flush=True)
         result = subprocess.run(cmd)
+        if result.returncode == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] worker for {unit} was ABORTED by the memory watchdog; lower the recipe "
+                f"before rerunning. Completed chunks in {chunk_dir} are reused."
+            )
         if result.returncode != 0 or not (chunk_dir / _chunk_filename(unit)).exists():
             raise SystemExit(
                 f"[orchestrator] worker for {unit} failed (rc={result.returncode}); chunk not written. "

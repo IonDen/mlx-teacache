@@ -33,6 +33,7 @@ from typing import Any
 
 import mlx.core as mx
 import mlx.nn as nn
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from calibrate_flux2 import CALIBRATION_PROMPTS, _fit_polynomial
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1, poly_eval
@@ -62,6 +63,8 @@ _CANONICAL_DIR = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 # Pure helpers (unit-tested without weights).
 # ---------------------------------------------------------------------------
+
+PARTIAL_EXIT_CODE = 3
 
 
 class _Flux1PairReducer:
@@ -420,13 +423,18 @@ def _run_capture(
         rc = _spawn(
             ["--worker", "--model", model, "--prompt-idx", str(idx), "--chunk-dir", str(chunk_dir), *extra]
         )
+        if rc == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] worker for prompt {idx} was ABORTED by the memory watchdog; lower the recipe "
+                "before rerunning; completed chunks are reused"
+            )
         if rc != 0 or not (chunk_dir / _chunk_filename(model, idx)).exists():
             raise SystemExit(
                 f"[orchestrator] worker for prompt {idx} failed (rc={rc}); completed chunks are reused"
             )
     if _pending_prompt_indices(chunk_dir, model, n_prompts):
         print("[orchestrator] PARTIAL: prompts remain; re-invoke to continue", flush=True)
-        return 3
+        return PARTIAL_EXIT_CODE
     xs, ys = _aggregate_pairs(chunk_dir, model, n_prompts)
     coeffs, r2 = _fit_polynomial(xs, ys, fit_mode=fit_mode)
     result: dict[str, Any] = {
@@ -476,13 +484,18 @@ def _run_sweep(
         rc = _spawn(
             ["--worker", "--model", model, "--sweep-unit", unit, "--chunk-dir", str(chunk_dir), *extra]
         )
+        if rc == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] sweep worker for {unit} was ABORTED by the memory watchdog; lower the recipe "
+                "before rerunning; completed chunks are reused"
+            )
         if rc != 0 or not (chunk_dir / _sweep_chunk_filename(model, unit)).exists():
             raise SystemExit(
                 f"[orchestrator] sweep worker for {unit} failed (rc={rc}); completed chunks are reused"
             )
     if [u for u in units if not (chunk_dir / _sweep_chunk_filename(model, u)).exists()]:
         print("[orchestrator] PARTIAL: units remain; re-invoke to continue", flush=True)
-        return 3
+        return PARTIAL_EXIT_CODE
     vanilla = json.loads((chunk_dir / _sweep_chunk_filename(model, "vanilla")).read_text())["vanilla_seconds"]
     chunks = [json.loads((chunk_dir / _sweep_chunk_filename(model, u)).read_text()) for u in units[1:]]
     summary = _build_sweep_summary(chunks, vanilla, model=model)

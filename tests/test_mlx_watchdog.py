@@ -51,9 +51,14 @@ def test_watchdog_aborts_once_resident_exceeds_ceiling() -> None:
         stop=exited,
     )
     assert exited.wait(2.0), "watchdog never aborted"
-    assert codes == [3]
+    assert codes == [4]
     assert payloads[0]["resident_bytes"] == 29 * GIB
     assert payloads[0]["ceiling_bytes"] == 28 * GIB
+
+
+def test_watchdog_exit_code_is_four_not_the_partial_code() -> None:
+    """Bug caught: the abort exit code staying 3, which a resume loop reads as "chunks remain, re-invoke"."""
+    assert wd.WATCHDOG_EXIT_CODE == 4
 
 
 def test_watchdog_stays_quiet_under_ceiling() -> None:
@@ -95,7 +100,7 @@ def test_watchdog_still_exits_when_on_abort_raises() -> None:
         stop=exited,
     )
     assert exited.wait(2.0), "watchdog did not exit after a raising abort handler"
-    assert codes == [3]
+    assert codes == [4]
 
 
 def test_watchdog_keeps_polling_when_sample_raises_once() -> None:
@@ -119,5 +124,5 @@ def test_watchdog_keeps_polling_when_sample_raises_once() -> None:
         ceiling=28 * GIB, sample=_sample, on_abort=lambda p: None, exit_fn=_exit, poll_s=0.001, stop=exited
     )
     assert exited.wait(2.0), "watchdog stopped polling after one sampler error"
-    assert codes == [3]
+    assert codes == [4]
     assert calls["n"] >= 2

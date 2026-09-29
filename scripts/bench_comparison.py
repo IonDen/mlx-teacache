@@ -34,6 +34,9 @@ from typing import Any, cast
 from _comparison_recipes import Recipe, prompt_for
 from _comparison_sheet import frame_paths
 from _comparison_steps import medians_by_kind, preview_subtracted_speedup, steady_state_speedup
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
+
+PARTIAL_EXIT_CODE = 3
 
 REPO = Path(__file__).resolve().parent.parent
 REPORT_PATH = REPO / "_artifacts" / "comparison" / "report.json"
@@ -682,6 +685,8 @@ def _run_worker(cmd: list[str], label: str) -> dict[str, Any]:
             "label": label,
             "returncode": returncode,
         }
+    if returncode == WATCHDOG_EXIT_CODE:
+        raise RuntimeError(f"worker {label} was ABORTED by the memory watchdog but emitted no abort payload")
     if returncode != 0 or payload is None:
         raise RuntimeError(f"worker {label} failed: exit {returncode}")
     return payload
@@ -910,7 +915,7 @@ def _orchestrate(
         tmp.replace(path)
         print(f"  chunk persisted: {path}", flush=True)
     remaining = plan_conditions(chunks, raw_root, slug, recipe.steps, expected, -1)
-    return 3 if remaining else 0
+    return PARTIAL_EXIT_CODE if remaining else 0
 
 
 def _finalize(slug: str, *, export_jpg: bool = False) -> None:

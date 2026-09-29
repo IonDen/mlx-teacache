@@ -46,6 +46,7 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 from _bench_telemetry import streak_telemetry as _streak_telemetry
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
@@ -68,6 +69,8 @@ CHUNK_DIR_DEFAULT = OUT_DIR / "_chunks"
 # ---------------------------------------------------------------------------
 # Pure helpers (unit-testable without weights).
 # ---------------------------------------------------------------------------
+
+PARTIAL_EXIT_CODE = 3
 
 
 def _threshold_name(t: float) -> str:
@@ -335,7 +338,7 @@ def _run_orchestrator(
         result = subprocess.run(cmd)
         if result.returncode != 0 or not (chunk_dir / _chunk_filename(unit)).exists():
             aborted = chunk_dir / f"{unit}.aborted.json"
-            if aborted.exists():
+            if result.returncode == WATCHDOG_EXIT_CODE or aborted.exists():
                 raise SystemExit(
                     f"[orchestrator] worker for {unit} was ABORTED by the memory watchdog; artifact "
                     f"{aborted}. Lower the recipe before rerunning — completed chunks are reused."
@@ -347,7 +350,7 @@ def _run_orchestrator(
     if _pending_units(chunk_dir, units):
         remaining = _pending_units(chunk_dir, units)
         print(f"[orchestrator] PARTIAL: {len(remaining)} unit(s) pending {remaining}; re-invoke to continue.")
-        sys.exit(3)
+        sys.exit(PARTIAL_EXIT_CODE)
 
     vanilla_seconds = json.loads((chunk_dir / _chunk_filename("vanilla")).read_text())["vanilla_seconds"]
     threshold_chunks = [

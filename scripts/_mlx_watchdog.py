@@ -8,9 +8,10 @@ nothing stopping it. This thread samples ``get_active_memory + get_cache_memory`
 process the moment the sum exceeds ``memory_size - headroom``. The poll thread
 runs while ``mx.eval`` holds no GIL, so 0.05 s costs nothing measurable.
 
-The abort is ``os._exit(3)`` after ``on_abort(payload)``: the caller prints an
+The abort is ``os._exit(WATCHDOG_EXIT_CODE)`` (4) after ``on_abort(payload)``: the caller prints an
 honest artifact (the orchestrator persists it as ``*.aborted.json``) and the
-process dies before the kernel does. The exit is unconditional: a handler that
+process dies before the kernel does. Exit 4 is the watchdog's alone: the
+chunked-run scripts reserve exit 3 for "partial, chunks remain, re-invoke". The exit is unconditional: a handler that
 raises is reported to stderr and the process still exits.
 
 The headroom is budgeted for the OS, but the watchdog counts only MLX arrays;
@@ -33,7 +34,8 @@ from pathlib import Path
 
 GIB = 1024**3
 DEFAULT_HEADROOM_GIB = 4.0
-ABORT_EXIT_CODE = 3
+# Distinct from the chunked-run PARTIAL exit code (3): a resume loop must never read an abort as progress.
+WATCHDOG_EXIT_CODE = 4
 
 
 def ceiling_bytes(memory_size_bytes: int, *, headroom_gib: float = DEFAULT_HEADROOM_GIB) -> int:
@@ -59,7 +61,7 @@ def start_watchdog(
     stop: threading.Event | None = None,
 ) -> threading.Thread:
     """Start the daemon poll thread; return it. ``sample`` yields ``(active, cache)``
-    bytes; ``on_abort`` receives the payload once, then ``exit_fn(3)`` runs."""
+    bytes; ``on_abort`` receives the payload once, then ``exit_fn(WATCHDOG_EXIT_CODE)`` runs."""
     halt = stop if stop is not None else threading.Event()
 
     def _loop() -> None:
@@ -83,7 +85,7 @@ def start_watchdog(
                 except BaseException:  # noqa: BLE001 — the exit must happen even if the handler fails
                     traceback.print_exc(file=sys.stderr)
                     sys.stderr.flush()
-                exit_fn(ABORT_EXIT_CODE)
+                exit_fn(WATCHDOG_EXIT_CODE)
                 return
             halt.wait(poll_s)
 

@@ -194,3 +194,85 @@ def test_no_script_uses_the_deprecated_metal_namespace() -> None:
     # bug caught: mx.metal.get_peak_memory (stderr deprecation, invisible to filterwarnings)
     offenders = sorted(p.name for p in SCRIPTS.glob("*.py") if "mx.metal." in p.read_text())
     assert offenders == [], offenders
+
+
+# ----- exit-code contract: 3 is PARTIAL only, the watchdog owns 4 -----
+
+EXIT_CALLEES = frozenset({"exit", "_exit", "SystemExit"})
+# Orchestrators that translate a worker's death; each must compare against the shared constant.
+ORCHESTRATORS = (
+    "bench_speedup.py",
+    "bench_comparison.py",
+    "bench_klein_base_vs_distilled.py",
+    "sweep_threshold_qwen.py",
+    "sweep_threshold_klein_base_4b.py",
+    "calibrate_qwen.py",
+    "calibrate_flux2.py",
+    "calibrate_flux1.py",
+)
+
+
+def _is_int(node: ast.AST | None, value: int) -> bool:
+    return isinstance(node, ast.Constant) and type(node.value) is int and node.value == value
+
+
+def literal_exit_offenders(source: str, value: int) -> list[int]:
+    """Line numbers where ``value`` is passed as a literal to an exit call or returned."""
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and _callee_name(node) in EXIT_CALLEES:
+            if any(_is_int(a, value) for a in node.args):
+                lines.append(node.lineno)
+        elif isinstance(node, ast.Return) and _is_int(node.value, value):
+            lines.append(node.lineno)
+    return lines
+
+
+def assigned_int_names(source: str, value: int) -> list[str]:
+    names = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Assign) and _is_int(node.value, value):
+            names += [t.id for t in node.targets if isinstance(t, ast.Name)]
+    return names
+
+
+def test_exit_scanner_flags_a_literal_three_and_accepts_a_named_constant() -> None:
+    # bug caught: a scanner that never fires (the repository test below would then pass on anything)
+    assert literal_exit_offenders("import sys\nsys.exit(3)\n", 3) == [2]
+    assert literal_exit_offenders("def f():\n    return 3\n", 3) == [2]
+    assert literal_exit_offenders("raise SystemExit(3)\n", 3) == [1]
+    assert literal_exit_offenders("import os\nos._exit(3)\n", 3) == [2]
+    assert literal_exit_offenders("import sys\nsys.exit(PARTIAL_EXIT_CODE)\n", 3) == []
+    assert assigned_int_names("PARTIAL_EXIT_CODE = 3\n", 3) == ["PARTIAL_EXIT_CODE"]
+
+
+def test_no_script_exits_with_a_literal_three() -> None:
+    """Bug: a script hard-coding exit 3 for something other than PARTIAL, colliding with the resume loop."""
+    offenders = {}
+    for path in [*sorted(SCRIPTS.glob("*.py")), ROOT / "tests" / "generate_references.py"]:
+        lines = literal_exit_offenders(path.read_text(), 3)
+        if lines:
+            offenders[path.name] = lines
+    assert offenders == {}, offenders
+
+
+def test_partial_is_three_and_never_four() -> None:
+    """Bug: a script defining PARTIAL = 4, or a PARTIAL constant that is not 3."""
+    for path in sorted(SCRIPTS.glob("*.py")):
+        source = path.read_text()
+        assert [n for n in assigned_int_names(source, 4) if "PARTIAL" in n.upper()] == [], path.name
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and "PARTIAL" in t.id.upper() for t in node.targets
+            ):
+                assert _is_int(node.value, 3), (path.name, node.lineno)
+
+
+def test_orchestrators_compare_against_the_watchdog_constant() -> None:
+    """Bug: an orchestrator that recognises a worker abort by a literal, so a changed code goes unnoticed."""
+    missing = []
+    for name in ORCHESTRATORS:
+        names = {n.id for n in ast.walk(ast.parse((SCRIPTS / name).read_text())) if isinstance(n, ast.Name)}
+        if "WATCHDOG_EXIT_CODE" not in names:
+            missing.append(name)
+    assert missing == [], missing

@@ -44,7 +44,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from _bench_telemetry import streak_telemetry as _streak_telemetry
-from _mlx_watchdog import arm_mlx_watchdog
+from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
+
+PARTIAL_EXIT_CODE = 3
 
 # Portrait recipe for the distilled-vs-base study, on its own page. One prompt +
 # seed across every condition in this script.
@@ -637,6 +639,10 @@ def _run_one_worker(
     payload = _parse_worker_line(proc.stdout)
     if payload is not None and "aborted" in payload:
         return payload
+    if proc.returncode == WATCHDOG_EXIT_CODE:
+        raise RuntimeError(
+            f"worker {size}/{condition}/rep{rep} was ABORTED by the memory watchdog but emitted no abort payload"
+        )
     if proc.returncode != 0:
         raise RuntimeError(f"worker failed for {size}/{condition}/rep{rep}: exit {proc.returncode}")
     if payload is None:
@@ -833,7 +839,7 @@ def main() -> None:
                 "Nothing persisted; lower the recipe or caps before re-invoking. ==",
                 flush=True,
             )
-            raise SystemExit(4)
+            raise SystemExit(WATCHDOG_EXIT_CODE)
         written = persist_chunk(results_dir, result)
         print(f">> chunk persisted: {written}", flush=True)
 
@@ -844,7 +850,7 @@ def main() -> None:
             f"\n== PARTIAL: {total - len(remaining)}/{total} chunks persisted under {results_dir}; "
             f"{len(remaining)} pending — re-invoke to continue. No report written. =="
         )
-        raise SystemExit(3)
+        raise SystemExit(PARTIAL_EXIT_CODE)
 
     # A single-condition run cannot produce a complete report, so it must NOT write
     # over an existing full one. Its chunks are on disk; a later full run rebuilds the

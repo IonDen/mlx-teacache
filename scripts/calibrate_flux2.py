@@ -64,6 +64,7 @@ from typing import Any
 
 import mlx.core as mx
 import numpy as np
+from _mlx_watchdog import WATCHDOG_EXIT_CODE
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # the RUNTIME gate signal fn
 from mlx_teacache.variants.flux2_klein_base_4b.integration import (
@@ -609,6 +610,11 @@ def _run_orchestrator(
             cmd.append("--dry-run")
         print(f"[orchestrator] -> prompt {idx} ({CALIBRATION_PROMPTS[idx]!r})", flush=True)
         result = subprocess.run(cmd)
+        if result.returncode == WATCHDOG_EXIT_CODE:
+            raise SystemExit(
+                f"[orchestrator] worker for prompt {idx} was ABORTED by the memory watchdog; lower the recipe "
+                f"before rerunning. Completed chunks in {chunk_dir} are reused."
+            )
         if result.returncode != 0 or not (chunk_dir / _chunk_filename(variant, idx)).exists():
             raise SystemExit(
                 f"[orchestrator] worker for prompt {idx} failed (rc={result.returncode}); chunk not "

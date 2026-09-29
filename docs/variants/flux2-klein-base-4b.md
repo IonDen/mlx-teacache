@@ -69,6 +69,6 @@ See `scripts/_calibration_flux2_klein_base_4b.json` for the full report.
 
 ## Quirks
 
-- **Default threshold is 0.17, not the package fallback 0.20.** This is set via `Provenance.default_thresh` in the variant's `_PROVENANCE` and resolved at `apply_teacache` time.
+- **Default threshold is 0.17, not the package fallback 0.20.** The default comes from the variant's `DEFAULT_THRESH`.
 - The CFG path's cosine ≥ 0.97 tolerance is documented in `tests/test_parity_flux2.py::_FLUX2_COSINE_GATE`. Compile-vs-eager dispatch noise compounds across steps — see the test module docstring.
 - `flux2_klein_base_9b` cross-imports COEFFICIENTS from this variant — same architecture family, same calibration recipe.

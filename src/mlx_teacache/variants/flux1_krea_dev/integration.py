@@ -29,6 +29,7 @@ _PROVENANCE = Provenance(
     fit_metric="numpy.polyfit R^2 on 270 consecutive-step (mod_in, body_out) rel-L1 pairs",
     fit_metric_value=0.6817,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux1.py",
+    default_thresh=DEFAULT_THRESH,
 )
 
 

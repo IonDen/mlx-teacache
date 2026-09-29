@@ -22,6 +22,7 @@ _PROVENANCE = Provenance(
     revision="upstream-flux-v1-shared",
     calibration_dataset="upstream ali-vilab TeaCache (FLUX architecture is shared between dev and schnell)",
     reference_url="https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py",
+    default_thresh=DEFAULT_THRESH,
 )
 
 

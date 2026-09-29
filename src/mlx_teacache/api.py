@@ -79,6 +79,9 @@ def apply_teacache(
       - flux2-klein-4b, flux2-klein-9b ... no per-variant default; fall back to
         0.20 (these distilled 4-8 step schedules skip 0 steps at any reasonable
         threshold — see the "When to use" section of the README).
+    When you pass your own `coefficients`, the FLUX.2, Z-Image and Qwen-Image variants use
+    0.20 unless you also pass `rel_l1_thresh`; the FLUX.1 variants keep their per-variant
+    default (0.30 for flux1-krea-dev).
     Pass rel_l1_thresh=<float> to override. The resolved effective threshold is
     available afterwards as handle.rel_l1_thresh.
 

@@ -71,7 +71,7 @@ The mini-kernel re-walks `ZImageTransformer.__call__`: patchify → noise refine
 
 ## Quirks
 
-- **Default threshold is 0.12, not the package fallback 0.20.** Set via `Provenance.default_thresh` in the variant's `_PROVENANCE`, resolved at `apply_teacache` time.
+- **Default threshold is 0.12, not the package fallback 0.20.** The default comes from the variant's `DEFAULT_THRESH`.
 - **q8, not q4.** Z-Image's pinned recipe is 8-bit. The bench and comparison harnesses carry a per-variant quantize for this reason.
 - **Calibrated range (0.12.0).** The gate evaluates the signal-B polynomial only inside the range of deltas it was fitted on, 0.0279 to 0.2591 (`CALIBRATED_RANGE`). A smaller delta is priced at 0.082, the fit's value at the bottom of that range, instead of the near-zero the curve gives below its data; a larger one always computes. At the 0.12 default this allows at most one skip in a row. The 512² bench recipe's decisions are unchanged; see `docs/calibration.md`.
 - **Self-contained mini-kernel.** The variant defines its own internal handle and forward and imports no sibling variant — only the model-agnostic `_kernel/`, the public handle, and the shared mflux lifecycle helpers.

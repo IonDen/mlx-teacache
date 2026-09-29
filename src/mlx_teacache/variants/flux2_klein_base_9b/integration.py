@@ -35,7 +35,7 @@ _PROVENANCE = Provenance(
     fit_metric="constrained-LSQ R^2 on consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
     fit_metric_value=0.10643408169124158,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/validate_klein_base_9b.py",
-    default_thresh=0.17,
+    default_thresh=DEFAULT_THRESH,
 )
 
 

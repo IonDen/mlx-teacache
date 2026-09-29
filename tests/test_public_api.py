@@ -144,3 +144,19 @@ def test_stale_row_names_catches_one_dropped_name_in_a_grouped_row():
     assert _stale_row_names(rows, _REGISTRY) == []
     without_base_9b = [v for v in _REGISTRY if v != "flux2-klein-base-9b"]
     assert _stale_row_names(rows, without_base_9b) == ["-base-9b"]
+
+
+def test_package_docstring_lists_every_variant_default() -> None:
+    """Bug caught: the root docstring says 'other variants use 0.20' while Krea defaults to 0.30."""
+    import mlx_teacache
+    from mlx_teacache.variants import _REGISTRY
+
+    doc = mlx_teacache.__doc__ or ""
+    for vid, entry in _REGISTRY.items():
+        # The docstring writes the FLUX.2 pair as "flux2-klein-base-4b / -base-9b".
+        short = vid[len("flux2-klein") :] if vid.startswith("flux2-klein") else vid
+        assert vid in doc or short in doc, vid
+        if entry["default_thresh"] is not None:
+            assert f"{entry['default_thresh']:.2f}" in doc, vid
+    assert "0.30 flux1-krea-dev" in doc
+    assert "Provenance.default_thresh" not in doc

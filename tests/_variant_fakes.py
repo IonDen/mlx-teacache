@@ -111,3 +111,44 @@ def make_flux1_fake(alias: str = "dev") -> Any:
 
     flux.generate_image = generate_image
     return flux
+
+
+# Alias that each registry id's detector looks for, and the family it belongs to.
+_FLUX1_ALIASES = {"flux1-dev": "dev", "flux1-schnell": "schnell", "flux1-krea-dev": "krea-dev"}
+_DUCK_ALIASES = {
+    "flux2-klein-4b": "flux2-klein-4b",
+    "flux2-klein-9b": "flux2-klein-9b",
+    "flux2-klein-base-4b": "flux2-klein-base-4b",
+    "flux2-klein-base-9b": "flux2-klein-base-9b",
+    "z-image-base": "z-image",
+    "qwen-image": "qwen-image",
+}
+
+
+def fake_for_variant(variant_id: str) -> Any:
+    """A model that ``variant_id``'s detector matches and whose ``apply()`` can patch without weights.
+
+    Covers every id in the variant registry. FLUX.1 ids get the real-class fake from
+    ``make_flux1_fake`` (needs the ``[mflux]`` extra); the FLUX.2, Z-Image and Qwen-Image ids get a
+    duck-typed namespace (the detectors only read ``model_config.aliases``). Qwen-Image declares the
+    checkpoint the built-in polynomial was fitted on, so applying it raises no uncalibrated warning.
+    The fake is patched and restored only; it is not a working generator except for FLUX.1.
+
+    Distilled ids (``flux2-klein-4b``, ``-9b``) still emit ``TeaCacheNoBenefitWarning`` on apply
+    with built-in coefficients; the caller must expect it.
+    """
+    if variant_id in _FLUX1_ALIASES:
+        return make_flux1_fake(_FLUX1_ALIASES[variant_id])
+    if variant_id not in _DUCK_ALIASES:
+        raise KeyError(f"no fake for variant {variant_id!r}")
+    model_config: dict[str, Any] = {"aliases": [_DUCK_ALIASES[variant_id]]}
+    if variant_id == "qwen-image":
+        from mlx_teacache.variants.qwen_image.config import META
+
+        model_config["model_name"] = META["hf_model_id"]
+    return SimpleNamespace(
+        model_config=SimpleNamespace(**model_config),
+        transformer=SimpleNamespace(name="real-transformer"),
+        callbacks=FaithfulCallbackRegistry(),
+        generate_image=lambda **kw: "image",
+    )

@@ -17,9 +17,11 @@ wired cap prevents only wired exhaustion: pageable GPU memory can still
 grow past the working set into a paging storm, which has also panicked
 this machine. So when a session selects parity tests it arms the
 active+cache watchdog (scripts/_mlx_watchdog.py, abort at memory_size minus
-4 GiB) and a wall backstop (PYTEST_PARITY_WALL_S, default 3 h); a trip
-writes tests/_artifacts/watchdog_aborts/pytest-parity.aborted.json and
-exits with code 4. The fast lane arms neither. See CLAUDE.md "Memory
+4 GiB, PYTEST_PARITY_HEADROOM_GIB) and a wall backstop (PYTEST_PARITY_WALL_S,
+default 3 h), and lowers the MLX cache pool to 1 GiB; a trip prints one line
+past pytest's output capture, writes
+tests/_artifacts/watchdog_aborts/pytest-parity.aborted.json and exits with
+code 4. The fast lane arms neither and keeps a 2 GiB pool. See CLAUDE.md "Memory
 guardrails for heavy generations" and ml-explore/mlx-lm #883 for the
 upstream confirmation that wired memory, not the soft `set_memory_limit`,
 is the root cause."""
@@ -61,7 +63,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Arm the parity watchdog and wall backstop from the final (post -m) item list."""
-    arm_parity_guard(session.items)
+    arm_parity_guard(session.items, capture=session.config.pluginmanager.getplugin("capturemanager"))
 
 
 @contextlib.contextmanager

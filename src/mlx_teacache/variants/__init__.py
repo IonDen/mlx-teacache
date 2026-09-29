@@ -40,7 +40,7 @@ _REQUIRED_META_KEYS = ("variant_id", "display_name", "license")
 def _validate_meta(meta: object, *, subname: str) -> dict[str, Any]:
     """Validate a variant's META mapping, raising a CalibrationError that names
     the subpackage so a malformed variant can't fail `import mlx_teacache` with an
-    opaque AttributeError/KeyError (per 0031 #4)."""
+    opaque AttributeError/KeyError."""
     if not isinstance(meta, dict):
         raise CalibrationError(
             variant_id=subname,
@@ -58,7 +58,7 @@ def _validate_meta(meta: object, *, subname: str) -> dict[str, Any]:
 def _build_one(full: str, subname: str) -> tuple[str, _RegistryEntry]:
     """Import + validate a single variant subpackage. Any failure is surfaced as
     a CalibrationError naming the subpackage, so one broken variant can't take
-    down the whole registry with an opaque error (per 0031 #4)."""
+    down the whole registry with an opaque error."""
     try:
         config = importlib.import_module(f"{full}.config")
         detect = importlib.import_module(f"{full}.detect")
@@ -92,13 +92,33 @@ def _build_one(full: str, subname: str) -> tuple[str, _RegistryEntry]:
     )
 
 
+def _register(
+    registry: dict[str, _RegistryEntry],
+    sources: dict[str, str],
+    variant_id: str,
+    entry: _RegistryEntry,
+    *,
+    subname: str,
+) -> None:
+    """Add one entry, refusing a variant_id another subpackage already declared
+    (a copied subpackage must not silently overwrite the original)."""
+    if variant_id in registry:
+        raise CalibrationError(
+            variant_id=variant_id,
+            reason=f"subpackages {sources[variant_id]!r} and {subname!r} both declare this variant_id",
+        )
+    registry[variant_id] = entry
+    sources[variant_id] = subname
+
+
 def _build_registry() -> None:
     package = importlib.import_module(__name__)
+    sources: dict[str, str] = {}
     for _, subname, ispkg in pkgutil.iter_modules(package.__path__):
         if not ispkg:
             continue
         variant_id, entry = _build_one(f"{__name__}.{subname}", subname)
-        _REGISTRY[variant_id] = entry
+        _register(_REGISTRY, sources, variant_id, entry, subname=subname)
 
 
 _build_registry()

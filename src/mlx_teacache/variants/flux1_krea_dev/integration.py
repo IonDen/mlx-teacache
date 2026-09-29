@@ -1,5 +1,5 @@
-"""FLUX.1 Krea [dev] integration. Reuses FLUX.1 dev's proxy + forward
-verbatim; Krea is a FLUX.1-dev-architecture finetune, so the transformer,
+"""FLUX.1 Krea [dev] integration. Uses FLUX.1 dev's proxy and forward; the
+code is shared. Krea is a FLUX.1-dev-architecture finetune, so the transformer,
 the gate signal and the patch strategy are the same. Only the metadata
 (provenance, recipe, default threshold) differs.
 """
@@ -10,7 +10,7 @@ from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import wrap_generate_image
 
-# Reuse the verbatim port from flux1_dev — identical forward code.
+# Uses flux1_dev's proxy and forward; the code is shared.
 from mlx_teacache.variants.flux1_dev.integration import (
     ProxyFlux1Transformer,
     _InternalHandle,
@@ -29,6 +29,7 @@ _PROVENANCE = Provenance(
     fit_metric="numpy.polyfit R^2 on 270 consecutive-step (mod_in, body_out) rel-L1 pairs",
     fit_metric_value=0.6817,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux1.py",
+    default_thresh=DEFAULT_THRESH,
 )
 
 
@@ -68,7 +69,7 @@ def apply(
 
     import contextlib
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation raises after the first, all preceding mutations are reversed.
     _rollbacks_so_far: list[Any] = []
 
@@ -98,7 +99,7 @@ def apply(
         raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
-    #    callback + restores generate_image. NO stats finalize call (audit F2).
+    #    callback + restores generate_image. No stats finalize call.
     def _restore_transformer() -> None:
         flux.transformer = original_transformer
 
@@ -119,7 +120,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

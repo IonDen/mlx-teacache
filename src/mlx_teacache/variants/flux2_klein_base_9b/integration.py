@@ -34,8 +34,8 @@ _PROVENANCE = Provenance(
     ),
     fit_metric="constrained-LSQ R^2 on consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
     fit_metric_value=0.10643408169124158,
-    reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/validate_klein_base_9b.py",
-    default_thresh=0.17,
+    reference_url="https://github.com/IonDen/mlx-teacache/blob/main/_artifacts/validation_klein_base_9b.json",
+    default_thresh=DEFAULT_THRESH,
 )
 
 
@@ -85,7 +85,7 @@ def apply(
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation after callback registration raises, preceding mutations
     # are reversed. Start with the callback unregister.
     from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
@@ -122,7 +122,7 @@ def apply(
     # No try needed: _predict assignment is the last mutation; fall through.
 
     # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
-    #    Finalizer unsubscribes the callback. NO stats finalize (audit F2).
+    #    Finalizer unsubscribes the callback. No stats finalize.
     def _restore_predict() -> None:
         if _predict_was_instance_attr:
             flux._predict = _original_predict
@@ -140,7 +140,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

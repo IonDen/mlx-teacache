@@ -29,7 +29,7 @@ from tests._mflux_surface import assigned_attributes, return_tuple_arities
 
 
 def test_callback_registry_exposes_list_attributes() -> None:
-    """These four are the PRIMARY callback lists _remove_callback_by_identity walks during restore(). It also has a suffixed-name fallback (before_loop_callbacks, etc.), so a bare-name rename in mflux would red THIS test as a heads-up even if production's fallback still carries it — treat a failure as 'go re-read _remove_callback_by_identity', not necessarily a hard break."""
+    """These four are the only callback lists _remove_callback_by_identity walks during restore(); a rename in mflux reds this test — go re-read _remove_callback_by_identity."""
     from mflux.callbacks.callback_registry import CallbackRegistry
 
     reg = CallbackRegistry()

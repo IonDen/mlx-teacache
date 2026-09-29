@@ -6,32 +6,37 @@ import re
 import subprocess
 import sys
 
+EXPECTED_ALL = {
+    "__version__",
+    "apply_teacache",
+    "TeaCacheHandle",
+    "TeaCacheStats",
+    "GenerationStats",
+    "StepDecision",
+    "StatsFrozenError",
+    "Provenance",
+    "TeaCacheError",
+    "TeaCacheValueError",
+    "TeaCacheDisabledWarning",
+    "TeaCacheNoBenefitWarning",
+    "TeaCacheUncalibratedCheckpointWarning",
+    "IncompatibleModelError",
+    "AlreadyPatchedError",
+    "CalibrationError",
+    "TransformerShapeError",
+    "InternalStateError",
+    "InvalidStepWindowError",
+    "MissingGenerationContextError",
+}
 
-def test_root_package_exports() -> None:
+
+def test_all_is_exactly_the_public_surface() -> None:
+    """Bug caught: dropping TeaCacheUncalibratedCheckpointWarning from __init__ passes the hasattr list."""
     import mlx_teacache
 
-    for name in [
-        "__version__",
-        "apply_teacache",
-        "TeaCacheHandle",
-        "TeaCacheStats",
-        "GenerationStats",
-        "StepDecision",
-        "Provenance",
-        "TeaCacheError",
-        "TeaCacheValueError",
-        "AlreadyPatchedError",
-        "CalibrationError",
-        "IncompatibleModelError",
-        "InternalStateError",
-        "InvalidStepWindowError",
-        "MissingGenerationContextError",
-        "StatsFrozenError",
-        "TeaCacheDisabledWarning",
-        "TeaCacheNoBenefitWarning",
-        "TransformerShapeError",
-    ]:
-        assert hasattr(mlx_teacache, name), f"missing public export: {name}"
+    assert set(mlx_teacache.__all__) == EXPECTED_ALL
+    for name in EXPECTED_ALL:
+        getattr(mlx_teacache, name)
 
 
 def test_stats_submodule_paths() -> None:
@@ -144,3 +149,77 @@ def test_stale_row_names_catches_one_dropped_name_in_a_grouped_row():
     assert _stale_row_names(rows, _REGISTRY) == []
     without_base_9b = [v for v in _REGISTRY if v != "flux2-klein-base-9b"]
     assert _stale_row_names(rows, without_base_9b) == ["-base-9b"]
+
+
+_NAMES = r"[a-z0-9][a-z0-9-]*(?: / -[a-z0-9-]+| / [a-z0-9][a-z0-9-]*)*"
+
+
+def _expand_names(group: str) -> list[str]:
+    """``"flux2-klein-base-4b / -base-9b"`` -> both full ids. A ``-suffix`` token
+    replaces as many trailing dash-segments of the group's first name."""
+    tokens = [t.strip() for t in group.split(" / ")]
+    first = tokens[0]
+    out = [first]
+    for tok in tokens[1:]:
+        if tok.startswith("-"):
+            keep = first.split("-")[: -(tok.count("-"))]
+            out.append("-".join(keep) + tok)
+        else:
+            out.append(tok)
+    return out
+
+
+def _package_doc_defaults(doc: str) -> tuple[dict[str, str], list[str], str | None]:
+    """Parse the root docstring's default paragraph into (id -> threshold text,
+    distilled ids, distilled fallback text)."""
+    para = doc[doc.index("rel_l1_thresh defaults to") :].split("\n\n")[0]
+    para = " ".join(para.split())
+    per_id: dict[str, str] = {}
+    for m in re.finditer(r"(?<![\w.])(\d\.\d\d) (" + _NAMES + ")", para):
+        for name in _expand_names(m.group(2)):
+            assert name not in per_id, f"{name} named twice"
+            per_id[name] = m.group(1)
+    distilled = re.search(r"Distilled (" + _NAMES + r") have none and use (\d\.\d\d)", para)
+    if distilled is None:
+        return per_id, [], None
+    return per_id, _expand_names(distilled.group(1)), distilled.group(2)
+
+
+def test_package_docstring_states_each_variant_with_its_own_default() -> None:
+    """Bug caught: the root docstring pairs a variant with another variant's number
+    (e.g. "0.30 flux1-dev" while flux1-dev defaults to 0.20 and Krea to 0.30), drops a
+    variant, or stops naming the distilled pair that has no default of its own."""
+    import mlx_teacache
+    from mlx_teacache.variants import _REGISTRY
+
+    doc = mlx_teacache.__doc__ or ""
+    per_id, distilled, fallback = _package_doc_defaults(doc)
+    with_default = {
+        vid: f"{e['default_thresh']:.2f}" for vid, e in _REGISTRY.items() if e["default_thresh"] is not None
+    }
+    without_default = sorted(vid for vid, e in _REGISTRY.items() if e["default_thresh"] is None)
+    assert per_id == with_default
+    assert sorted(distilled) == without_default == ["flux2-klein-4b", "flux2-klein-9b"]
+    assert fallback == "0.20"
+    assert "Provenance.default_thresh" not in doc
+
+
+def test_package_doc_parser_pairs_each_name_with_its_own_number() -> None:
+    """Bug caught: the parser credits a grouped or shared number to the wrong ids,
+    so the association test above passes a swapped docstring."""
+    swapped = (
+        "rel_l1_thresh defaults to a per-variant value:\n"
+        "    0.30 flux1-dev / flux1-schnell, 0.20 flux1-krea-dev, 0.17 flux2-klein-base-4b /\n"
+        "    -base-9b. Distilled flux2-klein-4b / -9b have none and use 0.20.\n"
+    )
+    per_id, distilled, fallback = _package_doc_defaults(swapped)
+    assert per_id == {
+        "flux1-dev": "0.30",
+        "flux1-schnell": "0.30",
+        "flux1-krea-dev": "0.20",
+        "flux2-klein-base-4b": "0.17",
+        "flux2-klein-base-9b": "0.17",
+    }
+    assert distilled == ["flux2-klein-4b", "flux2-klein-9b"]
+    assert fallback == "0.20"
+    assert _package_doc_defaults("rel_l1_thresh defaults to 0.20 flux1-dev.")[1:] == ([], None)

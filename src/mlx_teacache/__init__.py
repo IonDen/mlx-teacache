@@ -4,9 +4,10 @@
 Public API:
     apply_teacache(flux, *, rel_l1_thresh=..., ...)
         Enable TeaCache on a supported mflux FLUX, Qwen-Image, or Z-Image model.
-        rel_l1_thresh defaults to the variant's Provenance.default_thresh
-        if set: 0.17 for flux2-klein-base, 0.12 for z-image-base, and 0.30
-        for qwen-image. Other variants use the 0.20 package fallback.
+        rel_l1_thresh defaults to a per-variant value (see apply_teacache's docstring):
+        0.20 flux1-dev / flux1-schnell, 0.30 flux1-krea-dev, 0.17 flux2-klein-base-4b /
+        -base-9b, 0.12 z-image-base, 0.30 qwen-image. Distilled flux2-klein-4b / -9b have
+        none and use 0.20.
 
     TeaCacheHandle
         Context-manager-compatible return value with .stats, .provenance, .restore().

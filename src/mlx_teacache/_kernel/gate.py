@@ -11,19 +11,22 @@ from typing import Literal
 
 import mlx.core as mx
 
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache.errors import TeaCacheValueError
+
 GateKind = Literal["computed", "forced", "skipped", "numerical-miss"]
 
+# Runaway-skip guard, not a tuning knob (intentional divergence from
+# upstream ali-vilab TeaCache, like the max(0,·) clamp below). The
+# origin-constrained in-repo fits are positive for small deltas but cross
+# zero at large ones (base-4b x≈0.24, z-image x≈0.29, qwen x≈0.78), past the
+# range they were calibrated on; there the max(0,·) clamp turns a large,
+# real change into a predicted change of zero, so the accumulator stops
+# advancing and a stale residual could be reused without bound at a
+# user-raised threshold. Observed max streaks at per-variant default
+# thresholds are recorded in docs/calibration.md; raise this constant only
+# from a re-measured run.
 MAX_CONSECUTIVE_SKIPS = 8
-"""Runaway-skip guard, not a tuning knob (intentional divergence from
-upstream ali-vilab TeaCache, like the max(0,·) clamp below). The
-origin-constrained in-repo fits are positive for small deltas but cross
-zero at large ones (base-4b x≈0.24, z-image x≈0.29, qwen x≈0.78), past the
-range they were calibrated on; there the max(0,·) clamp turns a large,
-real change into a predicted change of zero, so the accumulator stops
-advancing and a stale residual could be reused without bound at a
-user-raised threshold. Observed max streaks at per-variant default
-thresholds are recorded in docs/calibration.md; raise this constant only
-from a re-measured run."""
 
 
 @dataclass(frozen=True)
@@ -45,15 +48,14 @@ def poly_eval(coeffs: tuple[float, float, float, float, float], x: float) -> flo
 def mean_abs_rel_l1(current: mx.array, previous: mx.array) -> float:
     """Mean absolute relative L1 distance: mean(|current - previous|) / mean(|previous|).
 
-    The element-wise difference stays in the inputs' dtype (bf16 in every shipped
-    variant); the two reductions return float32 scalars. ``mx.mean`` on a bf16
-    array accumulates in float32 but rounds its result back to bf16, up to half
-    a bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 %
-    on their ratio; that rounding is not something a polynomial calibrated on
-    one trace can absorb. The casts cost one extra pass and a transient float32
-    buffer per reduction, immaterial next to a transformer step. Both scalars
-    are evaluated in one sync. Guards against division by zero with a small
-    epsilon."""
+    The element-wise difference stays in the inputs' dtype; both reductions run in
+    float32 (the cast is a no-op when the inputs already are float32). ``mx.mean`` on a
+    bf16 array accumulates in float32 but rounds its result back to bf16, up to half a
+    bf16 ulp (about 1e-3 relative) on each of the two numbers and up to ~0.4 % on their
+    ratio; that rounding is not something a polynomial calibrated on one trace can
+    absorb. The casts cost one extra pass and a transient float32 buffer per reduction,
+    immaterial next to a transformer step. Both scalars are evaluated in one sync.
+    Guards against division by zero with a small epsilon."""
     num_arr = mx.mean(mx.abs(current - previous).astype(mx.float32))
     denom_arr = mx.mean(mx.abs(previous).astype(mx.float32))
     mx.eval(num_arr, denom_arr)
@@ -64,8 +66,8 @@ def _all_finite(t: mx.array) -> bool:
     return bool(mx.all(mx.isfinite(t)))
 
 
-def gate_step(  # type: ignore[no-untyped-def]
-    state,
+def gate_step(
+    state: TeaCacheState,
     *,
     rel_l1_thresh: float,
     coefficients: tuple[float, float, float, float, float],
@@ -78,8 +80,7 @@ def gate_step(  # type: ignore[no-untyped-def]
 ) -> GateDecision:
     """Return a structured decision for one denoising step.
 
-    `state` is a mlx_teacache.cache.TeaCacheState (duck-typed here to keep the
-    gate module pure / circular-import-free).
+    `state` is the per-generation TeaCacheState; the gate reads and updates it.
 
     `calibrated_range` is the (min, max) rel_l1 the coefficients were fitted on.
     When given, the measured delta is clamped into it before the polynomial is
@@ -88,6 +89,9 @@ def gate_step(  # type: ignore[no-untyped-def]
     change. A delta above the range always computes. The decision still reports
     the measured rel_l1. None (the default, and always for caller-supplied
     coefficients) evaluates the raw delta."""
+    if calibrated_range is not None and calibrated_range[0] > calibrated_range[1]:
+        raise TeaCacheValueError(f"calibrated_range must be (lo, hi) with lo <= hi, got {calibrated_range}")
+
     # Hard short-circuit: threshold <= 0 ⇒ always compute, never cache.
     # At non-positive threshold no future step can ever be skipped, so the
     # cache can never be consumed. Setting should_update_cache=False avoids

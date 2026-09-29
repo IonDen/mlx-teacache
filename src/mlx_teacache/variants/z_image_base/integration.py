@@ -111,7 +111,7 @@ def _step_decision_from_gate(decision: GateDecision, *, step_idx: int, timestep:
 
 
 # ---------- Re-walk of ZImageTransformer.__call__ (transformer.py:57-139). ----------
-# Ported from scripts/calibrate_z_image.py::_zimage_capture_forward, split so the
+# Mirrors the calibration capture forward, split so the
 # main-layer loop can stop after layer 0 on a skip step.
 
 
@@ -505,7 +505,7 @@ def apply(
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation after callback registration raises, preceding mutations
     # are reversed. Start with the callback unregister.
     _rollbacks_so_far: list[Any] = [lambda: _remove_callback_by_identity(flux.callbacks, callback)]

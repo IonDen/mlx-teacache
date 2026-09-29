@@ -1,5 +1,5 @@
 # src/mlx_teacache/integrations/mflux/lifecycle.py
-"""Lifecycle helpers for both FLUX.1 and FLUX.2:
+"""Lifecycle helpers shared by every variant family:
 
 1. _GenerationContextCallback — registered on flux.callbacks. Implements all
    three protocols (BeforeLoopCallback, AfterLoopCallback, InterruptCallback)
@@ -7,23 +7,18 @@
 
 2. wrap_generate_image — replaces flux.generate_image with a try/finally
    wrapper that clears handle._gen_ctx and discards/commits in-progress stats
-   based on completion status (per spec §4.5 + §5.5 v2.5).
+   based on completion status.
 
 Both signatures match mflux/callbacks/callback.py exactly. Extra **kwargs are
 accepted for forward-compat with future mflux releases that add new keyword
 arguments (e.g., kontext_image).
-
-v0.4.1 changes:
-- Dropped the flux2_cfg_fallback warning-suppression block in call_before_loop.
-  The CFG path is now gated (Task 4/5), so skipping is achievable even at
-  guidance > 1.0; the old suppression was masking legitimate no-benefit warnings.
-- call_after_loop now reads cfg_was_active from
-  _staging.cfg_was_active (set by the predict closure on first CFG branch entry)
-  instead of the obsolete cfg_fallback > 0 derivation."""
+"""
 
 import warnings
 from dataclasses import dataclass
 from typing import Any
+
+from mlx_teacache.errors import InternalStateError
 
 
 @dataclass
@@ -148,9 +143,8 @@ class GenerationContextCallback:
             # discard stats.
             active_num_steps = _active_step_count(config)
 
-        # v0.4.1+: cfg_was_active is set by the predict closure on first CFG branch entry.
-        # The old cfg_fallback>0 derivation is obsolete because production no longer
-        # records "cfg-fallback" decisions.
+        # cfg_was_active is set by the predict closure on first CFG branch entry
+        # (no "cfg-fallback" decisions are recorded any more).
         self._handle._pending_finalize = PendingFinalize(
             num_inference_steps=active_num_steps,
             cfg_was_active=self._handle._state.stats._staging.cfg_was_active,
@@ -184,7 +178,7 @@ class GenerationContextCallback:
 
 def wrap_generate_image(flux: Any, handle: Any) -> None:
     """Replace flux.generate_image with a try/finally wrapper that:
-    - Verifies our lifecycle callback is still registered (per audit medium #4).
+    - Verifies our lifecycle callback is still registered.
     - On natural completion: finalizes staged stats via _pending_finalize.
     - On any other exit: discards staged stats so failed runs leave no trace.
     - Always clears _gen_ctx so context can't leak across runs.
@@ -200,7 +194,7 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
     original = flux.generate_image  # bound regardless of source
 
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        # Per audit medium #4: verify our lifecycle callback is still registered
+        # Verify our lifecycle callback is still registered
         # BEFORE the generation runs. If the user replaced or cleared
         # flux.callbacks after apply_teacache(), we must fail loudly rather than
         # silently disable img2img rejection / stats finalization.
@@ -232,14 +226,32 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
             cache = getattr(handle._state, "cache", None)
             if cache is not None:
                 cache.release_arrays()
-            if completed and handle._pending_finalize is not None:
+            stats = handle._state.stats
+            if getattr(stats, "_frozen", False):
+                # restore() ran while this generation was in flight (e.g. from an
+                # after-loop callback). Stats are frozen by design; there is
+                # nothing to commit or discard, and the caller's result must
+                # still be returned.
+                pass
+            elif completed and handle._pending_finalize is not None:
                 pf: PendingFinalize = handle._pending_finalize
-                handle._state.stats.finalize_last_generation(
-                    num_inference_steps=pf.num_inference_steps,
-                    cfg_was_active=pf.cfg_was_active,
-                )
+                try:
+                    stats.finalize_last_generation(
+                        num_inference_steps=pf.num_inference_steps,
+                        cfg_was_active=pf.cfg_was_active,
+                    )
+                except InternalStateError as exc:
+                    # The image is finished; a bookkeeping mismatch must not replace it.
+                    # Clear first: under an error-level warnings filter (test
+                    # configurations only) the warning below escalates and raises.
+                    handle._pending_finalize = None
+                    warnings.warn(
+                        f"TeaCache stats for this generation were discarded: {exc}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
             else:
-                handle._state.stats.discard_current_generation()
+                stats.discard_current_generation()
             handle._pending_finalize = None
 
     flux.generate_image = wrapped
@@ -247,38 +259,31 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
 
 def _remove_callback_by_identity(registry: Any, target: Any) -> bool:
     """Walk every callback list on the registry and remove `target` by identity.
-    Returns True iff at least one removal succeeded. mflux 0.17 stores the
-    actual lists on `before_loop` / `in_loop` / `after_loop` / `interrupt`;
-    the suffixed names (`*_callbacks`) are methods returning those same lists.
-    We try the real list names first, then the suffixed names (for backward
-    compat with existing fake-registry test fixtures), then generic fallbacks."""
+    Returns True iff at least one removal succeeded. mflux's CallbackRegistry
+    stores the lists on `before_loop` / `in_loop` / `after_loop` / `interrupt`.
+
+    Each list is replaced by a filtered copy rather than edited in place:
+    restore() can run from inside an after-loop callback while mflux is still
+    iterating that very list, and deleting an earlier entry would shift the
+    list under the loop so the next callback is skipped. The loop keeps
+    walking the old list; later readers see the new one."""
     removed_any = False
     for attr in (
         "before_loop",
         "in_loop",
         "after_loop",
         "interrupt",
-        "before_loop_callbacks",
-        "in_loop_callbacks",
-        "after_loop_callbacks",
-        "interrupt_callbacks",
-        "_callbacks",
-        "callbacks",
     ):
         lst = getattr(registry, attr, None)
-        if isinstance(lst, list):
-            for i in range(len(lst) - 1, -1, -1):
-                if lst[i] is target:
-                    del lst[i]
-                    removed_any = True
+        if isinstance(lst, list) and any(item is target for item in lst):
+            setattr(registry, attr, [item for item in lst if item is not target])
+            removed_any = True
     return removed_any
 
 
 def _callback_present_by_identity(registry: Any, target: Any) -> bool:
-    """Return True iff target is registered (by identity) on any of the standard
-    callback lists. mflux 0.17's CallbackRegistry stores lists on `before_loop`
-    etc.; the suffixed names are methods. Check real names first, then the
-    suffixed names (for fake-registry test fixtures), then generic fallbacks."""
+    """Return True iff target is registered (by identity) on any of mflux's
+    callback lists (`before_loop` / `in_loop` / `after_loop` / `interrupt`)."""
     if registry is None:
         return False
     for attr in (
@@ -286,12 +291,6 @@ def _callback_present_by_identity(registry: Any, target: Any) -> bool:
         "in_loop",
         "after_loop",
         "interrupt",
-        "before_loop_callbacks",
-        "in_loop_callbacks",
-        "after_loop_callbacks",
-        "interrupt_callbacks",
-        "_callbacks",
-        "callbacks",
     ):
         lst = getattr(registry, attr, None)
         if isinstance(lst, list) and any(item is target for item in lst):

@@ -72,6 +72,5 @@ class TeaCacheHandle:
             raise errors[0]
         for on_success in self._patch.on_restored:
             on_success()
-        if hasattr(self.stats, "_freeze"):
-            self.stats._freeze()
+        self.stats._freeze()
         self._torn_down = True

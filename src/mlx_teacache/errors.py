@@ -2,6 +2,16 @@
 """Typed exception hierarchy for mlx-teacache. Every error names the parameter
 and actual value; messages include remediation pointers where applicable."""
 
+from typing import Any
+
+
+def _rebuild(cls: type, kwargs: dict[str, Any]) -> Any:
+    """Unpickle helper for exceptions whose constructors are keyword-only.
+
+    Each ``__reduce__`` below also returns the instance ``__dict__`` as state, so
+    ``add_note`` notes and attributes set after construction survive the round trip."""
+    return cls(**kwargs)
+
 
 class TeaCacheError(Exception):
     """Base class — catch this to catch anything from mlx-teacache."""
@@ -23,6 +33,20 @@ class IncompatibleModelError(TeaCacheError):
         self.actual_model_name = actual_model_name
         self.supported = supported
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (
+                type(self),
+                {
+                    "actual_type": self.actual_type,
+                    "actual_model_name": self.actual_model_name,
+                    "supported": self.supported,
+                },
+            ),
+            self.__dict__,
+        )
+
 
 class AlreadyPatchedError(TeaCacheError):
     def __init__(self, *, variant_id: str, rel_l1_thresh: float) -> None:
@@ -34,12 +58,22 @@ class AlreadyPatchedError(TeaCacheError):
         self.variant_id = variant_id
         self.rel_l1_thresh = rel_l1_thresh
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (type(self), {"variant_id": self.variant_id, "rel_l1_thresh": self.rel_l1_thresh}),
+            self.__dict__,
+        )
+
 
 class CalibrationError(TeaCacheError):
     def __init__(self, *, variant_id: str, reason: str) -> None:
         super().__init__(f"Coefficient calibration data for variant {variant_id!r} is invalid: {reason}.")
         self.variant_id = variant_id
         self.reason = reason
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild, (type(self), {"variant_id": self.variant_id, "reason": self.reason}), self.__dict__)
 
 
 class TransformerShapeError(TeaCacheError):
@@ -54,6 +88,9 @@ class TransformerShapeError(TeaCacheError):
         self.expected = expected
         self.actual = actual
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (self.step_idx, self.expected, self.actual), self.__dict__)
+
 
 class InvalidStepWindowError(TeaCacheError):
     def __init__(
@@ -61,13 +98,13 @@ class InvalidStepWindowError(TeaCacheError):
         *,
         skip_first: int,
         skip_last: int,
-        num_steps: int,  # legacy alias for active count
+        num_steps: int,  # accepted alias of active_num_steps; the built-in callers pass this
         nominal_num_inference_steps: int | None = None,
         active_num_steps: int | None = None,
     ) -> None:
-        # Resolve which value represents the "active" denoising step count.
-        # New callers may pass active_num_steps explicitly; old callers pass it
-        # via the legacy `num_steps` keyword.
+        # active_num_steps is the preferred keyword for the active denoising step
+        # count; num_steps is accepted as an alias and is what the built-in callers
+        # pass today.
         active = num_steps if active_num_steps is None else active_num_steps
 
         if nominal_num_inference_steps is not None and nominal_num_inference_steps != active:
@@ -85,22 +122,36 @@ class InvalidStepWindowError(TeaCacheError):
         super().__init__("skip_first_n_steps + skip_last_n_steps must be < active denoising steps" + tail)
         self.skip_first = skip_first
         self.skip_last = skip_last
-        self.num_steps = num_steps  # legacy attribute name preserved
+        self.num_steps = num_steps  # the value passed as num_steps
         self.nominal_num_inference_steps = nominal_num_inference_steps
         self.active_num_steps = active
+        # Raw constructor inputs, so a round trip re-derives the same message and attributes.
+        self._ctor = {
+            "skip_first": skip_first,
+            "skip_last": skip_last,
+            "num_steps": num_steps,
+            "nominal_num_inference_steps": nominal_num_inference_steps,
+            "active_num_steps": active_num_steps,
+        }
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild, (type(self), dict(self._ctor)), self.__dict__)
 
 
 class MissingGenerationContextError(TeaCacheError):
     def __init__(self, detail: str | None = None) -> None:
-        msg = (
-            "FLUX.2 generation started but no fresh generation context was captured. "
+        # A detail comes from a raiser whose text already carries the remedy.
+        msg = detail or (
+            "A generation started but no fresh generation context was captured. "
             "This usually means flux.callbacks was replaced or cleared after apply_teacache(), "
-            "or a previous generation crashed before lifecycle cleanup completed. "
+            "or a previous generation crashed before cleanup. "
             "Call handle.restore() and apply_teacache() again."
         )
-        if detail:
-            msg = f"{msg} (detail: {detail})"
         super().__init__(msg)
+        self.detail = detail
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (self.detail,), self.__dict__)
 
 
 class InternalStateError(TeaCacheError):

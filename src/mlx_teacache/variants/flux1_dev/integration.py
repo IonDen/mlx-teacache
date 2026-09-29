@@ -1,7 +1,7 @@
-"""FLUX.1 dev integration. Byte-for-byte port from v0.5.x:
-- src/mlx_teacache/integrations/mflux/flux1.py::ProxyFlux1Transformer
-- src/mlx_teacache/integrations/mflux/forward.py FLUX.1 forward block
-- src/mlx_teacache/api.py::apply_teacache FLUX.1 branch
+"""FLUX.1 dev integration, shared by the other FLUX.1 variants:
+- ProxyFlux1Transformer: an nn.Module standing in for flux.transformer.
+- flux1_forward_with_gate: the FLUX.1 forward with the gate between body and tail.
+- apply(): installs the proxy and the lifecycle hooks.
 
 mflux is imported only inside this module. The package registry loads
 this lazily, after detect.matches() wins.
@@ -27,6 +27,7 @@ _PROVENANCE = Provenance(
     revision="upstream-flux-v1",
     calibration_dataset="upstream ali-vilab TeaCache (no in-repo calibration)",
     reference_url="https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py",
+    default_thresh=DEFAULT_THRESH,
 )
 
 
@@ -77,7 +78,7 @@ class _InternalHandle:
         self._callback_instance: Any = None
 
 
-# ----- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/flux1.py -----
+# ----- Proxy transformer -----
 
 
 class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
@@ -130,6 +131,26 @@ class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
     def trainable_parameters(self) -> dict[str, Any]:
         return cast(dict[str, Any], self._inner.trainable_parameters())
 
+    # Everything nn.Module walks through update()/children()/filter_and_map()
+    # (load_weights, set_dtype, quantize, eval/train) must see the inner tree,
+    # not the proxy's own empty dict. Signatures match mlx 0.31.2 nn/layers/base.py.
+    def update(self, parameters: dict[str, Any], strict: bool = True) -> "ProxyFlux1Transformer":
+        self._inner.update(parameters, strict=strict)
+        return self
+
+    def update_modules(self, modules: dict[str, Any], strict: bool = True) -> "ProxyFlux1Transformer":
+        self._inner.update_modules(modules, strict=strict)
+        return self
+
+    def filter_and_map(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.filter_and_map(*args, **kwargs)
+
+    def children(self) -> Any:
+        return self._inner.children()
+
+    def leaf_modules(self) -> Any:
+        return self._inner.leaf_modules()
+
     def __getattr__(self, name: str) -> Any:
         # nn.Module's __getattr__ handles dict children + parameters. Fall
         # back to the inner module for anything else (x_embedder,
@@ -143,8 +164,7 @@ class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
             return getattr(inner, name)
 
 
-# ----- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/forward.py -----
-# FLUX.1 block only.
+# ----- Gated FLUX.1 forward -----
 
 from mlx_teacache.errors import (  # noqa: E402
     InternalStateError,
@@ -259,7 +279,7 @@ def flux1_forward_with_gate(
     """Replacement for mflux.models.flux.model.flux_transformer.transformer.Transformer.__call__
     with TeaCache gating inserted between body and tail.
 
-    img2img is supported as of v0.2.0. The forward path uses state.step_counter
+    img2img is supported. The forward path uses state.step_counter
     (0-based, per-generation) rather than the scheduler's absolute `t` for gate
     indexing, so img2img runs starting mid-schedule still index correctly.
 
@@ -439,7 +459,7 @@ def apply(
 
     import contextlib
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation raises after the first, all preceding mutations are reversed.
     _rollbacks_so_far: list[Any] = []
 
@@ -473,7 +493,7 @@ def apply(
         raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
-    #    callback + restores generate_image. NO stats finalize call (audit F2).
+    #    callback + restores generate_image. No stats finalize call.
     def _restore_transformer() -> None:
         flux.transformer = original_transformer
 
@@ -494,7 +514,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

@@ -1,5 +1,5 @@
-"""FLUX.1 schnell integration. Reuses FLUX.1 dev's proxy + forward
-verbatim; same transformer architecture. Only the public-facing
+"""FLUX.1 schnell integration. Uses FLUX.1 dev's proxy and forward; the code
+is shared (same transformer architecture). Only the public-facing
 metadata (provenance) and the apply() defaults differ.
 """
 
@@ -9,7 +9,7 @@ from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import wrap_generate_image
 
-# Reuse the verbatim port from flux1_dev — identical forward code.
+# Uses flux1_dev's proxy and forward; the code is shared.
 from mlx_teacache.variants.flux1_dev.integration import (
     ProxyFlux1Transformer,
     _InternalHandle,
@@ -22,6 +22,7 @@ _PROVENANCE = Provenance(
     revision="upstream-flux-v1-shared",
     calibration_dataset="upstream ali-vilab TeaCache (FLUX architecture is shared between dev and schnell)",
     reference_url="https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py",
+    default_thresh=DEFAULT_THRESH,
 )
 
 
@@ -61,7 +62,7 @@ def apply(
 
     import contextlib
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation raises after the first, all preceding mutations are reversed.
     _rollbacks_so_far: list[Any] = []
 
@@ -91,7 +92,7 @@ def apply(
         raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
-    #    callback + restores generate_image. NO stats finalize call (audit F2).
+    #    callback + restores generate_image. No stats finalize call.
     def _restore_transformer() -> None:
         flux.transformer = original_transformer
 
@@ -112,7 +113,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

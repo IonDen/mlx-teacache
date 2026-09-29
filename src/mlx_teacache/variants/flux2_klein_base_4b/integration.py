@@ -1,13 +1,12 @@
-"""FLUX.2 Klein base 4B integration. Byte-for-byte port from v0.5.x:
-- src/mlx_teacache/integrations/mflux/flux2.py (proxy / factory)
-- src/mlx_teacache/integrations/mflux/forward.py FLUX.2 block:
-  * _flux2_extract_mod_input
-  * _flux2_run_body
-  * flux2_forward_with_gate (no-CFG path)
-  * flux2_cfg_forward_with_gate (CFG-per-branch, v0.4.1)
-  * _flux2_apply_tail_and_combine
-- src/mlx_teacache/api.py::apply_teacache FLUX.2 branch (apply logic +
-  guidance-based forward selection)
+"""FLUX.2 Klein base 4B integration: the gated forwards, the `_predict`
+replacement and `apply()`, which the other FLUX.2 Klein variants reuse.
+
+- _flux2_extract_mod_input, _flux2_run_body, _flux2_apply_tail_and_combine:
+  the pieces of the FLUX.2 transformer call that the gate splits apart.
+- flux2_forward_with_gate: the no-CFG path.
+- flux2_cfg_forward_with_gate: the CFG path, one shared gate decision per step
+  and one cached residual per branch.
+- apply(): wraps flux._predict and picks the forward from the guidance scale.
 
 mflux is imported only inside this module. The registry loads this
 lazily, after detect.matches() wins.
@@ -43,12 +42,11 @@ _PROVENANCE = Provenance(
     fit_metric="constrained-LSQ R^2 on consecutive-step (mod_in, body_out) rel-L1 pairs (poly(0)=0)",
     fit_metric_value=0.10643408169124158,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_flux2.py",
-    default_thresh=0.17,
+    default_thresh=DEFAULT_THRESH,
 )
 
 
-# ---------- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/forward.py ----------
-# FLUX.2 block: lines 258-664.
+# ---------- Gated FLUX.2 forwards ----------
 
 from mlx_teacache.errors import (  # noqa: E402
     InternalStateError,
@@ -145,7 +143,7 @@ def flux2_forward_with_gate(
 ) -> Any:
     """Replacement for Flux2Transformer.__call__ with gating.
 
-    img2img is supported as of v0.2.0; the active denoising window is set up
+    img2img is supported: the active denoising window is set up
     by lifecycle's call_before_loop and consumed via handle._gen_ctx. CFG is
     handled in the predict closure (we only reach this function for non-CFG
     steps). Skip-window validation is handled in the predict closure too
@@ -202,16 +200,17 @@ def flux2_forward_with_gate(
             temb_mod_params_txt,
             concat_rotary_emb,
         )
+        timestep_val = float(timestep.flatten()[0])
         stats.record(
             StepDecision(
                 step_idx=state.step_counter,
-                timestep=float(timestep.flatten()[0]),
+                timestep=timestep_val,
                 rel_l1=None,
                 accumulated_distance=state.accumulated_distance,
                 decision="computed",
             )
         )
-        state.last_timestep = float(timestep.flatten()[0])
+        state.last_timestep = timestep_val
         out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
         out = inner.norm_out(out, temb)
         out = inner.proj_out(out)
@@ -249,19 +248,12 @@ def flux2_forward_with_gate(
         calibrated_range=handle.calibrated_range,
     )
 
-    # 5. Stats record.
-    stats.record(
-        _step_decision_from_gate(
-            decision,
-            step_idx=state.step_counter,
-            timestep=float(timestep.flatten()[0]),
-        )
-    )
+    # 5. Stats record and timestep tracking (one host read for both).
+    timestep_val = float(timestep.flatten()[0])
+    stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
+    state.last_timestep = timestep_val
 
-    # 6. Debug-only timestep tracking.
-    state.last_timestep = float(timestep.flatten()[0])
-
-    # 7. Compute path.
+    # 6. Compute path.
     if decision.should_compute:
         body_out_concat = _flux2_run_body(
             inner,
@@ -304,7 +296,7 @@ def flux2_cfg_forward_with_gate(
     timestep: mx.array,
     img_ids: mx.array,
 ) -> Any:
-    """v0.4.1: gated CFG forward for FLUX.2.
+    """Gated CFG forward for FLUX.2.
 
     One shared polynomial-gate decision per step (mod_in is encoder-
     independent — see forward.py:258-304). Two cached residuals
@@ -458,7 +450,7 @@ def _flux2_apply_tail_and_combine(
     return noise_neg + guidance * (noise_pos - noise_neg)
 
 
-# ---------- PORTED VERBATIM from src/mlx_teacache/integrations/mflux/flux2.py ----------
+# ---------- _predict replacement ----------
 
 PredictFn = Callable[
     [mx.array, mx.array, mx.array, mx.array, "mx.array | None", "mx.array | None", float, mx.array],
@@ -499,11 +491,9 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
                 ctx.consumed_at_token = ctx.token
                 context_consumed = True
 
-            # 2. Lazy skip-window validation. v0.4.1: lifted up so it runs on
-            #    the first gated call regardless of CFG. In v0.4.0 the CFG
-            #    branch bypassed this; an all-CFG generation with a bad
-            #    window silently ran vanilla. This is now a behavior change
-            #    documented in CHANGELOG.
+            # 2. Lazy skip-window validation. It runs on the first gated call
+            #    regardless of CFG, so an all-CFG generation with a bad window
+            #    raises instead of silently running vanilla.
             if not handle._state.cache.skip_window_validated:
                 if handle.skip_first_n_steps + handle.skip_last_n_steps >= ctx.active_num_steps:
                     raise InvalidStepWindowError(
@@ -559,12 +549,11 @@ def apply(
     skip_first_n_steps: int = 1,
     skip_last_n_steps: int = 1,
 ) -> TeaCacheHandle:
-    """FLUX.2 Klein base 4B apply. Public-API-equivalent of the FLUX.2 branch
-    of v0.5.x apply_teacache.
+    """Patch a FLUX.2 Klein base 4B model (the other Klein variants call this too).
 
     FLUX.2 wraps flux._predict (not flux.transformer). VariantPatch rollback
     deletes the _predict instance attribute; finalizer unsubscribes callback.
-    No stats finalize in either (audit F2)."""
+    No stats finalize in either."""
     # 1. Resolve rel_l1_thresh.
     # Priority: explicit caller > per-variant DEFAULT_THRESH (only when using
     # builtin coefficients) > package fallback 0.20.
@@ -603,7 +592,7 @@ def apply(
     callback = GenerationContextCallback(internal)
     internal._callback_instance = callback
 
-    # Eager rollback list for the transactional patch (per audit medium #3):
+    # Eager rollback list for the transactional patch:
     # if any mutation after callback registration raises, preceding mutations
     # are reversed. Start with the callback unregister.
     from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
@@ -640,7 +629,7 @@ def apply(
     # No try needed: _predict assignment is the last mutation; fall through.
 
     # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
-    #    Finalizer unsubscribes the callback. NO stats finalize (audit F2).
+    #    Finalizer unsubscribes the callback. No stats finalize.
     def _restore_predict() -> None:
         if _predict_was_instance_attr:
             flux._predict = _original_predict
@@ -658,7 +647,7 @@ def apply(
         finalizers=[_unsubscribe_callback],
     )
 
-    # 8. Return public TeaCacheHandle (variant-agnostic, audit F3).
+    # 8. Return the public, variant-agnostic TeaCacheHandle.
     handle = TeaCacheHandle(
         patch=patch,
         stats=internal._state.stats,

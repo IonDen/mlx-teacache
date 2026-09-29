@@ -10,13 +10,16 @@ from mlx_teacache import apply_teacache
 from mlx_teacache.errors import IncompatibleModelError
 
 
-def test_signature_has_explicit_kwargs() -> None:
-    """All four v0.5.x public kwargs must survive."""
-    sig = inspect.signature(apply_teacache)
-    expected = {"flux", "rel_l1_thresh", "coefficients", "skip_first_n_steps", "skip_last_n_steps"}
-    actual = set(sig.parameters.keys())
-    missing = expected - actual
-    assert not missing, f"public kwargs missing: {missing}"
+def test_apply_teacache_signature_is_frozen() -> None:
+    """Bug caught: a new kwarg, a dropped `*`, or a changed default passes a subset check."""
+    params = inspect.signature(apply_teacache).parameters
+    assert [(n, p.kind, p.default) for n, p in params.items()] == [
+        ("flux", inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.empty),
+        ("rel_l1_thresh", inspect.Parameter.KEYWORD_ONLY, None),
+        ("coefficients", inspect.Parameter.KEYWORD_ONLY, None),
+        ("skip_first_n_steps", inspect.Parameter.KEYWORD_ONLY, 1),
+        ("skip_last_n_steps", inspect.Parameter.KEYWORD_ONLY, 1),
+    ]
 
 
 def test_skip_first_n_steps_default_is_1() -> None:

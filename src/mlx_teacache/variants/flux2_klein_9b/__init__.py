@@ -1,3 +1,5 @@
+"""FLUX.2 Klein 9B variant."""
+
 from .config import META
 from .detect import matches
 

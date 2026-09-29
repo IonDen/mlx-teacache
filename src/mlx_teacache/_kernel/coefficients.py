@@ -1,9 +1,8 @@
 """Canonical home for the Provenance dataclass and coefficient utilities.
 
-The coefficient _REGISTRY and per-variant tuples lived in
-src/mlx_teacache/coefficients.py through Phase A — they moved to
-per-variant config.py files in Phase C (Task 18). The legacy
-src/mlx_teacache/coefficients.py is now a Provenance re-export shim.
+The per-variant coefficient tuples live in each variant's config.py.
+src/mlx_teacache/coefficients.py re-exports Provenance and validate_custom
+from here.
 """
 
 import math

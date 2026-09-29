@@ -123,6 +123,26 @@ class ProxyQwenTransformer(nn.Module):  # type: ignore[misc,name-defined]
     def trainable_parameters(self) -> dict[str, Any]:
         return cast(dict[str, Any], self._inner.trainable_parameters())
 
+    # Everything nn.Module walks through update()/children()/filter_and_map()
+    # (load_weights, set_dtype, quantize, eval/train) must see the inner tree,
+    # not the proxy's own empty dict. Signatures match mlx 0.31.2 nn/layers/base.py.
+    def update(self, parameters: dict[str, Any], strict: bool = True) -> "ProxyQwenTransformer":
+        self._inner.update(parameters, strict=strict)
+        return self
+
+    def update_modules(self, modules: dict[str, Any], strict: bool = True) -> "ProxyQwenTransformer":
+        self._inner.update_modules(modules, strict=strict)
+        return self
+
+    def filter_and_map(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.filter_and_map(*args, **kwargs)
+
+    def children(self) -> Any:
+        return self._inner.children()
+
+    def leaf_modules(self) -> Any:
+        return self._inner.leaf_modules()
+
     def __getattr__(self, name: str) -> Any:
         try:
             return super().__getattr__(name)

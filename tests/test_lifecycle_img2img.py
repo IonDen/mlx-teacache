@@ -164,8 +164,8 @@ def test_after_loop_defensive_recompute_when_gen_ctx_active_is_none():
 def test_before_loop_resets_stale_cache_for_img2img():
     """The actual safety property surfaced by the audit: lifecycle reset must
     clear stale cache state from a prior generation, including step_counter,
-    cached_residual, previous_mod_input, accumulated_distance.
-    The test seeds stale fields and asserts they are
+    cached_residual, previous_mod_input, accumulated_distance, last_timestep,
+    and (re)set num_steps. The test seeds stale fields and asserts they are
     cleared by call_before_loop."""
     import mlx.core as mx
 
@@ -176,16 +176,21 @@ def test_before_loop_resets_stale_cache_for_img2img():
     cache.cached_residual = mx.zeros((1, 24, 4))
     cache.previous_mod_input = mx.zeros((1, 16, 4))
     cache.accumulated_distance = 0.42
+    cache.last_timestep = 21.0
     cache.skip_window_validated = True
+    cache.num_steps = 25
 
     cb = GenerationContextCallback(handle)
     # New img2img generation with active=8.
     cfg = _make_config(25, image_strength=0.7)
     cb.call_before_loop(seed=1, prompt="hi", latents=None, config=cfg)
 
-    # Cache fields must be reset to a clean per-generation state.
+    # Cache fields must be reset to a clean per-generation state with
+    # num_steps == active_num_steps (8), not the stale 25 from the prior run.
     assert cache.step_counter == 0
     assert cache.cached_residual is None
     assert cache.previous_mod_input is None
     assert cache.accumulated_distance == 0.0
+    assert cache.last_timestep is None
     assert cache.skip_window_validated is False
+    assert cache.num_steps == 8  # lifecycle reset uses active count

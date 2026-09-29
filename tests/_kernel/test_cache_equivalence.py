@@ -17,12 +17,35 @@ def test_field_set_matches_v05():
         "cached_residual",
         "cached_residual_neg",
         "accumulated_distance",
+        "last_timestep",
         "skip_window_validated",
+        "num_steps",
         # v0.10.0: consecutive-delta anchoring (Option A) — runaway-skip streak counter.
         "consecutive_skips",
     }
     actual = {f.name for f in dataclasses.fields(TeaCacheState)}
     assert actual == expected_field_names
+
+
+def test_field_order_is_the_released_order():
+    """Bug caught: a field restored or added in a different position shifts every
+    later positional argument of ``TeaCacheState(...)``, so a caller that built
+    the state positionally against the released class gets wrong fields."""
+    from mlx_teacache._kernel.cache import TeaCacheState
+
+    assert [f.name for f in dataclasses.fields(TeaCacheState)] == [
+        "step_counter",
+        "previous_mod_input",
+        "cached_residual",
+        "cached_residual_neg",
+        "accumulated_distance",
+        "last_timestep",
+        "skip_window_validated",
+        "num_steps",
+        "consecutive_skips",
+    ]
+    fresh = TeaCacheState()
+    assert (fresh.last_timestep, fresh.num_steps) == (None, None)
 
 
 def test_reset_signature_takes_num_steps():
@@ -34,6 +57,8 @@ def test_reset_signature_takes_num_steps():
     s.cached_residual = mx.array([1.0])
     s.cached_residual_neg = mx.array([2.0])
     s.skip_window_validated = True
+    s.num_steps = 8
+    s.last_timestep = 0.5
     s.previous_mod_input = mx.array([0.1])
 
     s.reset_for_new_generation(num_steps=12)
@@ -43,7 +68,9 @@ def test_reset_signature_takes_num_steps():
     assert s.cached_residual is None
     assert s.cached_residual_neg is None
     assert s.accumulated_distance == 0.0
+    assert s.last_timestep is None
     assert s.skip_window_validated is False
+    assert s.num_steps == 12
 
 
 def test_shim_re_exports_state_identity():

@@ -210,6 +210,7 @@ def flux2_forward_with_gate(
                 decision="computed",
             )
         )
+        state.last_timestep = timestep_val
         out = body_out_concat[:, encoder_hidden_states.shape[1] :, ...]
         out = inner.norm_out(out, temb)
         out = inner.proj_out(out)
@@ -247,14 +248,10 @@ def flux2_forward_with_gate(
         calibrated_range=handle.calibrated_range,
     )
 
-    # 5. Stats record.
-    stats.record(
-        _step_decision_from_gate(
-            decision,
-            step_idx=state.step_counter,
-            timestep=float(timestep.flatten()[0]),
-        )
-    )
+    # 5. Stats record and timestep tracking (one host read for both).
+    timestep_val = float(timestep.flatten()[0])
+    stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
+    state.last_timestep = timestep_val
 
     # 6. Compute path.
     if decision.should_compute:
@@ -368,6 +365,7 @@ def flux2_cfg_forward_with_gate(
                 decision="computed",
             )
         )
+        state.last_timestep = timestep_val
         state.step_counter += 1
         return _flux2_apply_tail_and_combine(
             inner, body_out_pos, body_out_neg, enc_pos, enc_neg, temb, guidance
@@ -396,6 +394,7 @@ def flux2_cfg_forward_with_gate(
         calibrated_range=handle.calibrated_range,
     )
     stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
+    state.last_timestep = timestep_val
 
     # 5. Compute / skip — applied uniformly across both branches.
     body_in_concat_pos = mx.concatenate([enc_pos, body_in], axis=1)

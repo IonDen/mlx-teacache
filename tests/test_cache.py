@@ -14,7 +14,9 @@ def test_fresh_state_fields():
     assert s.cached_residual is None
     assert s.cached_residual_neg is None
     assert s.accumulated_distance == 0.0
+    assert s.last_timestep is None
     assert s.skip_window_validated is False
+    assert s.num_steps is None
     assert s.consecutive_skips == 0
 
 
@@ -25,6 +27,7 @@ def test_reset_for_new_generation_clears_all():
     s.cached_residual = mx.ones((1, 8, 8))
     s.cached_residual_neg = mx.ones((1, 8, 8))
     s.accumulated_distance = 0.123
+    s.last_timestep = 0.5
     s.skip_window_validated = True
     s.consecutive_skips = 3
     s.reset_for_new_generation(num_steps=10)
@@ -33,7 +36,9 @@ def test_reset_for_new_generation_clears_all():
     assert s.cached_residual is None
     assert s.cached_residual_neg is None
     assert s.accumulated_distance == 0.0
+    assert s.last_timestep is None
     assert s.skip_window_validated is False
+    assert s.num_steps == 10
     assert s.consecutive_skips == 0
 
 

@@ -85,6 +85,7 @@ from typing import Any
 
 import mlx.core as mx
 import numpy as np
+from _memory_saver import make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # reuse the RUNTIME signal fn
@@ -474,10 +475,8 @@ def _chunk_from_reducer(
 
 def _register_memory_saver(flux: Any, saver_cls: Any) -> None:
     """Free the Qwen2.5-VL text encoders once the prompt is encoded, with the same
-    MemorySaver the Qwen threshold sweep registers (same pinned kwargs)."""
-    from sweep_threshold_qwen import _make_memory_saver
-
-    flux.callbacks.register(_make_memory_saver(flux, saver_cls))
+    MemorySaver the Qwen threshold sweep and bench register (same pinned kwargs)."""
+    flux.callbacks.register(make_memory_saver(flux, saver_cls))
 
 
 def _run_memory_probe() -> None:

@@ -46,6 +46,7 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 from _bench_telemetry import streak_telemetry as _streak_telemetry
+from _memory_saver import make_memory_saver as _make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
@@ -149,15 +150,6 @@ def _build_summary(
 # ---------------------------------------------------------------------------
 # Generation (imperative shell).
 # ---------------------------------------------------------------------------
-
-
-def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
-    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned:
-    keep_transformer=True frees only the text encoders; cache_limit_bytes=None
-    keeps MemorySaver away from mx.set_cache_limit, mx.reset_peak_memory and the
-    tiled-VAE switch its default branch performs (tiling changes output pixels).
-    It also runs gc.collect and mx.clear_cache after every loop, uniformly."""
-    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
 
 
 def _gen(flux: Any, *, save_path: Path) -> float:

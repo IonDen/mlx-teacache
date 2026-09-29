@@ -8,6 +8,7 @@ this runs in the mflux lane.
 """
 
 import ast
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -231,6 +232,61 @@ def test_memory_saver_frees_the_text_encoders_with_the_load_bearing_kwargs() -> 
     cq._register_memory_saver(flux, _FakeSaver)
     assert len(registered) == 1
     assert registered[0].kw == dict(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+
+
+_NO_IMAGE_LIBS_PROBE = """
+import sys
+for name in ("skimage", "PIL", "scipy"):
+    sys.modules[name] = None
+sys.path.insert(0, sys.argv[1])
+import calibrate_qwen
+# the helper must already be loaded by the module import, i.e. before any model is built
+assert "_memory_saver" in sys.modules, "MemorySaver helper not imported at module load"
+
+class _Callbacks:
+    def __init__(self):
+        self.seen = []
+    def register(self, cb):
+        self.seen.append(cb)
+
+class _Flux:
+    callbacks = _Callbacks()
+
+flux = _Flux()
+calibrate_qwen._register_memory_saver(flux, lambda **kw: kw)
+assert flux.callbacks.seen == [
+    dict(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+], flux.callbacks.seen
+print("OK")
+"""
+
+
+def test_memory_saver_registration_needs_no_image_libraries() -> None:
+    """bug caught: the calibration worker and --memory-probe importing the MemorySaver
+    builder from the SSIM sweep script, which pulls PIL + scikit-image; on an env without
+    them the calibrator dies after the 20B model has already loaded."""
+    scripts = Path(cq.__file__).resolve().parent
+    proc = subprocess.run(
+        [sys.executable, "-c", _NO_IMAGE_LIBS_PROBE, str(scripts)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert proc.stdout.strip().endswith("OK")
+
+
+def test_memory_saver_module_imports_only_the_standard_library() -> None:
+    """bug caught: scripts/_memory_saver.py growing an import of PIL / skimage / scipy /
+    mflux at module level, which would put the image stack back on the calibrator's path."""
+    tree = ast.parse((Path(cq.__file__).resolve().parent / "_memory_saver.py").read_text())
+    top: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            top.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top.add(node.module.split(".")[0])
+    assert top <= {"typing", "collections"}, top
 
 
 def test_every_install_caps_call_bounds_the_cache_pool_to_one_gib() -> None:

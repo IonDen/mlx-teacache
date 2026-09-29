@@ -99,6 +99,7 @@ from typing import Any, cast
 
 from _bench_telemetry import mlx_version, repo_relative, teacache_version
 from _bench_telemetry import streak_telemetry as _streak_telemetry
+from _memory_saver import make_memory_saver as _make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
 
 PARTIAL_EXIT_CODE = 3
@@ -184,19 +185,6 @@ _DEFAULT_CACHE_GB = 2.0
 # compressed-memory thrash (a step went from ~20 s to ~230 s on 2026-09-06). Applied to
 # every condition of the run alike; the report records it.
 _VARIANT_MEMORY_SAVER: dict[str, bool] = {"qwen": True}
-
-
-def _make_memory_saver(flux: Any, saver_cls: Any) -> Any:
-    """Build mflux's MemorySaver with the load-bearing keyword arguments pinned.
-
-    keep_transformer=True frees only the text encoders. cache_limit_bytes=None
-    matters: MemorySaver's default (1 GB) branch calls mx.set_cache_limit,
-    overriding install_caps, calls mx.reset_peak_memory before the load peak is
-    read, and switches the VAE to tiled decode, which changes output pixels and
-    would make the SSIM numbers and committed images incomparable. MemorySaver
-    also runs gc.collect and mx.clear_cache after every loop; that applies to
-    every condition alike, so the ratios stand."""
-    return saver_cls(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
 
 
 def _memory_saver_for(variant: str) -> bool:

@@ -63,11 +63,11 @@ def test_no_public_doc_cites_gitignored_artifacts():
 
 
 def test_mflux_files_allowlist_all_exist():
-    from tests.conftest import _MFLUX_FILES
+    from tests._lanes import MFLUX_FILES
 
     tests_dir = _REPO / "tests"
-    missing = sorted(filename for filename in _MFLUX_FILES if not (tests_dir / filename).exists())
-    assert not missing, f"_MFLUX_FILES lists non-existent files: {missing}"
+    missing = sorted(rel_path for rel_path in MFLUX_FILES if not (tests_dir / rel_path).exists())
+    assert not missing, f"MFLUX_FILES lists non-existent files: {missing}"
 
 
 def test_public_docstring_summaries_name_all_supported_model_families():

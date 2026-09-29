@@ -1,9 +1,10 @@
 # tests/conftest.py
 """Shared pytest fixtures and marker handling.
 
-The `mflux` marker is auto-applied to every test whose file name is in the
-explicit `_MFLUX_FILES` allowlist below (matched exactly, not by glob) — these
-all import the integration layer and therefore require mflux. The
+The `mflux` marker is auto-applied to every test whose path relative to
+`tests/` is in the explicit allowlist in `tests/_lanes.py` (matched exactly, not
+by glob or basename) — these all import the integration layer and therefore
+require mflux. The
 test-pure-core CI job skips them via `-m "not mflux"`.
 
 Memory guardrail: at session start we install a hard cap on MLX wired
@@ -23,9 +24,11 @@ from __future__ import annotations
 import contextlib
 import sys
 from collections.abc import Iterator, Sequence
+from pathlib import Path
 
 import pytest
 
+from tests._lanes import is_mflux_file
 from tests._memory_guard import apply_mlx_memory_caps
 
 
@@ -41,31 +44,13 @@ def _install_mlx_memory_caps() -> None:
 _install_mlx_memory_caps()
 
 
-_MFLUX_FILES = {
-    "test_lifecycle.py",
-    "test_forward_flux1.py",
-    "test_forward_flux2.py",
-    "test_forward_z_image_fake.py",  # imports the z-image-base integration module
-    "test_cfg_branch_independence.py",  # calls flux2_cfg_forward_with_gate which lazily imports mflux
-    "test_api.py",
-    "test_parity_flux1.py",
-    "test_parity_flux2.py",
-    "test_parity_z_image.py",
-    "test_parity_qwen.py",
-    "test_parity_krea.py",
-    "test_image_quality_flux1.py",
-    "test_image_quality_flux2.py",
-    "test_detect.py",  # imports mflux types for variant detection
-    "test_mflux_contract_smoke.py",
-    "test_mflux_forward_drift.py",  # fingerprints the real mflux forwards
-    "test_comparison_qwen_config.py",
-}
+_TESTS_DIR = Path(__file__).resolve().parent
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     for item in items:
-        path = str(item.path.name)
-        if path in _MFLUX_FILES:
+        rel_path = Path(item.path).resolve().relative_to(_TESTS_DIR).as_posix()
+        if is_mflux_file(rel_path):
             item.add_marker(pytest.mark.mflux)
 
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
+import sys
 from pathlib import Path
 
 import mlx.core as mx
@@ -138,6 +139,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--variant", required=True, choices=["flux1-dev", "flux1-schnell", "flux2-klein-4b"])
     args = parser.parse_args()
+
+    # Caps and the active+cache watchdog go in BEFORE any model load; the helpers live in scripts/.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from _mlx_caps import install_caps
+    from _mlx_watchdog import abort_handler, arm_mlx_watchdog
+
+    install_caps(wired_gb=18, soft_gb=20)  # device-clamped; FLUX.1 / Klein 4B q4 peak 11-13 GiB
+    arm_mlx_watchdog(on_abort=abort_handler(f"generate_references-{args.variant}"))
+
     if args.variant.startswith("flux1-"):
         _generate_flux1(args.variant)
     else:

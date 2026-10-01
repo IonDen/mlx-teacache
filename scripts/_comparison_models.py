@@ -11,16 +11,11 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from _comparison_recipes import Recipe
+from _qwen_config import qwen_original_config
 
 ENCODER_ATTRS: tuple[str, ...] = ("clip_text_encoder", "t5_text_encoder", "text_encoder")
 DENOISER_ATTRS: tuple[str, ...] = ("transformer", "vae")
 _CACHE_LOADERS = ("flux1-dev", "flux1-krea-dev", "qwen-image-original")
-
-
-def qwen_original_config() -> Any:
-    from mflux.models.common.config.model_config import ModelConfig
-
-    return ModelConfig.from_name("Qwen/Qwen-Image")
 
 
 def load_model(recipe: Recipe) -> Any:
@@ -48,10 +43,6 @@ def load_model(recipe: Recipe) -> Any:
         from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
         flux = QwenImage(quantize=recipe.quantize, model_config=qwen_original_config())
-        if flux.model_config.model_name != "Qwen/Qwen-Image":
-            raise RuntimeError(
-                f"expected the original Qwen/Qwen-Image, loaded {flux.model_config.model_name!r}"
-            )
     else:
         raise ValueError(f"unknown loader {recipe.loader!r}")
     flux.freeze()

@@ -48,6 +48,7 @@ import numpy as np
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _memory_saver import make_memory_saver as _make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
+from _qwen_config import qwen_original_config
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
@@ -219,7 +220,6 @@ def _run_worker(
         (chunk_dir / f"{unit}.aborted.json").write_text(json.dumps({"unit": unit, **payload}, indent=2))
 
     arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=headroom_gib)
-    from mflux.models.common.config.model_config import ModelConfig
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
     from mlx_teacache import apply_teacache
@@ -231,13 +231,14 @@ def _run_worker(
         # Showcase quality: mixed-precision (q8 edge blocks + bf16 embeddings) clears the
         # uniform-q4 grain. mlx-teacache stays quant-agnostic; this is a construction-time
         # choice. Peaks ~30.4 GB, above the watchdog ceiling on a 32 GB Mac; --plain-q4 is
-        # the shipped recipe (the one bench_speedup measures) and the one the default
+        # mflux's 4-bit build (uniform on mflux < 0.19, image-stream modulation layers at 8-bit from
+        # 0.19; the recipe bench_speedup measures) and the one the default
         # threshold is chosen on.
         from qwen_mixed_precision import enable_qwen_mixed_precision
 
         enable_qwen_mixed_precision()
     print(f"[worker {unit}] loading qwen-image ({build}) ...", flush=True)
-    flux = QwenImage(quantize=QUANTIZE, model_config=ModelConfig.qwen_image())
+    flux = QwenImage(quantize=QUANTIZE, model_config=qwen_original_config())
     flux.freeze()
     # mflux's MemorySaver frees the Qwen2.5-VL text encoder (several GB at q4) once the
     # prompt is encoded, before the denoising loop. Without it this recipe sits within
@@ -401,7 +402,7 @@ def main() -> None:
         "--plain-q4",
         action="store_true",
         dest="plain_q4",
-        help="sweep the shipped uniform-q4 build (the bench recipe) instead of the mixed-precision showcase build",
+        help="sweep mflux's 4-bit build (the bench recipe; uniform on mflux < 0.19, image-stream modulation layers at 8-bit from 0.19) instead of the mixed-precision showcase build",
     )
     parser.add_argument(
         "--thresholds",

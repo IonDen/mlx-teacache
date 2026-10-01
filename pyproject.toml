@@ -88,6 +88,9 @@ target-version = "py310"
 select = ["E", "F", "I", "B", "UP", "SIM", "TID"]
 ignore = ["E501"]  # line-length handled by formatter
 
+[tool.ruff.format]
+exclude = ["*.md"]  # ruff 0.16+ formats Markdown code blocks; docs/papers keeps its own formatting
+
 [tool.mypy]
 strict = true
 files = ["src/mlx_teacache"]

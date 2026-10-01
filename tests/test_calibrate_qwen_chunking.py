@@ -91,6 +91,69 @@ def test_aggregate_path_dry_run_never_clobbers_committed(tmp_path: Path) -> None
     assert cq._aggregate_path(cq.CHUNK_DIR_DEFAULT, dry_run=True) == cq.CHUNK_DIR_DEFAULT / cq.OUTPUT_JSON
 
 
+def test_model_flag_defaults_to_the_original_checkpoint_and_default_paths() -> None:
+    """Bug: --model defaults to the 2512 alias (or the paths stay unresolved), so a plain run calibrates the
+    wrong checkpoint or writes somewhere other than the committed calibration."""
+    args = cq._build_parser().parse_args([])
+    assert args.model == "Qwen/Qwen-Image"
+    assert args.chunk_dir is None
+    chunk_dir, out_name = cq.calibration_paths(args.model)
+    assert chunk_dir == cq.CHUNK_DIR_DEFAULT
+    assert out_name == "_calibration_qwen.json"
+
+
+def test_other_checkpoint_never_targets_the_committed_calibration(tmp_path: Path) -> None:
+    """Bug: calibrating Qwen-Image-2512 writes scripts/_calibration_qwen.json (pinned by the artifact tests)
+    or reuses the original's chunk dir and mixes two checkpoints' captures."""
+    chunk_dir, out_name = cq.calibration_paths("Qwen/Qwen-Image-2512")
+    assert chunk_dir != cq.CHUNK_DIR_DEFAULT
+    assert chunk_dir == cq.CHUNK_DIR_DEFAULT / "qwen-qwen-image-2512"
+    assert out_name != cq.OUTPUT_JSON
+    assert "qwen-image-2512" in out_name and "/" not in out_name
+    # Even an explicit default chunk dir must not route a non-default model to the committed file.
+    for d in (cq.CHUNK_DIR_DEFAULT, tmp_path):
+        p = cq._aggregate_path(d, dry_run=False, model="Qwen/Qwen-Image-2512")
+        assert p.name != cq.OUTPUT_JSON and p.parent == d
+
+
+def test_other_checkpoint_chunks_live_inside_the_gitignored_default_chunk_dir() -> None:
+    """Bug: a non-default run writes to a sibling folder that .gitignore does not cover, so its chunks
+    land in git status and in the sdist (`/scripts/` is included)."""
+    chunk_dir, _ = cq.calibration_paths("Qwen/Qwen-Image-2512")
+    assert cq.CHUNK_DIR_DEFAULT in chunk_dir.parents
+    repo = Path(__file__).resolve().parents[1]
+    assert repo / "scripts" / "_calib_qwen_chunks" == cq.CHUNK_DIR_DEFAULT
+    ignored = (repo / ".gitignore").read_text().splitlines()
+    assert "scripts/_calib_qwen_chunks/" in ignored
+
+
+def test_default_resume_ignores_a_nested_checkpoint_folder(tmp_path: Path) -> None:
+    """Bug: the default run's resume counts another checkpoint's nested chunks as its own."""
+    nested = tmp_path / "qwen-qwen-image-2512"
+    nested.mkdir()
+    (nested / cq._chunk_filename(0)).write_text("{}")
+    assert cq._pending_prompt_indices(tmp_path, 2) == [0, 1]
+
+
+def test_check_chunk_models_refuses_a_foreign_chunk() -> None:
+    """Bug: chunks of two checkpoints in one dir aggregate into a fit that belongs to neither."""
+    orig = {"idx": 0}  # older chunk without a model key counts as the original
+    with pytest.raises(SystemExit, match="prompt 1.*Qwen/Qwen-Image-2512"):
+        cq._check_chunk_models([orig, {"idx": 1, "model": "Qwen/Qwen-Image-2512"}], "Qwen/Qwen-Image")
+    with pytest.raises(SystemExit, match="prompt 0"):
+        cq._check_chunk_models([orig], "Qwen/Qwen-Image-2512")
+    cq._check_chunk_models([orig, {"idx": 1, "model": "Qwen/Qwen-Image"}], "Qwen/Qwen-Image")
+    cq._check_chunk_models([{"idx": 0, "model": "Qwen/Qwen-Image-2512"}], "Qwen/Qwen-Image-2512")
+
+
+def test_dry_run_chunk_stamps_the_model(tmp_path: Path) -> None:
+    """Bug: chunks carry no model, so the aggregator cannot tell checkpoints apart."""
+    cq._run_worker(0, steps=4, chunk_dir=tmp_path, dry_run=True, model="Qwen/Qwen-Image-2512")
+    import json
+
+    assert json.loads((tmp_path / cq._chunk_filename(0)).read_text())["model"] == "Qwen/Qwen-Image-2512"
+
+
 def _held_arrays(obj: object) -> int:
     """Count the mx.arrays an object keeps alive through its attributes."""
 
@@ -311,7 +374,13 @@ def test_worker_chunk_records_the_peak_memory() -> None:
     for i in range(3):
         reducer.positive(signal_A=_normal(i), signal_B=_normal(100 + i), body_out=_normal(200 + i))
         reducer.negative(body_out=_normal(300 + i))
-    chunk = cq._chunk_from_reducer(reducer, prompt_idx=4, prompt="p", steps=3)
-    assert chunk["idx"] == 4 and chunk["prompt"] == "p" and chunk["num_captures"] == 3 and chunk["steps"] == 3
+    chunk = cq._chunk_from_reducer(reducer, prompt_idx=4, prompt="p", steps=3, model="Qwen/Qwen-Image")
+    assert (
+        chunk["model"] == "Qwen/Qwen-Image"
+        and chunk["idx"] == 4
+        and chunk["prompt"] == "p"
+        and chunk["num_captures"] == 3
+        and chunk["steps"] == 3
+    )
     assert len(chunk["signal_A"]["xs"]) == 2 and len(chunk["signal_B"]["ys"]) == 2
     assert isinstance(chunk["peak_memory_gb"], float) and chunk["peak_memory_gb"] > 0.0

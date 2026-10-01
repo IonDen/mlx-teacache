@@ -21,6 +21,7 @@ Real weights — pytest.mark.parity (deselected from the per-PR lanes). 20B near
 runs between tests to keep the peak ~one generation.
 """
 
+import sys
 import warnings
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,8 @@ import pytest
 
 from mlx_teacache import apply_teacache
 from mlx_teacache.errors import TeaCacheDisabledWarning
-from tests.conftest import allow_uncalibrated_checkpoint
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 # PIL + skimage live in the [mflux]/test extra and are absent in the pure-core CI
 # env. importorskip skips this module cleanly at collection there (it is parity-only
@@ -108,12 +110,12 @@ def _gen_image_array(flux: Any, *, save_path: Path, steps: int) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def qwen_image() -> Any:
-    from mflux.models.common.config.model_config import ModelConfig
+    from _qwen_config import qwen_original_config
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
     _max_set = mx.device_info()["max_recommended_working_set_size"]
     mx.set_wired_limit(int(_max_set * 0.85))  # device-derived; 20B near the 32 GB edge
-    flux = QwenImage(quantize=4, model_config=ModelConfig.qwen_image())
+    flux = QwenImage(quantize=4, model_config=qwen_original_config())
     flux.freeze()
     return flux
 
@@ -132,7 +134,7 @@ def test_cfg_parity_at_threshold_zero(qwen_image: Any) -> None:
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)
 
     vanilla_before = _capture_latent(flux, **kw)
-    with warnings.catch_warnings(), allow_uncalibrated_checkpoint():
+    with warnings.catch_warnings():
         warnings.simplefilter("ignore", TeaCacheDisabledWarning)
         ctx = apply_teacache(flux, rel_l1_thresh=0.0)
     with ctx as h:
@@ -158,8 +160,7 @@ def test_image_quality_ssim_at_default_threshold(qwen_image: Any) -> None:
     manual inspection."""
     flux = qwen_image
     van = _gen_image_array(flux, save_path=_ARTIFACTS / "vanilla.png", steps=50)
-    with allow_uncalibrated_checkpoint():
-        ctx = apply_teacache(flux)  # builtin DEFAULT_THRESH
+    ctx = apply_teacache(flux)  # builtin DEFAULT_THRESH
     with ctx as h:
         wrap = _gen_image_array(flux, save_path=_ARTIFACTS / "wrapper_default_thresh.png", steps=50)
         skipped, computed = h.stats.skipped_count, h.stats.computed_count
@@ -179,8 +180,7 @@ def test_skip_path_engages_and_produces_finite_latent(qwen_image: Any) -> None:
     by the SSIM test above at the pinned recipe."""
     flux = qwen_image
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)
-    with allow_uncalibrated_checkpoint():
-        ctx = apply_teacache(flux, rel_l1_thresh=0.5)
+    ctx = apply_teacache(flux, rel_l1_thresh=0.5)
     with ctx as h:
         latent = _capture_latent(flux, **kw)
         skipped = h.stats.skipped_count

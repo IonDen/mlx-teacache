@@ -16,9 +16,9 @@ from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
 from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.window import check_step_window
 from mlx_teacache.errors import (
     InternalStateError,
-    InvalidStepWindowError,
     TeaCacheUncalibratedCheckpointWarning,
     TransformerShapeError,
 )
@@ -269,13 +269,12 @@ def qwen_forward_with_gate(
     # silently running at vanilla speed. Reset each generation by the lifecycle's
     # reset_for_new_generation (skip_window_validated=False).
     if state.step_counter == 0 and not state.skip_window_validated:
-        if handle.skip_first_n_steps + handle.skip_last_n_steps >= active_num_steps:
-            raise InvalidStepWindowError(
-                skip_first=handle.skip_first_n_steps,
-                skip_last=handle.skip_last_n_steps,
-                num_steps=active_num_steps,
-                nominal_num_inference_steps=config.num_inference_steps,
-            )
+        check_step_window(
+            active_num_steps,
+            skip_first_n_steps=handle.skip_first_n_steps,
+            skip_last_n_steps=handle.skip_last_n_steps,
+            nominal_num_inference_steps=config.num_inference_steps,
+        )
         state.skip_window_validated = True
 
     pre = _qwen_prelude(inner, t, config, hidden_states)

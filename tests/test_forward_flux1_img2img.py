@@ -142,7 +142,8 @@ def test_skip_window_validated_against_active_num_steps_not_nominal():
     prompt_embeds = mx.zeros((1, 8, 4))
     pooled = mx.zeros((1, 4))
 
-    with pytest.raises(InvalidStepWindowError) as exc:
+    # Bug: the FLUX.1 call site drops nominal_num_inference_steps, so the refusal never shows the 25-step schedule.
+    with pytest.raises(InvalidStepWindowError, match=r"active_num_steps=4, nominal_num_inference_steps=25"):
         flux1_forward_with_gate(
             inner,
             handle,
@@ -152,5 +153,3 @@ def test_skip_window_validated_against_active_num_steps_not_nominal():
             prompt_embeds=prompt_embeds,
             pooled_prompt_embeds=pooled,
         )
-    # The error should mention the active count, not the nominal 25.
-    assert "active_num_steps=4" in str(exc.value) or "active" in str(exc.value).lower()

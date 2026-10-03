@@ -463,7 +463,8 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
     """Return a callable assignable to `flux._predict`. Mflux will call it
     as `predict = self._predict(self.transformer)` at the top of each
     generate_image."""
-    from mlx_teacache.errors import InvalidStepWindowError, MissingGenerationContextError
+    from mlx_teacache._kernel.window import check_step_window
+    from mlx_teacache.errors import MissingGenerationContextError
 
     def predict_factory(transformer: Any) -> PredictFn:
         # Closure-local — fresh per generation. Survives mid-loop crashes of
@@ -495,12 +496,11 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
             #    regardless of CFG, so an all-CFG generation with a bad window
             #    raises instead of silently running vanilla.
             if not handle._state.cache.skip_window_validated:
-                if handle.skip_first_n_steps + handle.skip_last_n_steps >= ctx.active_num_steps:
-                    raise InvalidStepWindowError(
-                        skip_first=handle.skip_first_n_steps,
-                        skip_last=handle.skip_last_n_steps,
-                        num_steps=ctx.active_num_steps,
-                    )
+                check_step_window(
+                    ctx.active_num_steps,
+                    skip_first_n_steps=handle.skip_first_n_steps,
+                    skip_last_n_steps=handle.skip_last_n_steps,
+                )
                 handle._state.cache.skip_window_validated = True
 
             # 3. CFG branch: gated per-branch caching.

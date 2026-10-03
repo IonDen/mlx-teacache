@@ -61,7 +61,6 @@ def warn_if_untested_mflux() -> None:
     installed = installed_mflux_version()
     if not is_newer_than_verified(installed):
         return
-    _warned = True
     warnings.warn(
         f"mflux {installed} is newer than {NEWEST_VERIFIED_MFLUX}, the newest mflux release this "
         "version of mlx-teacache was verified on. TeaCache still applies; if a generation fails or "
@@ -69,3 +68,5 @@ def warn_if_untested_mflux() -> None:
         TeaCacheUntestedMfluxWarning,
         stacklevel=3,
     )
+    # After the call: a caller's "error" filter makes warn() raise, and that must not silence later calls.
+    _warned = True

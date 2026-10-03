@@ -1,7 +1,8 @@
 """mflux 0.21 deletes the per-generation predict closure before the after-loop callbacks so that --low-ram can free
 the transformer before decoding (Z-Image and FLUX.2 Klein). With TeaCache applied, nothing else may keep the
-transformer reachable once that closure is gone. No weights, no mflux: duck-typed models and the tiny fake
-transformers of the forward tests."""
+transformer reachable once that closure is gone. No weights: duck-typed models and the tiny fake transformers of the
+forward tests. The FLUX.2 cases call a forward that imports mflux inside the function, so the file is in the
+mflux lane."""
 
 import gc
 import importlib
@@ -94,10 +95,6 @@ def test_proxy_variants_free_the_transformer_once_the_pipeline_drops_it(variant_
     gc.collect()
     assert handle.variant_id == variant_id
     assert ref() is None
-
-
-class _Transformer:
-    """Stand-in transformer for the factory-level test; only its lifetime matters."""
 
 
 @pytest.mark.parametrize(

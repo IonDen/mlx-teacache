@@ -2,8 +2,8 @@
 
 ## Why
 
-mflux wraps `Flux2Klein._predict` in `mx.compile(predict)` on **most** Apple
-Silicon chips. The exact gate (`mflux/utils/apple_silicon.py` +
+mflux wraps `Flux2Klein._predict` (and Z-Image's `_predict`, behind the same
+chip check) in `mx.compile(predict)` on **most** Apple Silicon chips. The exact gate (`mflux/utils/apple_silicon.py` +
 `mflux/models/flux2/variants/txt2img/flux2_klein.py:278-281`):
 
 ```python

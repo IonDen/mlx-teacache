@@ -6,23 +6,26 @@ The whole library is one idea applied per model: run the expensive transformer b
 
 ## The public entry: `apply_teacache`
 
-`api.py::apply_teacache(flux, **kwargs)` is the only public function, and it always runs the same sequence:
+`api.py::apply_teacache(flux, **kwargs)` is the function that patches a model, and it always runs the same sequence:
 
 1. Validate the keyword arguments statically (threshold range, coefficient shape, skip-window ints).
 2. Check the already-patched sentinel (`flux._teacache_handle`). A second apply on a patched model raises rather than nesting.
-3. Walk the variant registry and take the first entry whose `detect.matches(flux)` returns True. No match raises `IncompatibleModelError`.
-4. Warn at apply time if the matched variant has no built-in default threshold (the distilled Klein variants) and the caller passed no coefficients: the dispatcher emits `TeaCacheNoBenefitWarning`. Under `filterwarnings = error` that warning becomes an error, so parity-lane apply sites wrap it.
-5. Lazily import the winning variant's `integration.py` and call its `apply()`. A variant can emit its own warning here — `qwen-image` raises `TeaCacheUncalibratedCheckpointWarning` once when the model was loaded from a checkpoint its coefficients were not calibrated on (Qwen-Image-2512 on mflux 0.19 and 0.20).
-6. Attach `variant_id` and a rollback that clears the sentinel, and hand back a `TeaCacheHandle`.
+3. Walk the variant registry and take the first entry whose `detect.matches(flux)` returns True; `matches` hands `flux.model_config` and `type(flux)` to the variant's `matches_config`. No match raises `IncompatibleModelError`.
+4. If the installed mflux is newer than the newest release this version was verified on, warn once per process (`TeaCacheUntestedMfluxWarning`) and carry on.
+5. Warn at apply time if the matched variant has no built-in default threshold (the distilled Klein variants) and the caller passed no coefficients: the dispatcher emits `TeaCacheNoBenefitWarning`. Under `filterwarnings = error` that warning becomes an error, so parity-lane apply sites wrap it.
+6. Lazily import the winning variant's `integration.py` and call its `apply()`. A variant can emit its own warning here: `qwen-image` raises `TeaCacheUncalibratedCheckpointWarning` once when the model was loaded from a checkpoint its coefficients were not calibrated on (Qwen-Image-2512 on mflux 0.19 and later).
+7. Attach `variant_id` and a rollback that clears the sentinel, and hand back a `TeaCacheHandle`.
 
 The 4-keyword signature (`rel_l1_thresh`, `coefficients`, `skip_first_n_steps`, `skip_last_n_steps`) is snapshot-tested, so it does not drift between releases.
+
+Two weight-free helpers answer the same questions before a model exists. `support.py::match_variant(model_config, pipeline_class)` walks the same registry in the same order through each variant's `matches_config` and returns a `VariantInfo` or `None`; its `calibrated` field comes from the variant's optional `detect.is_calibrated_checkpoint` (only Qwen-Image has one). `_kernel/window.py::check_step_window(active_num_steps, ...)` is the skip-window rule every variant's forward applies on its first step (3 or fewer active steps skip nothing; 2 or fewer are refused; 0 is refused too, though `apply_teacache` treats a zero-step run as a no-op). Both are exported from the package root and import no mflux.
 
 ## Variant registry and the mflux-free import contract
 
 Every model is a three-file subpackage under `src/mlx_teacache/variants/<id>/`:
 
 - `config.py` — a `META` dict (`variant_id`, display name, license, recipes), the degree-4 `COEFFICIENTS` tuple (high-to-low), and `DEFAULT_THRESH`. **Imports no mflux.**
-- `detect.py` — `matches(flux) -> bool`, duck-typing `flux.model_config`. **Imports no mflux.**
+- `detect.py` — `MODEL_NAMES` (the mflux model aliases the variant is detected by), `matches_config(model_config, pipeline_class) -> bool` (an mflux pipeline class must be one the variant implements, and the config's aliases must contain one of `MODEL_NAMES`; a class defined outside mflux is matched by alias alone), and `matches(flux)`, which calls `matches_config(flux.model_config, type(flux))`. A variant whose coefficients are tied to one checkpoint also defines `is_calibrated_checkpoint(model_config, calibrated)` and names that checkpoint in `META["hf_model_id"]`. **Imports no mflux.**
 - `integration.py` — `apply(flux, **kwargs) -> TeaCacheHandle`. **Imports mflux**, and is loaded lazily.
 
 `variants/__init__.py::_build_registry()` walks every subpackage at import time but eagerly imports only `config` and `detect`, registering a lazy `load_integration` thunk for the rest. A variant's `integration.py` is imported only after its `detect.matches()` wins. That is the contract that keeps `import mlx_teacache` working without the `[mflux]` extra installed: nothing on the import path from the package root touches mflux until a real model asks for it. The rule for anyone adding code: do not import mflux from `config`, `detect`, the package root, or `_kernel/`.
@@ -75,6 +78,10 @@ FLUX.1 coefficients are vendored from upstream ali-vilab TeaCache; the FLUX.2 an
 
 Replacing an `mx.compile`d function with an eager one costs about one ULP per element of Metal-dispatch divergence, which compounds across steps, so FLUX.2 parity is numerical rather than bit-exact (cosine stays at or above 0.97 at threshold 0). The guarantee the library actually makes is end-to-end image quality, measured by SSIM: the red-apple PR-gate holds ≥ 0.90 on FLUX.1 and ≥ 0.85 on FLUX.2, and the wider prompt suite holds ≥ 0.80 to absorb high-frequency-detail variance. Those gates run against real weights in `tests/test_image_quality_*.py` and `tests/test_parity_*.py`.
 
+## mflux versions
+
+The `[mflux]` extra allows every mflux release from 0.17.5 up to two minor versions past the newest release the copied code was verified on; `_mflux_versions.py::NEWEST_VERIFIED_MFLUX` names that release. `tests/test_mflux_forward_drift.py` fingerprints every mflux function a variant copies or depends on, one row per verified release. An installed release with its own row must match it. A release newer than every row is held to the newest row, so it passes until one of those functions changes. At runtime `apply_teacache` warns once per process on a release newer than `NEWEST_VERIFIED_MFLUX` and patches the model anyway. CI runs the fast tests against the lowest supported release, the newest release in range, and mflux's main branch; the last of these never blocks a merge. Verifying a new release means recording its row from the wheel's sources, running the real-weights tests on it, then moving `NEWEST_VERIFIED_MFLUX` and the upper bound together (a config test keeps the bound at the verified minor plus three).
+
 ## Adding a variant
 
-The moving parts, in order: create `variants/<id>/{config,detect,integration}.py` (config and detect mflux-free); calibrate coefficients or vendor them; add a `docs/variants/<id>.md` page; regenerate the README "Supported models" table with `docs/_generate_supported_models.py`; and expect the coverage floor to need a small downward nudge, since a new `integration.py` forward is only reachable with real weights.
+The moving parts, in order: create `variants/<id>/{config,detect,integration}.py` (config and detect mflux-free; `detect.py` declares `MODEL_NAMES` and `matches_config`); calibrate coefficients or vendor them; add a `docs/variants/<id>.md` page; regenerate the README "Supported models" table with `docs/_generate_supported_models.py`; and expect the coverage floor to need a small downward nudge, since a new `integration.py` forward is only reachable with real weights.

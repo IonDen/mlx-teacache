@@ -117,12 +117,12 @@ def _orch_handle(thresh: float) -> _InternalHandle:
     return h
 
 
-def _orch_call(inner, handle, *, t):  # noqa: ANN001
+def _orch_call(inner, handle, *, t, num_inference_steps=4):  # noqa: ANN001
     return qwen_forward_with_gate(
         inner,
         handle,
         t=t,
-        config=SimpleNamespace(num_inference_steps=4),
+        config=SimpleNamespace(num_inference_steps=num_inference_steps),
         hidden_states=mx.zeros((1, 4, 8)),
         encoder_hidden_states=mx.zeros((1, 2, 8)),
         encoder_hidden_states_mask=mx.ones((1, 2)),
@@ -260,8 +260,9 @@ def test_overwide_skip_window_raises(monkeypatch) -> None:  # noqa: ANN001
     )
     handle._gen_ctx.token = 1
     handle._gen_ctx.active_num_steps = 4  # 3 + 3 >= 4 → invalid
-    with pytest.raises(InvalidStepWindowError):
-        _orch_call(inner, handle, t=0)
+    # Bug: the Qwen call site drops nominal_num_inference_steps, so an img2img refusal never shows the 20-step schedule.
+    with pytest.raises(InvalidStepWindowError, match=r"active_num_steps=4, nominal_num_inference_steps=20"):
+        _orch_call(inner, handle, t=0, num_inference_steps=20)
 
 
 def test_fast_path_thresh_zero_advances_once_no_cache(monkeypatch) -> None:  # noqa: ANN001

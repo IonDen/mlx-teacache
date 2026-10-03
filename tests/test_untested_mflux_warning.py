@@ -1,6 +1,8 @@
 """apply_teacache warns once per process, and still patches, when the installed mflux is newer than the newest
 release this version was verified on."""
 
+import importlib.metadata
+import importlib.util
 import inspect
 import re
 import sys
@@ -13,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 import mlx_teacache._mflux_versions as versions
-from mlx_teacache import TeaCacheUntestedMfluxWarning, apply_teacache
+from mlx_teacache import IncompatibleModelError, TeaCacheUntestedMfluxWarning, apply_teacache
 from tests._fakes import FaithfulCallbackRegistry
 
 if sys.version_info >= (3, 11):
@@ -125,3 +127,49 @@ def test_pytest_ignores_exactly_this_warning(installed_mflux) -> None:
     _action, message, category = entries[0].split(":")
     assert re.match(message, str(caught[0].message), re.IGNORECASE)
     assert category == "UserWarning" and issubclass(TeaCacheUntestedMfluxWarning, UserWarning)
+
+
+def test_installed_mflux_version_reads_the_real_environment() -> None:
+    """Bug: the lookup mishandles the real PackageNotFoundError on an install without mflux (it escapes, or it
+    reports a version for an absent package), or it reports a version other than the installed one. Unpatched. It
+    only discriminates in the pure-core lane, where mflux is not installed and the absent-package path runs; with
+    mflux installed, the expected value is read the same way as the code under test does."""
+    expected = None if importlib.util.find_spec("mflux") is None else importlib.metadata.version("mflux")
+    assert versions.installed_mflux_version() == expected
+
+
+def test_unmatched_model_raises_without_spending_the_untested_warning(installed_mflux) -> None:
+    """Bug: warn_if_untested_mflux() moves above the registry loop, so a model apply_teacache refuses still emits
+    the untested-mflux warning and uses up the once-per-process flag before any model is actually patched."""
+    installed_mflux("0.22.0")
+    turbo = SimpleNamespace(
+        model_config=SimpleNamespace(aliases=["z-image-turbo"]),
+        transformer=SimpleNamespace(),
+        callbacks=FaithfulCallbackRegistry(),
+        generate_image=lambda **kw: "image",
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(IncompatibleModelError):
+            apply_teacache(turbo)
+    assert [w for w in caught if issubclass(w.category, TeaCacheUntestedMfluxWarning)] == []
+    # The refusal did not spend the flag: the next apply on a matching model still warns, once.
+    matched, variant_ids = _apply()
+    assert variant_ids == ["flux1-dev"]
+    assert len(matched) == 1
+
+
+def test_a_raising_warnings_filter_does_not_silence_later_calls(installed_mflux) -> None:
+    """Bug: the once-per-process flag is set before warnings.warn runs, so a caller's "error" filter that makes the
+    first call raise also silences every later call, where the warning would otherwise reach a caller who relaxed
+    the filter."""
+    installed_mflux("0.22.0")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for _ in range(2):
+            with pytest.raises(TeaCacheUntestedMfluxWarning):
+                versions.warn_if_untested_mflux()
+    caught, _ = _apply()
+    assert len(caught) == 1
+    caught_again, _ = _apply()
+    assert caught_again == []

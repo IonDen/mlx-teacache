@@ -9,6 +9,16 @@ Public API:
         -base-9b, 0.12 z-image-base, 0.30 qwen-image. Distilled flux2-klein-4b / -9b have
         none and use 0.20.
 
+    match_variant(model_config, pipeline_class) -> VariantInfo | None
+        Weight-free support check: the variant apply_teacache would use for a model that
+        mflux's `pipeline_class` (for example ZImage) builds from a ModelConfig, or None.
+
+    check_step_window(active_num_steps, *, skip_first_n_steps=1, skip_last_n_steps=1)
+        Raises InvalidStepWindowError when a run has too few denoising steps for TeaCache.
+
+    VariantInfo
+        variant_id, display_name, default_thresh, model_names, calibrated (keyword-only).
+
     TeaCacheHandle
         Context-manager-compatible return value with .stats, .provenance, .restore().
 
@@ -29,6 +39,7 @@ from mlx_teacache._kernel.stats import (
     StepDecision,
     TeaCacheStats,
 )
+from mlx_teacache._kernel.window import check_step_window
 from mlx_teacache._version import __version__
 from mlx_teacache.api import apply_teacache
 from mlx_teacache.errors import (
@@ -47,10 +58,14 @@ from mlx_teacache.errors import (
     TransformerShapeError,
 )
 from mlx_teacache.handle import TeaCacheHandle
+from mlx_teacache.support import VariantInfo, match_variant
 
 __all__ = [
     "__version__",
     "apply_teacache",
+    "check_step_window",
+    "match_variant",
+    "VariantInfo",
     "TeaCacheHandle",
     "TeaCacheStats",
     "GenerationStats",

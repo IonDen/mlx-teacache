@@ -3,7 +3,7 @@
 Mirrors test_parity_flux2.py's CFG release-blocker pattern. Z-Image's vanilla
 `_predict` is `mx.compile`-wrapped except on base and Pro M1/M2, where mflux
 returns the eager function (AppleSiliconUtil.is_m1_or_m2, which excludes Max
-and Ultra; unchanged from 0.17.5 through 0.20.0); our TeaCache integration
+and Ultra; unchanged from 0.17.5 through 0.21.0); our TeaCache integration
 replaces `_predict` with an eager-Python wrapper that re-walks
 ZImageTransformer.__call__ so the per-step gate runs every step. We gate threshold=0 parity with cosine
 similarity (not bit-exact): the calibration self-check measured cos >= 0.999

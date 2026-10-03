@@ -7,12 +7,13 @@ Each variant's apply() accepts all four; the dispatcher forwards them.
 """
 
 import numbers
-import operator
 import warnings
 from collections.abc import Sequence
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import validate_custom
+from mlx_teacache._kernel.window import validate_step_count
+from mlx_teacache._mflux_versions import warn_if_untested_mflux
 from mlx_teacache.errors import (
     AlreadyPatchedError,
     IncompatibleModelError,
@@ -34,18 +35,6 @@ def _release_cache_arrays(handle: Any) -> None:
     release = getattr(cache, "release_arrays", None)
     if callable(release):
         release()
-
-
-def _validate_window(name: str, value: object) -> int:
-    if isinstance(value, bool):
-        raise TeaCacheValueError(f"{name} must be a non-negative int, got {value!r}")
-    try:
-        as_int = operator.index(value)  # type: ignore[arg-type]
-    except TypeError:
-        raise TeaCacheValueError(f"{name} must be a non-negative int, got {value!r}") from None
-    if as_int < 0:
-        raise TeaCacheValueError(f"{name} must be >= 0, got {as_int}")
-    return as_int
 
 
 def _validate_thresh(value: object) -> float:
@@ -90,14 +79,17 @@ def apply_teacache(
     trade-off). rel_l1_thresh=0.0 disables caching entirely — every step
     computes, no speedup is gained, and a TeaCacheDisabledWarning is emitted.
 
+    On an mflux release newer than the newest one this version was verified on, a
+    TeaCacheUntestedMfluxWarning is emitted once per process; the model is still patched.
+
     coefficients: any 5-element sequence of finite floats (list, tuple, etc.),
     coerced to a tuple before dispatch. nan or inf raises TeaCacheValueError.
 
     Returns a TeaCacheHandle (context-manager compatible; handle.restore()
     undoes the patch)."""
     # --- Static validation (model-independent) ---
-    skip_first_n_steps = _validate_window("skip_first_n_steps", skip_first_n_steps)
-    skip_last_n_steps = _validate_window("skip_last_n_steps", skip_last_n_steps)
+    skip_first_n_steps = validate_step_count("skip_first_n_steps", skip_first_n_steps)
+    skip_last_n_steps = validate_step_count("skip_last_n_steps", skip_last_n_steps)
     if coefficients is not None:
         coefficients = validate_custom(coefficients)
     if rel_l1_thresh is not None:
@@ -120,6 +112,7 @@ def apply_teacache(
 
     for variant_id, entry in _REGISTRY.items():
         if entry["matches"](flux):
+            warn_if_untested_mflux()
             # The warning describes the *builtin* polynomial on a few-step
             # schedule; a caller supplying coefficients is experimenting on
             # purpose and must not be blocked under filterwarnings=error.

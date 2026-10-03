@@ -9,6 +9,9 @@ import sys
 EXPECTED_ALL = {
     "__version__",
     "apply_teacache",
+    "check_step_window",
+    "match_variant",
+    "VariantInfo",
     "TeaCacheHandle",
     "TeaCacheStats",
     "GenerationStats",
@@ -20,6 +23,7 @@ EXPECTED_ALL = {
     "TeaCacheDisabledWarning",
     "TeaCacheNoBenefitWarning",
     "TeaCacheUncalibratedCheckpointWarning",
+    "TeaCacheUntestedMfluxWarning",
     "IncompatibleModelError",
     "AlreadyPatchedError",
     "CalibrationError",

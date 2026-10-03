@@ -9,8 +9,10 @@ import ast
 import hashlib
 import inspect
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
+
+from mlx_teacache._mflux_versions import release_tuple
 
 
 def _source_ast(obj: Any) -> ast.AST:
@@ -101,3 +103,38 @@ def ast_fingerprint(fn: Callable[..., Any]) -> str:
     tree = _strip_docstrings(_source_ast(fn))
     fn_node = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef))
     return fingerprint_function_node(fn_node)
+
+
+def drift_reference(installed: str, known: Iterable[str]) -> str | None:
+    """The verified release whose fingerprints an installed mflux is held to.
+
+    Its own row when it has one; the newest row when it is a later release than every row (an
+    unrecorded new release is judged on whether the copied functions moved, not on its number);
+    None for an unrecorded release inside the verified span or a string with no release number."""
+    versions = list(known)
+    if installed in versions:
+        return installed
+    mine = release_tuple(installed)
+    ranked = [(parsed, v) for v in versions if (parsed := release_tuple(v)) is not None]
+    if mine is None or not ranked:
+        return None
+    newest_parsed, newest = max(ranked)
+    return newest if mine > newest_parsed else None
+
+
+def drift_failures(
+    installed: str, fresh: Mapping[str, str], known: Mapping[str, Mapping[str, str]]
+) -> list[str]:
+    """One message per reason the installed mflux fails the drift guard; empty when it passes."""
+    reference = drift_reference(installed, known)
+    if reference is None:
+        return [
+            f"mflux {installed} has no verified row and is not newer than the newest one; "
+            f"current fingerprints: {dict(fresh)}"
+        ]
+    return [
+        f"{label} changed in mflux {installed} (verified {reference}: {expected}, now {fresh.get(label)}); "
+        "diff it against the copy that feeds on it and re-verify before recording a row"
+        for label, expected in known[reference].items()
+        if fresh.get(label) != expected
+    ]

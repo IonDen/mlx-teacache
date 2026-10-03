@@ -63,10 +63,10 @@ pip install "mlx-teacache[mflux]"
 uv add "mlx-teacache[mflux]"
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.21`. mflux 0.19 and 0.20 need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair either with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat from 0.19 on: the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section). mflux 0.20's separate Qwen-Image-2.1 model is not a supported variant.
+Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.24`. mflux 0.19 and newer need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair one of them with mlx-taef's live preview, use mlx-taef 0.8.1 or later. mlx-taef 0.8.3's own `[mflux]` extra still pins `mflux<0.21`, so installing `mlx-teacache[mflux]` and `mlx-taef[mflux]` together resolves to mflux 0.20. To run mflux 0.21 with the live preview, install `mlx-taef` without its `[mflux]` extra next to `mlx-teacache[mflux]`; mlx-taef's mflux integration loads on 0.21, and only the extra's version bound blocks the resolver. One caveat from 0.19 on: the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section). The separate Qwen-Image-2.1 model (mflux 0.20 and later) is not a supported variant.
 
 ```bash
-pip install "mlx-teacache[mflux]==0.12.1"  # pin for reproducibility
+pip install "mlx-teacache[mflux]==0.13.0"  # pin for reproducibility
 ```
 
 ## Quick start
@@ -190,6 +190,24 @@ with apply_teacache(flux):  # default rel_l1_thresh=0.20
     flux.generate_image(prompt="...", seed=42, num_inference_steps=25)
 ```
 
+## Checking support before loading
+
+```python
+from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.z_image.variants.z_image import ZImage
+
+from mlx_teacache import check_step_window, match_variant
+
+info = match_variant(ModelConfig.from_name("z-image"), ZImage)
+print(info.variant_id, info.default_thresh)  # z-image-base 0.12
+
+check_step_window(50)  # returns; check_step_window(2) raises InvalidStepWindowError
+```
+
+`match_variant` returns `None` for a model or pipeline that `apply_teacache` would refuse. Otherwise it returns a `VariantInfo` with the variant id, a display name, the default threshold, the mflux model names the variant is detected by, and `calibrated`. `default_thresh` is `None` for the distilled Klein 4B and 9B, where the gate skips nothing. `calibrated` is `False` when the config names a checkpoint the coefficients were not fitted on, such as Qwen-Image-2512 (the `qwen-image` alias on mflux 0.19 and later); `apply_teacache` still patches it and warns.
+
+`check_step_window` raises when a run has too few denoising steps for the skip window. By default one step at each end always computes, so 3 or fewer active steps skip nothing and 2 or fewer are refused. A 3-step run therefore passes `check_step_window`, but `apply_teacache` warns that it cannot skip anything. For image-to-image, pass the number of steps mflux actually runs. A count of 0 is refused as well, which is stricter than `apply_teacache`, where a zero-step run is a valid no-op. Neither call reads weights, and both apply the same window rule as `apply_teacache`.
+
 ## Inspecting stats
 
 ```python
@@ -268,7 +286,7 @@ The wall-clock improvement above comes from two distinct mechanisms; they fire i
 
 **1. TeaCache step-skipping.** This is the headline feature. The polynomial gate predicts how much the transformer body output will change from the immediately previous step, whether or not that step was itself skipped. The wrapper accumulates the predicted change across consecutive skips, and once that running total would cross `rel_l1_thresh`, it recomputes the transformer body instead of reusing the cached residual and resets the running total. On FLUX.1-dev at 25 steps, 6 of 25 steps are skippable and this is where the 1.57× speedup on FLUX.1-dev comes from. mflux does not compile the FLUX.1 predict step, so none of that speedup is compile avoidance. On non-distilled FLUX.2 Klein at 50 steps + CFG, the same mechanism produces 8 to 13 skips per generation and dominates the wall-clock win (the v0.12.0 three-way bench attributes 1.35× to gating on base-9b, footnote ⁴).
 
-**2. `mx.compile` avoidance on FLUX.2.** mflux wraps `Flux2Klein._predict` in `mx.compile` on every chip *except* base + Pro M1/M2 — i.e., compilation is active on M1/M2 Max + Ultra and on every M3, M4, M5 chip. mlx-teacache replaces the compiled `_predict` with an eager Python closure so the gate can run live per step. The magnitude of this effect varies by schedule and chip. On the 50-step Klein base CFG recipes the subprocess-per-rep bench measures it at 1.01× to 1.02×: kernel-dispatch round-trips drop slightly, but with 50 steps per generation that gain is small relative to the per-step compute. Short distilled schedules may benefit more because each step is a larger share of the wall-clock, but this repository has no committed multi-run measurement of that, so no figure is quoted. On chips where mflux is already eager (base + Pro M1/M2), this mechanism does not fire: the wrapper just adds per-step gate overhead, and Klein with mlx-teacache on those chips is approximately neutral or slightly slower than vanilla.
+**2. `mx.compile` avoidance on FLUX.2 and Z-Image.** mflux wraps `Flux2Klein._predict` (and Z-Image's, behind the same chip check) in `mx.compile` on every chip *except* base + Pro M1/M2 — i.e., compilation is active on M1/M2 Max + Ultra and on every M3, M4, M5 chip. mlx-teacache replaces the compiled `_predict` with an eager Python closure so the gate can run live per step. The magnitude of this effect varies by schedule and chip. On the 50-step Klein base CFG recipes the subprocess-per-rep bench measures it at 1.01× to 1.02×: kernel-dispatch round-trips drop slightly, but with 50 steps per generation that gain is small relative to the per-step compute. Short distilled schedules may benefit more because each step is a larger share of the wall-clock, but this repository has no committed multi-run measurement of that, so no figure is quoted. On chips where mflux is already eager (base + Pro M1/M2), this mechanism does not fire: the wrapper just adds per-step gate overhead, and Klein with mlx-teacache on those chips is approximately neutral or slightly slower than vanilla.
 
 On FLUX.2 Klein 4B and 9B at the distilled 4-8 step defaults, mechanism (1) does not engage: the empirical adjacent-step rel-L1 between consecutive transformer outputs is ≥ 0.25, so every step's predicted change exceeds the default 0.20 threshold and the gate signals "compute" every time. This is expected — distilled schedules collapse the entire denoising trajectory into a handful of consequential steps, so adjacent steps are not similar enough to skip. The gate skips nothing here, so whatever speed difference you see is mechanism (2), which only exists on Macs where mflux compiles `_predict`.
 
@@ -288,7 +306,7 @@ The PR-gate prompt is the red-apple one; SSIM ≥ 0.90 on FLUX.1-dev and ≥ 0.8
 
 ## Performance by chip
 
-mflux wraps `_predict` in `mx.compile` on every Apple Silicon chip *except* base + Pro M1/M2 (the behaviour is unchanged from mflux 0.17.5 through 0.20). The `is_m1_or_m2()` predicate returns true (eager path) when the chip brand contains "Apple M1" or "Apple M2" *and* does not contain "Max" or "Ultra" — so M1 Pro and M2 Pro are eager too, while M1/M2 Max + Ultra and every M3/M4/M5 chip get the compiled path. mlx-teacache replaces `_predict` with an eager closure so per-step gating stays live, trading the compile gain for the skip gain on compiled chips. That compile-avoidance effect is **FLUX.2 Klein only** — FLUX.1, FLUX.1 Krea, and Qwen-Image have no `mx.compile` path, so their step-skipping speedup is the same on every chip. See `docs/m3-plus-tradeoff.md` for a benchmark recipe.
+mflux wraps `_predict` in `mx.compile` on every Apple Silicon chip *except* base + Pro M1/M2 (the behaviour is unchanged from mflux 0.17.5 through 0.21). The `is_m1_or_m2()` predicate returns true (eager path) when the chip brand contains "Apple M1" or "Apple M2" *and* does not contain "Max" or "Ultra" — so M1 Pro and M2 Pro are eager too, while M1/M2 Max + Ultra and every M3/M4/M5 chip get the compiled path. mlx-teacache replaces `_predict` with an eager closure so per-step gating stays live, trading the compile gain for the skip gain on compiled chips. That compile-avoidance effect applies to FLUX.2 Klein and Z-Image (mflux compiles Z-Image's `_predict` behind the same chip check); FLUX.1, FLUX.1 Krea, and Qwen-Image have no `mx.compile` path, so their step-skipping speedup is the same on every chip. See `docs/m3-plus-tradeoff.md` for a benchmark recipe.
 
 | Chip | Vanilla `_predict` in mflux | Expected speedup |
 |---|---|---|
@@ -315,7 +333,7 @@ The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exc
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
-The mflux pin is strict at `>=0.17.5,<0.21`. Bumping it is a deliberate release: each new mflux minor is verified on real weights before the range widens.
+Fingerprints are recorded for mflux 0.17.5, 0.18.0, 0.18.1, 0.19.1, 0.19.2, 0.20.0 and 0.21.0, and the `[mflux]` range spans them; 0.21.0 was also checked on real weights for Z-Image. It also allows the next two minor versions, so mflux 0.22 and 0.23 install without waiting for a release here. On an mflux newer than 0.21.0 (0.21.1 included), `apply_teacache` emits a `TeaCacheUntestedMfluxWarning` once per process and still patches the model; if a generation fails or looks wrong there, please open an issue with both version numbers.
 
 On FLUX.1 and Qwen-Image the wrapper replaces `flux.transformer` with a proxy that the parent model's parameter tree does not reach. Calling `flux.parameters()`, `nn.quantize(flux)` or `flux.update(...)` at the parent level can therefore miss the transformer while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first. Calls on the transformer itself work: `flux.transformer.load_weights(...)`, `set_dtype`, `eval()` and `nn.quantize(flux.transformer)`.
 

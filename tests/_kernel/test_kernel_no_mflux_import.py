@@ -16,7 +16,7 @@ def test_kernel_subtree_imports_without_mflux():
         "import sys; sys.modules['mflux'] = None; "
         "import mlx_teacache._kernel.gate, mlx_teacache._kernel.cache, "
         "mlx_teacache._kernel.stats, mlx_teacache._kernel.coefficients, "
-        "mlx_teacache.variants"
+        "mlx_teacache._mflux_versions, mlx_teacache.support, mlx_teacache.variants"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -29,6 +29,8 @@ def _mflux_free_sources() -> list:
     assert pkg.is_dir(), f"package dir not found at {pkg}"
     files = set(pkg.joinpath("_kernel").rglob("*.py"))
     files.add(pkg / "__init__.py")
+    files.add(pkg / "_mflux_versions.py")
+    files.add(pkg / "support.py")
     files.update(pkg.joinpath("variants").glob("*.py"))
     files.update(pkg.joinpath("variants").glob("*/config.py"))
     files.update(pkg.joinpath("variants").glob("*/detect.py"))

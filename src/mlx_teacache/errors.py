@@ -204,3 +204,17 @@ class TeaCacheDisabledWarning(UserWarning):
     Suppress via the standard `warnings` module:
         warnings.filterwarnings("ignore", category=TeaCacheDisabledWarning)
     """
+
+
+class TeaCacheUntestedMfluxWarning(UserWarning):
+    """Emitted once per process by `apply_teacache` when the installed mflux is a later
+    release than the newest one this version of mlx-teacache was verified on.
+
+    TeaCache still applies. The `[mflux]` extra allows two minor versions past the verified
+    release because most mflux releases change nothing TeaCache relies on. If a generation
+    fails or looks wrong on that mflux, please report it with both version numbers at
+    https://github.com/IonDen/mlx-teacache/issues.
+
+    Suppress via the standard `warnings` module:
+        warnings.filterwarnings("ignore", category=TeaCacheUntestedMfluxWarning)
+    """

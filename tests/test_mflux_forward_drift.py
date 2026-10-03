@@ -6,17 +6,16 @@ helpers; all four also depend on the shape of the generation loop that calls
 them. A change upstream to any of those bodies is invisible off the real-weights
 parity lane, so this test pins an AST fingerprint of each one per mflux version.
 
-On red: the installed mflux is either unknown here (add it only after diffing
-each listed function against the copy it feeds and re-running the parity lane)
-or a known version's function no longer matches (the copy must be re-verified).
-This is a heads-up, not proof of breakage."""
+On red: either a fingerprinted function moved (diff it against the copy that feeds on
+it, re-verify on real weights, then record a row for that version), or the installed
+mflux is an unrecorded release older than the newest row. A release newer than every
+row is held to the newest row and passes while none of these functions moved. This is
+a heads-up, not proof of breakage."""
 
 import importlib
 from importlib.metadata import version
 
-import pytest
-
-from tests._mflux_surface import ast_fingerprint
+from tests._mflux_surface import ast_fingerprint, drift_failures
 
 _TARGETS: list[tuple[str, str, str, str]] = [
     # (label, module, class, member)  — member is looked up via the class __dict__ so staticmethods resolve
@@ -223,6 +222,30 @@ KNOWN: dict[str, dict[str, str]] = {
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
+    # 0.21.0, fingerprinted 2026-10-03 from the PyPI wheel (identical to mflux main at f63b4f0,
+    # the release commit). Only the two generate_image loops moved: Z-Image and FLUX.2 Klein now
+    # `del predict` right before `ctx.after_loop(latents)` so `--low-ram` can free the transformer
+    # before the decode (mflux PR 802). Z-Image's generate_image also changed its return annotation to
+    # GeneratedImage; that is not part of the fingerprint, and wrap_generate_image passes the value
+    # through. The deleted object is the per-generation closure the
+    # TeaCache `_predict` replacement returns, and nothing else in the patch holds the transformer
+    # (tests/test_predict_closure_release.py), so the copied path is unchanged.
+    "0.21.0": {
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
+        "z_image.ZImageTransformer.__call__": "179208f45cc524e1",
+        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
+        "flux1.Flux1.generate_image": "879f66c3de7a0b52",
+        "flux2.Flux2Klein.generate_image": "76e7cf2460d5e121",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "305359bd4490aea8",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
+    },
 }
 
 
@@ -236,25 +259,7 @@ def _installed_fingerprints() -> dict[str, str]:
     return {label: ast_fingerprint(_member(m, c, f)) for label, m, c, f in _TARGETS}
 
 
-def test_installed_mflux_version_has_verified_forward_fingerprints() -> None:
-    installed = version("mflux")
-    assert installed in KNOWN, (
-        f"mflux {installed} is not a version whose forwards were verified against the copies in "
-        f"src/mlx_teacache/variants/*/integration.py; current fingerprints: {_installed_fingerprints()}"
-    )
-
-
-@pytest.mark.parametrize("label", [t[0] for t in _TARGETS])
-def test_forward_fingerprint_matches_the_verified_one(label: str) -> None:
-    installed = version("mflux")
-    if installed not in KNOWN:
-        # The summary test above already fails once for an unknown version; one
-        # more failure per target would only repeat it.
-        pytest.skip(
-            f"mflux {installed} unknown; see test_installed_mflux_version_has_verified_forward_fingerprints"
-        )
-    fresh = _installed_fingerprints()[label]
-    assert fresh == KNOWN[installed][label], (
-        f"{label} changed in mflux {installed} (was {KNOWN[installed][label]}, now {fresh}); diff it against the "
-        f"copy that feeds on it and re-verify before updating the pin"
-    )
+def test_installed_mflux_forwards_match_their_verified_fingerprints() -> None:
+    """Bug: a copied mflux function changes upstream and the integration keeps running a stale copy."""
+    failures = drift_failures(version("mflux"), _installed_fingerprints(), KNOWN)
+    assert failures == [], "\n".join(failures)

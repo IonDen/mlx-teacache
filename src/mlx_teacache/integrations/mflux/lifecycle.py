@@ -18,6 +18,7 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
+from mlx_teacache._kernel.window import window_too_short
 from mlx_teacache.errors import InternalStateError
 
 
@@ -93,9 +94,8 @@ class GenerationContextCallback:
         # Suppression: the configuration is going to raise InvalidStepWindowError
         # at lazy validation time — the error covers the case; a duplicate
         # warning is noise.
-        window_invalid = (
-            active_num_steps > 0
-            and self._handle.skip_first_n_steps + self._handle.skip_last_n_steps >= active_num_steps
+        window_invalid = active_num_steps > 0 and window_too_short(
+            active_num_steps, self._handle.skip_first_n_steps, self._handle.skip_last_n_steps
         )
 
         if active_num_steps == 0:

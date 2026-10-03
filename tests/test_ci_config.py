@@ -134,10 +134,29 @@ def test_ci_newest_in_range_job_installs_the_extra_range() -> None:
     assert ci_ranges == {_mflux_extra_range()}
 
 
+def test_ci_runs_daily_on_a_schedule() -> None:
+    """Bug: the schedule trigger is dropped, so the newest-in-range and mflux-main jobs only run on a push or a
+    pull request and a new mflux release goes unnoticed until someone happens to push."""
+    live = [line.split("#", 1)[0].rstrip() for line in _CI_WORKFLOW.read_text().splitlines()]
+    on_block = live[live.index("on:") + 1 : live.index("permissions:")]
+    assert "  schedule:" in on_block
+    assert any(re.fullmatch(r'\s+- cron: "\d+ \d+ \* \* \*"', line) for line in on_block)
+
+
 def test_readme_quotes_only_the_extra_mflux_range() -> None:
     readme = (_REPO_ROOT / "README.md").read_text()
     quoted = set(re.findall(r"`(?:mflux)?(>=\d+(?:\.\d+)*,<\d+(?:\.\d+)*)`", readme))
     assert quoted == {_mflux_extra_range()}
+
+
+def test_mflux_upper_bound_sits_two_minors_past_the_newest_verified_release() -> None:
+    """Bug: NEWEST_VERIFIED_MFLUX moves to a new release while the extra keeps the old upper bound (or the bound
+    widens with no newly verified release), so 'two minor versions past the verified one' (0.21 -> <0.24) drifts."""
+    from mlx_teacache._mflux_versions import NEWEST_VERIFIED_MFLUX
+
+    major, minor = (int(part) for part in NEWEST_VERIFIED_MFLUX.split(".")[:2])
+    upper = _mflux_extra_range().split(",<", 1)[1]
+    assert upper == f"{major}.{minor + 3}"
 
 
 def _job_block(workflow: str, job: str) -> list[str]:
@@ -483,3 +502,24 @@ def test_ci_has_a_non_blocking_least_privilege_audit_job() -> None:
     assert any("pip-audit" in ln and "--no-deps" in ln for ln in block)
     assert any("uv export --frozen" in ln for ln in block)
     assert not [ln for ln in block if "write" in ln]
+
+
+def test_ci_runs_a_non_blocking_fast_lane_against_mflux_main() -> None:
+    """Bug: no job tests mflux's main branch (a breaking upstream change shows up only after a release), the job
+    blocks merges whenever upstream main is red, it re-resolves the lock instead of moving only mflux, its log does
+    not say which upstream commit was tested, or a red run passes unnoticed because the job is non-blocking."""
+    block = [ln.strip() for ln in _job_block(_CI_WORKFLOW.read_text(), "test-mflux-main")]
+    assert "continue-on-error: true" in block
+    sync = block.index("uv sync --locked --group test-mflux")
+    install = block.index('uv pip install "mflux @ git+https://github.com/mflux-community/mflux@main"')
+    assert sync < install
+    pytest_at = next(
+        i
+        for i, ln in enumerate(block)
+        if ln.startswith('uv run --no-sync pytest -m "not parity and not slow')
+    )
+    assert install < pytest_at
+    assert any("direct_url.json" in ln and "commit_id" in ln for ln in block[install:pytest_at])
+    failure_at = block.index("if: failure()")
+    assert pytest_at < failure_at
+    assert block[failure_at + 1] == 'run: echo "::warning::mflux main broke the fast lane"'

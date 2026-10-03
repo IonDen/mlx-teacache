@@ -17,6 +17,7 @@ from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
 from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.window import check_step_window
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 
@@ -168,7 +169,6 @@ class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
 
 from mlx_teacache.errors import (  # noqa: E402
     InternalStateError,
-    InvalidStepWindowError,
     TransformerShapeError,
 )
 
@@ -307,13 +307,12 @@ def flux1_forward_with_gate(
             # window (num_inference_steps - init_time_step), not the nominal
             # schedule, so an img2img run validates against the real denoising count.
             active_num_steps = _active_step_count(config)
-        if handle.skip_first_n_steps + handle.skip_last_n_steps >= active_num_steps:
-            raise InvalidStepWindowError(
-                skip_first=handle.skip_first_n_steps,
-                skip_last=handle.skip_last_n_steps,
-                num_steps=active_num_steps,  # legacy alias; carries the active count
-                nominal_num_inference_steps=config.num_inference_steps,
-            )
+        check_step_window(
+            active_num_steps,
+            skip_first_n_steps=handle.skip_first_n_steps,
+            skip_last_n_steps=handle.skip_last_n_steps,
+            nominal_num_inference_steps=config.num_inference_steps,
+        )
         state.skip_window_validated = True
 
     # 2. Prelude (mirrors mflux Transformer.__call__ lines 44-47). Both paths

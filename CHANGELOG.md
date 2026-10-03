@@ -7,10 +7,25 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-04
+
+Adds mflux 0.21 support, a wider mflux range, and two checks a program can run before it loads any weights. Skip decisions, default thresholds, coefficients and generated images are unchanged for every supported model, and this release has no new speedup measurements. Only Z-Image was checked against real mflux 0.21 weights; the other variants are covered by the fast tests and the mflux function fingerprints.
+
+Verified, not changed: with TeaCache applied to Z-Image or FLUX.2 Klein, nothing keeps the transformer alive once mflux drops its prediction closure, so `--low-ram` can free it, and mflux 0.21 drops that closure after the denoising loop, before decoding. FLUX.1 and Qwen-Image are not covered by this.
+
+mlx-taef 0.8.3's own `[mflux]` extra pins `mflux<0.21`, so installing it together with `mlx-teacache[mflux]` resolves to mflux 0.20. To use mflux 0.21 with mlx-taef's live preview, install `mlx-taef` without its `[mflux]` extra next to `mlx-teacache[mflux]`.
+
+### Added
+- `match_variant(model_config, pipeline_class)` tells you which variant `apply_teacache` would use for a model that an mflux pipeline class (for example `ZImage`) builds from a `ModelConfig`, or `None` when it would raise `IncompatibleModelError`. It returns a `VariantInfo` with the variant id, a display name, the default threshold (`None` for the distilled Klein 4B and 9B), the mflux model names the variant is detected by, and `calibrated`. `calibrated` is `False` when the config names a checkpoint the coefficients were not fitted on (today that is Qwen-Image-2512, which the `qwen-image` alias loads on mflux 0.19 and later). It reads no weights, imports nothing from mflux, and runs the same detection code as `apply_teacache`, so the two agree.
+- `check_step_window(active_num_steps, *, skip_first_n_steps=1, skip_last_n_steps=1)` raises `InvalidStepWindowError` when a run has too few denoising steps for TeaCache. `apply_teacache` makes the same check on the first step of a generation; now you can make it before loading. With the default window, 3 or fewer active steps skip nothing and 2 or fewer are refused. For image-to-image, pass the number of steps mflux actually runs. A count of 0 is refused too, which is stricter than `apply_teacache`, where a zero-step generation is a valid no-op.
+- `TeaCacheUntestedMfluxWarning`, emitted once per process when the installed mflux is newer than the newest release this version was checked on (0.21.0). TeaCache still applies. If a generation fails or looks wrong on that mflux, please open an issue with both version numbers.
+
 ### Changed
+- The `[mflux]` extra now allows `mflux>=0.17.5,<0.24`: every release up to 0.21, plus the next two minor versions, so a new mflux minor installs without waiting for a release here.
 - The Qwen-Image bench, sweep and calibration scripts and the Qwen parity test load `Qwen/Qwen-Image` by name. On mflux 0.19 and later the `qwen-image` alias is Qwen-Image-2512, which the shipped coefficients were not fitted on.
 - `scripts/calibrate_qwen.py --model` calibrates another Qwen-Image checkpoint, for example `Qwen/Qwen-Image-2512`. It writes its chunks and fit under `scripts/_calib_qwen_chunks/<model>/`, never the committed calibration.
-- The development lock moved to mflux 0.20.0, MLX 0.32.2 and mlx-taef 0.8.3. Benchmarks keep the mflux version they were measured on.
+- The development lock moved to mflux 0.21.0, MLX 0.32.2 and mlx-taef 0.8.3. Benchmarks keep the mflux version they were measured on.
+- For contributors: the test that fingerprints the mflux functions TeaCache copies now accepts an mflux release newer than every recorded one when none of those functions changed, and fails as before when one did. CI also runs the fast tests against mflux's main branch; that job never blocks a merge.
 
 ## [0.12.1] — 2026-09-29
 

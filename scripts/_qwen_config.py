@@ -2,7 +2,7 @@
 
 On mflux 0.19+ ``ModelConfig.qwen_image()`` and the ``qwen-image`` alias resolve to Qwen-Image-2512, which has no
 calibration and is ~58 GB. The calibrated checkpoint is the original ``Qwen/Qwen-Image``, so it is named explicitly
-(``from_name`` resolves it on mflux 0.17.5 through 0.20 alike). Only mflux is imported, and only inside the function.
+(``from_name`` resolves it on mflux 0.17.5 through 0.21 alike). Only mflux is imported, and only inside the function.
 """
 
 from typing import Any

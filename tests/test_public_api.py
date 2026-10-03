@@ -20,6 +20,7 @@ EXPECTED_ALL = {
     "TeaCacheDisabledWarning",
     "TeaCacheNoBenefitWarning",
     "TeaCacheUncalibratedCheckpointWarning",
+    "TeaCacheUntestedMfluxWarning",
     "IncompatibleModelError",
     "AlreadyPatchedError",
     "CalibrationError",

@@ -64,7 +64,8 @@ def test_distilled_warning_ties_compile_avoidance_to_hardware() -> None:
     with pytest.warns(TeaCacheNoBenefitWarning) as caught:
         handle = apply_teacache(flux)
     handle.restore()
-    message = str(caught[0].message)
+    (warning,) = [w for w in caught if issubclass(w.category, TeaCacheNoBenefitWarning)]
+    message = str(warning.message)
     assert "on Macs where mflux compiles the prediction step (not base or Pro M1/M2)" in message
     assert "any wall-clock benefit comes from bypassing" not in message
 

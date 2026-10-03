@@ -66,6 +66,17 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     arm_parity_guard(session.items, capture=session.config.pluginmanager.getplugin("capturemanager"))
 
 
+@pytest.fixture(autouse=True)
+def _untested_mflux_warning_already_shown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts as if apply_teacache's once-per-process TeaCacheUntestedMfluxWarning had already fired.
+    Without this, on a newer mflux the warning lands in whichever test applies first, so warning assertions depend
+    on test order. The warning's own tests reset the flag (fixture installed_mflux in
+    tests/test_untested_mflux_warning.py). The message-based ignore in pyproject.toml stays for subprocesses."""
+    import mlx_teacache._mflux_versions as versions
+
+    monkeypatch.setattr(versions, "_warned", True)
+
+
 @contextlib.contextmanager
 def expect_distilled_warning(variant_id: str, coefficients: Sequence[float] | None = None) -> Iterator[None]:
     """Wrap an `apply_teacache(...)` call site that may touch a distilled

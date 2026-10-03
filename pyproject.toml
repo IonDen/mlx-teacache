@@ -31,7 +31,7 @@ classifiers = [
 dependencies = ["mlx>=0.31"]
 
 [project.optional-dependencies]
-mflux = ["mflux>=0.17.5,<0.21"]
+mflux = ["mflux>=0.17.5,<0.24"]
 
 [project.urls]
 Homepage = "https://github.com/IonDen/mlx-teacache"
@@ -51,7 +51,7 @@ test-core = [
 ]
 test-mflux = [
     { include-group = "test-core" },
-    "mflux>=0.17.5,<0.21",
+    "mflux>=0.17.5,<0.24",
     "mlx-taef>=0.1.1",
     "scikit-image",
 ]
@@ -126,6 +126,12 @@ filterwarnings = [
     # the calling package, mirroring the tokenizers/transformers pair above.
     "ignore::DeprecationWarning:huggingface_hub",
     "ignore::DeprecationWarning:hf_xet",
+    # On an mflux newer than the newest verified release, apply_teacache warns once per process
+    # (TeaCacheUntestedMfluxWarning). The newest-in-range and mflux-main CI jobs run exactly that
+    # setup, where the drift guard is the signal, so the warning is ignored here and asserted in
+    # its own tests. Matched by message: a class path would import mlx_teacache while pytest reads
+    # its config, before coverage starts.
+    'ignore:mflux \S+ is newer than:UserWarning',
 ]
 
 [tool.coverage.run]

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "23 5 * * *"  # daily, so the newest-in-range and mflux-main jobs notice a new mflux release without a push
   workflow_dispatch:  # allows the parity job to be triggered manually
 
 permissions:
@@ -100,7 +102,8 @@ jobs:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
-      # Sync from uv.lock, then move only mflux off it.
+      # Sync from uv.lock, then reinstall mflux. `uv pip install` re-resolves mflux's own dependencies,
+      # so mlx and others can move off the lock too.
       - name: Install test-mflux, then pin mflux to the floor (0.17.5)
         run: |
           uv sync --locked --group test-mflux
@@ -121,19 +124,53 @@ jobs:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
-      # This job is the upstream alarm: tests/test_mflux_forward_drift.py goes red on an
-      # mflux version whose forwards have not been verified against the copies, so a new
-      # in-range upstream release turns it red until the drift table is re-recorded
-      # after a real-weights parity run. That is the intended trade-off.
-      # Sync from uv.lock, then move only mflux off it.
+      # The fast lane, drift guard included, against the newest mflux the [mflux] extra allows.
+      # A release newer than the newest verified one passes the drift guard while none of the
+      # fingerprinted functions moved, and turns this job red when one did; record its row
+      # after a real-weights parity run.
+      # Sync from uv.lock, then reinstall mflux. `uv pip install` re-resolves mflux's own dependencies,
+      # so mlx and others can move off the lock too.
       - name: Install test-mflux, then upgrade mflux to the newest in-range
         run: |
           uv sync --locked --group test-mflux
-          uv pip install --upgrade "mflux>=0.17.5,<0.21"
+          uv pip install --upgrade "mflux>=0.17.5,<0.24"
       - name: Show resolved mflux and run the fast lane without re-syncing
         run: |
           uv run --no-sync python -c "import importlib.metadata as m; print('mflux', m.version('mflux'))"
           uv run --no-sync pytest -m "not parity and not slow and not benchmark and not network"
+
+  test-mflux-main:
+    # Early warning for the next mflux release: the fast lane, drift guard included, against
+    # mflux's main branch. Upstream main can move at any time, so this job never blocks a
+    # merge; read its log when it goes red.
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      # Sync from uv.lock, then install mflux from the tip of its main branch. `uv pip install` re-resolves
+      # mflux's own dependencies, so mlx and others can move off the lock too.
+      - name: Install test-mflux, then mflux from its main branch
+        run: |
+          uv sync --locked --group test-mflux
+          uv pip install "mflux @ git+https://github.com/mflux-community/mflux@main"
+      # main reports the last release's version number, so the commit is what identifies the code tested.
+      - name: Show the mflux version and main commit under test
+        run: |
+          uv run --no-sync python -c "import importlib.metadata as m, json; d = m.distribution('mflux'); print('mflux', d.version, 'commit', json.loads(d.read_text('direct_url.json') or '{}').get('vcs_info', {}).get('commit_id', 'unknown'))"
+      - name: Run the fast lane without re-syncing
+        run: |
+          uv run --no-sync pytest -m "not parity and not slow and not benchmark and not network"
+      # continue-on-error keeps the workflow green; this annotation keeps a red run visible on the summary page.
+      - name: Flag a red run
+        if: failure()
+        run: echo "::warning::mflux main broke the fast lane"
 
   sdist-smoke:
     runs-on: macos-14

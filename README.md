@@ -63,7 +63,7 @@ pip install "mlx-teacache[mflux]"
 uv add "mlx-teacache[mflux]"
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.21`. mflux 0.19 and 0.20 need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair either with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat from 0.19 on: the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section). mflux 0.20's separate Qwen-Image-2.1 model is not a supported variant.
+Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.24`. mflux 0.19 and newer need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18); if you pair one of them with mlx-taef's live preview, use mlx-taef 0.8.1 or later. One caveat from 0.19 on: the `qwen-image` alias loads `Qwen/Qwen-Image-2512`, a checkpoint this library's Qwen coefficients were not calibrated on, and `apply_teacache` warns about it (see the Qwen-Image section). The separate Qwen-Image-2.1 model (mflux 0.20 and later) is not a supported variant.
 
 ```bash
 pip install "mlx-teacache[mflux]==0.12.1"  # pin for reproducibility
@@ -315,7 +315,7 @@ The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exc
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
-The mflux pin is strict at `>=0.17.5,<0.21`. Bumping it is a deliberate release: each new mflux minor is verified on real weights before the range widens.
+The `[mflux]` range covers the mflux releases with recorded fingerprints, 0.17.5 through 0.21.0; 0.21.0 was checked on real weights for Z-Image. It also allows the next two minor versions, so mflux 0.22 and 0.23 install without waiting for a release here. On an mflux newer than 0.21, `apply_teacache` emits a `TeaCacheUntestedMfluxWarning` once per process and still patches the model; if a generation fails or looks wrong there, please open an issue with both version numbers.
 
 On FLUX.1 and Qwen-Image the wrapper replaces `flux.transformer` with a proxy that the parent model's parameter tree does not reach. Calling `flux.parameters()`, `nn.quantize(flux)` or `flux.update(...)` at the parent level can therefore miss the transformer while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first. Calls on the transformer itself work: `flux.transformer.load_weights(...)`, `set_dtype`, `eval()` and `nn.quantize(flux.transformer)`.
 

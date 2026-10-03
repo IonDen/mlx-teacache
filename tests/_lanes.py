@@ -34,7 +34,10 @@ MFLUX_FILES = build_allowlist(
         "test_detect.py",  # imports mflux types for variant detection
         "test_mflux_contract_smoke.py",
         "test_mflux_forward_drift.py",  # fingerprints the real mflux forwards
+        "test_mflux_drift_newer_release.py",  # runs the real drift test against the installed mflux
         "test_comparison_qwen_config.py",
+        "test_untested_mflux_warning.py",  # applies a duck-typed FLUX.1 dev, which lazily imports the integration
+        "test_predict_closure_release.py",  # FLUX.2 cases call a forward that imports mflux inside the function
         "variants/flux1_dev/test_integration_smoke.py",  # imports mflux and the variant integration
     ]
 )

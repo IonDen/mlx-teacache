@@ -8,8 +8,10 @@ what the integrations touch goes red in CI without loading weights."""
 import ast
 import hashlib
 import inspect
+import json
 import textwrap
 from collections.abc import Callable, Iterable, Mapping
+from importlib.metadata import PackageNotFoundError, distribution
 from typing import Any
 
 from mlx_teacache._mflux_versions import release_tuple
@@ -138,3 +140,61 @@ def drift_failures(
         for label, expected in known[reference].items()
         if fresh.get(label) != expected
     ]
+
+
+def installed_vcs_commit(dist_name: str = "mflux") -> str | None:
+    """The git commit an installed distribution was built from, read from its PEP 610
+    ``direct_url.json``; None for a wheel or PyPI install, a missing file, or a non-git source."""
+    try:
+        text = distribution(dist_name).read_text("direct_url.json")
+    except PackageNotFoundError:
+        return None
+    if not text:
+        return None
+    try:
+        vcs_info = json.loads(text).get("vcs_info", {})
+        if vcs_info.get("vcs") != "git":
+            return None
+        commit = vcs_info.get("commit_id")
+    except (ValueError, AttributeError):
+        return None
+    return commit if isinstance(commit, str) and commit else None
+
+
+def drift_failures_for_install(
+    installed: str,
+    vcs_commit: str | None,
+    fresh: Mapping[str, str],
+    known: Mapping[str, Mapping[str, str]],
+    reviewed_main: Mapping[str, Any],
+) -> list[str]:
+    """`drift_failures` for a wheel; for a git install (a commit is given), the installed fingerprints are
+    compared with the reviewed-main row, because a main checkout keeps the last release's version string.
+
+    A wheel newer than every recorded release may carry the already-reviewed main change (the release cut
+    from that main), so it passes when it matches the newest row or the reviewed-main row, and otherwise
+    fails with the differences against both. Recorded and in-span unrecorded versions keep the strict rule."""
+    short = str(reviewed_main["commit"])[:7]
+    main_fingerprints: Mapping[str, str] = reviewed_main["fingerprints"]
+
+    def against_main(prefix: str, label: str, expected: str) -> str:
+        return (
+            f"{label} changed {prefix} (was {expected}, now {fresh.get(label)}); "
+            "diff it against the copy that feeds on it and re-verify before recording a new reviewed commit"
+        )
+
+    if vcs_commit is not None:
+        return [
+            against_main(f"on mflux main (installed {vcs_commit[:7]}, reviewed {short})", label, expected)
+            for label, expected in main_fingerprints.items()
+            if fresh.get(label) != expected
+        ]
+    release = drift_failures(installed, fresh, known)
+    if installed in known or drift_reference(installed, known) is None:
+        return release
+    main = [
+        against_main(f"against reviewed main {short}", label, expected)
+        for label, expected in main_fingerprints.items()
+        if fresh.get(label) != expected
+    ]
+    return [] if not release or not main else release + main

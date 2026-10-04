@@ -9,13 +9,15 @@ parity lane, so this test pins an AST fingerprint of each one per mflux version.
 On red: either a fingerprinted function moved (diff it against the copy that feeds on
 it, re-verify on real weights, then record a row for that version), or the installed
 mflux is an unrecorded release older than the newest row. A release newer than every
-row is held to the newest row and passes while none of these functions moved. This is
+row passes while its functions match the newest row or the reviewed mflux main commit
+(REVIEWED_MAIN); a git install of mflux is judged against REVIEWED_MAIN. This is
 a heads-up, not proof of breakage."""
 
 import importlib
 from importlib.metadata import version
+from typing import Any
 
-from tests._mflux_surface import ast_fingerprint, drift_failures
+from tests._mflux_surface import ast_fingerprint, drift_failures_for_install, installed_vcs_commit
 
 _TARGETS: list[tuple[str, str, str, str]] = [
     # (label, module, class, member)  — member is looked up via the class __dict__ so staticmethods resolve
@@ -249,6 +251,34 @@ KNOWN: dict[str, dict[str, str]] = {
 }
 
 
+# A git install of mflux main keeps reporting the last release's version, so it cannot be judged by
+# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-04
+# (mflux PR 803, the bfloat16 Z-Image stream). Against KNOWN["0.21.0"] only the Z-Image transformer
+# forward (which gained `stream_t_emb`) and Z-Image's generate_image (the generation_parameters
+# metadata argument, off the copied path) differ. Bump it, commit and digests together, after
+# reviewing a newer main. Applies to git+URL installs only: an editable checkout writes `dir_info`, not
+# `vcs_info`, and is judged by its version string like a wheel.
+REVIEWED_MAIN: dict[str, Any] = {
+    "commit": "04fc1011f19c3e8be43145c0baf2972478ebdc0f",
+    "fingerprints": {
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
+        "z_image.ZImageTransformer.__call__": "600eb723a0529715",
+        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
+        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
+        "flux1.Flux1.generate_image": "879f66c3de7a0b52",
+        "flux2.Flux2Klein.generate_image": "76e7cf2460d5e121",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "6a9c34aabe69f6c9",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
+    },
+}
+
+
 def _member(module: str, cls_name: str, member: str):  # noqa: ANN202
     cls = getattr(importlib.import_module(module), cls_name)
     raw = cls.__dict__[member]
@@ -261,5 +291,7 @@ def _installed_fingerprints() -> dict[str, str]:
 
 def test_installed_mflux_forwards_match_their_verified_fingerprints() -> None:
     """Bug: a copied mflux function changes upstream and the integration keeps running a stale copy."""
-    failures = drift_failures(version("mflux"), _installed_fingerprints(), KNOWN)
+    failures = drift_failures_for_install(
+        version("mflux"), installed_vcs_commit("mflux"), _installed_fingerprints(), KNOWN, REVIEWED_MAIN
+    )
     assert failures == [], "\n".join(failures)

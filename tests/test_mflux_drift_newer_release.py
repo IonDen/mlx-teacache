@@ -7,6 +7,12 @@ import pytest
 
 import tests.test_mflux_forward_drift as drift
 from mlx_teacache._mflux_versions import NEWEST_VERIFIED_MFLUX
+from tests._mflux_surface import installed_vcs_commit
+
+pytestmark = pytest.mark.skipif(
+    installed_vcs_commit("mflux") is not None,
+    reason="mflux is a git install; these tests are about a released wheel",
+)
 
 
 @pytest.fixture

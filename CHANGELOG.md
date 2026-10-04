@@ -7,6 +7,14 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-10-04
+
+Z-Image now follows mflux's bfloat16 transformer stream on mflux builds that have it. That change landed on mflux's main branch after the 0.21.0 release, where plain mflux runs the transformer's hidden stream in bfloat16 and keeps float32 as an opt-in `--float32` mode. Before this patch, a TeaCache run on such a build used a mixed stream: the caption path ran in bfloat16 through mflux's attention and the rest in float32, which matches neither mode. On mflux 0.17.5 to 0.21.0 the behavior, the gate, the default thresholds, the coefficients and the skip decisions are unchanged. On builds with the bfloat16 stream, the coefficients and the default thresholds are unchanged. Measured with real weights on mflux's main branch (Z-Image base, q8, 512×512, 50 steps, guidance 4.0, seed 42, default threshold 0.12), the bfloat16 stream skips 12 of the 48 active steps instead of 15, because bfloat16 rounding raises the gate's measured change slightly, and the image keeps an SSIM of 0.990 against plain mflux. In `--float32` mode it skips 15, the count the committed 0.10.0 benchmark measured for this recipe.
+
+### Changed
+- Z-Image's timestep embedding goes through mflux's own `stream_t_emb` when the transformer has it, and honors the transformer's `float32` flag, so TeaCache runs the same dtypes as plain mflux in both modes. Releases without `stream_t_emb` take the same path as before.
+- For contributors: the drift test now judges a git install of mflux main against the fingerprints of a reviewed upstream commit instead of the last release's row, since a main checkout cannot be told apart from the release by its version string. A wheel install is judged as before.
+
 ## [0.13.0] — 2026-10-04
 
 Adds mflux 0.21 support, a wider mflux range, and two checks a program can run before it loads any weights. Skip decisions, default thresholds, coefficients and generated images are unchanged for every supported model, and this release has no new speedup measurements. Only Z-Image was checked against real mflux 0.21 weights; the other variants are covered by the fast tests and the mflux function fingerprints.

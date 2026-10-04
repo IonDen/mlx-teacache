@@ -116,7 +116,8 @@ def _step_decision_from_gate(decision: GateDecision, *, step_idx: int, timestep:
 
 
 def _zimage_t_emb(transformer: Any, timestep: Any, sigmas: mx.array) -> mx.array:
-    """Replicate the timestep -> t_emb path (transformer.py:66-75)."""
+    """Replicate the timestep -> t_emb path (mflux 0.17.5 transformer.py:66-75; builds with mflux PR 803 add the
+    stream_t_emb cast)."""
     if not isinstance(timestep, mx.array):
         if isinstance(timestep, int):
             sigma_t = sigmas[timestep].reshape((1,))
@@ -126,6 +127,11 @@ def _zimage_t_emb(transformer: Any, timestep: Any, sigmas: mx.array) -> mx.array
     if timestep.ndim == 0:
         timestep = timestep.reshape((1,))
     t_emb: mx.array = transformer.t_embedder(timestep.astype(mx.float32) * transformer.t_scale)
+    # mflux builds after 0.21.0 run the hidden stream in bfloat16 and cast t_emb through this
+    # staticmethod (honouring the transformer's `float32` flag); earlier releases have none.
+    stream_t_emb = getattr(transformer, "stream_t_emb", None)
+    if callable(stream_t_emb):
+        t_emb = stream_t_emb(t_emb, getattr(transformer, "float32", False))
     return t_emb
 
 

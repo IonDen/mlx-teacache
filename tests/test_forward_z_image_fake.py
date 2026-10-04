@@ -25,6 +25,7 @@ import mlx.core as mx
 
 from mlx_teacache.variants.z_image_base.integration import (
     _InternalHandle,
+    _zimage_t_emb,
     zimage_cfg_forward_with_gate,
     zimage_forward_with_gate,
 )
@@ -205,3 +206,86 @@ def test_cfg_forward_with_gating_off_combines_from_the_positive_noise():
     )
     assert _decisions(handle) == ["computed"]
     assert mx.array_equal(out, _full((_X_SEQ, _DIM), -176.0)).item()
+
+
+class _Bf16StreamFake(_FakeZImageTransformer):
+    """Mirrors mflux's bfloat16 stream: a `stream_t_emb` staticmethod plus a `float32` flag."""
+
+    def __init__(self, *, float32: bool) -> None:
+        super().__init__()
+        self.float32 = float32
+
+    @staticmethod
+    def stream_t_emb(t_emb: mx.array, float32: bool) -> mx.array:
+        return t_emb if float32 else t_emb.astype(mx.bfloat16)
+
+
+_SIGMAS = mx.array([1.0, 0.5, 0.0])
+
+
+def test_t_emb_is_bfloat16_when_the_transformer_has_a_bf16_stream():
+    """Bug: _zimage_t_emb skips mflux's stream_t_emb, so a TeaCache run keeps the float32 stream
+    while plain mflux runs bfloat16."""
+    t_emb = _zimage_t_emb(_Bf16StreamFake(float32=False), mx.array([0.5]), _SIGMAS)
+    assert t_emb.dtype == mx.bfloat16
+
+
+def test_t_emb_stays_float32_when_the_transformer_asks_for_float32():
+    """Bug: the float32 flag is ignored (the cast is applied unconditionally), so mflux's float32 mode
+    silently turns bfloat16 under TeaCache."""
+    t_emb = _zimage_t_emb(_Bf16StreamFake(float32=True), mx.array([0.5]), _SIGMAS)
+    assert t_emb.dtype == mx.float32
+
+
+def test_t_emb_is_unchanged_on_a_transformer_without_stream_t_emb():
+    """Bug: the cast is applied without feature detection, changing the dtype on mflux 0.17.5 to 0.21.0."""
+    t_emb = _zimage_t_emb(_FakeZImageTransformer(), mx.array([0.5]), _SIGMAS)
+    assert t_emb.dtype == mx.float32
+
+
+def test_gated_forward_hands_the_layers_a_bfloat16_t_emb_on_a_bf16_stream():
+    """Bug: the cast is made in _zimage_t_emb's caller path only for one forward, or not at all,
+    so the main layers receive a float32 t_emb that plain mflux would give them as bfloat16."""
+    seen: list[Any] = []
+
+    class _Spy(_AddLayer):
+        def __call__(self, *, x: mx.array, attn_mask: Any, freqs_cis: Any, t_emb: Any) -> mx.array:
+            seen.append(t_emb.dtype)
+            return super().__call__(x=x, attn_mask=attn_mask, freqs_cis=freqs_cis, t_emb=t_emb)
+
+    transformer = _Bf16StreamFake(float32=False)
+    transformer.layers = [_Spy(1.0)]
+    zimage_forward_with_gate(
+        transformer,
+        _handle(),
+        latents=_full((_X_SEQ, _DIM), 1.0),
+        timestep=mx.array([0.5]),
+        sigmas=_SIGMAS,
+        cap_feats=_full((_CAP_SEQ, _DIM), 7.0),
+    )
+    assert seen == [mx.bfloat16]
+
+
+def test_cfg_gated_forward_hands_the_layers_a_bfloat16_t_emb_on_a_bf16_stream():
+    """Bug: zimage_cfg_forward_with_gate builds t_emb without _zimage_t_emb (or casts only for one branch), so
+    CFG runs hand the main layers a float32 t_emb that plain mflux would give them as bfloat16."""
+    seen: list[Any] = []
+
+    class _Spy(_AddLayer):
+        def __call__(self, *, x: mx.array, attn_mask: Any, freqs_cis: Any, t_emb: Any) -> mx.array:
+            seen.append(t_emb.dtype)
+            return super().__call__(x=x, attn_mask=attn_mask, freqs_cis=freqs_cis, t_emb=t_emb)
+
+    transformer = _Bf16StreamFake(float32=False)
+    transformer.layers = [_Spy(1.0)]
+    zimage_cfg_forward_with_gate(
+        transformer,
+        _handle(),
+        latents=_full((_X_SEQ, _DIM), 1.0),
+        timestep=mx.array([0.5]),
+        sigmas=_SIGMAS,
+        cap_feats_pos=_full((_CAP_SEQ, _DIM), 7.0),
+        cap_feats_neg=_full((_CAP_SEQ, _DIM), -7.0),
+        guidance=4.0,
+    )
+    assert seen == [mx.bfloat16, mx.bfloat16]

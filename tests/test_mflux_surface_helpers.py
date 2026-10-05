@@ -1,7 +1,9 @@
 """The two introspection helpers the mflux contract pins are built on, checked
 on toy classes so their behaviour is pinned independently of mflux."""
 
-from tests._mflux_surface import assigned_attributes, ast_fingerprint
+import pytest
+
+from tests._mflux_surface import assigned_attributes, ast_fingerprint, require_or_skip
 
 
 class _Toy:
@@ -69,3 +71,26 @@ def test_return_tuple_arities_counts_each_literal_tuple() -> None:
     from tests._mflux_surface import return_tuple_arities
 
     assert return_tuple_arities(_returns_pair) == frozenset({2, 1})
+
+
+def test_require_or_skip_fails_on_a_git_install_missing_the_feature() -> None:
+    """Bug: a git install of mflux main that dropped or renamed a feature skips its parity cases, so the
+    reviewed-main guard goes quietly green."""
+    # Catch every outcome: pytest.skip raises Skipped, which pytest.raises(fail.Exception) would let escape and
+    # turn this test into a green skip on exactly the regression it names.
+    with pytest.raises(BaseException) as raised:
+        require_or_skip(False, vcs_commit="e50215c", feature="float16 compute")
+    assert raised.type is pytest.fail.Exception
+    assert "float16 compute" in str(raised.value)
+
+
+def test_require_or_skip_skips_on_a_wheel_missing_the_feature() -> None:
+    """Bug: a release without the feature fails instead of skipping."""
+    with pytest.raises(pytest.skip.Exception, match="float16 compute"):
+        require_or_skip(False, vcs_commit=None, feature="float16 compute")
+
+
+@pytest.mark.parametrize("vcs_commit", [None, "e50215c"])
+def test_require_or_skip_returns_when_the_feature_is_present(vcs_commit: str | None) -> None:
+    """Bug: the helper skips or fails even when the feature exists, so the parity cases never run."""
+    require_or_skip(True, vcs_commit=vcs_commit, feature="float16 compute")

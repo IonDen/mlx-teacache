@@ -31,4 +31,4 @@ def test_allowlist_has_no_duplicates() -> None:
         from tests._lanes import build_allowlist
 
         build_allowlist(["a.py", "b.py", "a.py"])
-    assert len(MFLUX_FILES) == 22
+    assert len(MFLUX_FILES) == 23

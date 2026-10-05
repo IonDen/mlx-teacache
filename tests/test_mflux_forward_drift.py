@@ -252,14 +252,18 @@ KNOWN: dict[str, dict[str, str]] = {
 
 
 # A git install of mflux main keeps reporting the last release's version, so it cannot be judged by
-# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-04
-# (mflux PR 803, the bfloat16 Z-Image stream). Against KNOWN["0.21.0"] only the Z-Image transformer
-# forward (which gained `stream_t_emb`) and Z-Image's generate_image (the generation_parameters
-# metadata argument, off the copied path) differ. Bump it, commit and digests together, after
+# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-05
+# (the four mflux PRs merged after 822: 820 opt-in float16 attention/feed-forward compute, on top of PR 803, the
+# bfloat16 Z-Image stream; 824 folds a baked LoRA into the dense weights before quantization (initializers pass
+# `dense_weights=`, lora_saver bakes earlier); 813 changes test tolerances; 828 silences the missing-files warning
+# for an mflux-saved checkpoint passed as --model; those three are off TeaCache's copied paths). Against KNOWN["0.21.0"] only the Z-Image transformer forward (which gained
+# `stream_t_emb`) and the Z-Image and FLUX.2 generate_image functions (the generation_parameters
+# metadata argument, off the copied path) differ. The float16 setting lives on the attention and
+# feed-forward modules, which the copied forwards call without reading it. Bump it, commit and digests together, after
 # reviewing a newer main. Applies to git+URL installs only: an editable checkout writes `dir_info`, not
 # `vcs_info`, and is judged by its version string like a wheel.
 REVIEWED_MAIN: dict[str, Any] = {
-    "commit": "04fc1011f19c3e8be43145c0baf2972478ebdc0f",
+    "commit": "e50215c1781ce5a82e9d6e68f90f820ae23c2404",
     "fingerprints": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
@@ -270,9 +274,9 @@ REVIEWED_MAIN: dict[str, Any] = {
         "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
         "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
-        "flux2.Flux2Klein.generate_image": "76e7cf2460d5e121",
+        "flux2.Flux2Klein.generate_image": "9a8e2c4041f54e75",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
-        "z_image.ZImage.generate_image": "6a9c34aabe69f6c9",
+        "z_image.ZImage.generate_image": "a0e64be2aa3d8bc9",
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },

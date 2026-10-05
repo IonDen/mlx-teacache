@@ -14,6 +14,8 @@ from collections.abc import Callable, Iterable, Mapping
 from importlib.metadata import PackageNotFoundError, distribution
 from typing import Any
 
+import pytest
+
 from mlx_teacache._mflux_versions import release_tuple
 
 
@@ -159,6 +161,20 @@ def installed_vcs_commit(dist_name: str = "mflux") -> str | None:
     except (ValueError, AttributeError):
         return None
     return commit if isinstance(commit, str) and commit else None
+
+
+def require_or_skip(has_feature: bool, *, vcs_commit: str | None, feature: str) -> None:
+    """Return when ``has_feature``; otherwise skip on a release (it predates the feature) but fail on a
+    git install of mflux (``vcs_commit`` given), where a missing feature means main dropped or renamed
+    something TeaCache was reviewed against and a skip would hide it."""
+    if has_feature:
+        return
+    if vcs_commit is not None:
+        pytest.fail(
+            f"mflux main ({vcs_commit[:7]}) has no {feature}: it dropped or renamed the feature "
+            "TeaCache was reviewed against"
+        )
+    pytest.skip(f"this mflux has no {feature}")
 
 
 def drift_failures_for_install(

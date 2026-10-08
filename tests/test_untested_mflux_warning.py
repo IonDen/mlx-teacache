@@ -24,6 +24,13 @@ else:
     import tomli as tomllib
 
 
+# The next minor release after the newest verified one: newer than verified, still inside the [mflux] range.
+_VERIFIED = versions.release_tuple(versions.NEWEST_VERIFIED_MFLUX)
+assert _VERIFIED is not None
+_MAJOR, _MINOR, *_ = _VERIFIED
+NEWER = f"{_MAJOR}.{_MINOR + 1}.0"
+
+
 def _fake_flux1_dev() -> SimpleNamespace:
     """Duck-typed FLUX.1 dev that apply() patches without mflux or weights (same shape as test_api_warnings)."""
     return SimpleNamespace(
@@ -59,17 +66,17 @@ def _apply(times: int = 1) -> tuple[list[warnings.WarningMessage], list[str]]:
 
 def test_newer_mflux_warns_once_per_process_and_still_patches(installed_mflux) -> None:
     """Bug: the once-per-process flag is never set (a warning on every apply), or a newer mflux is refused."""
-    installed_mflux("0.22.0")
+    installed_mflux(NEWER)
     caught, variant_ids = _apply(times=2)
     assert len(caught) == 1
     assert variant_ids == ["flux1-dev", "flux1-dev"]
     message = str(caught[0].message)
-    assert "mflux 0.22.0" in message
+    assert f"mflux {NEWER}" in message
     assert versions.NEWEST_VERIFIED_MFLUX in message
     assert "https://github.com/IonDen/mlx-teacache/issues" in message
 
 
-@pytest.mark.parametrize("installed", ["0.21.0", "0.20.0", "0.17.5"])
+@pytest.mark.parametrize("installed", [versions.NEWEST_VERIFIED_MFLUX, "0.20.0", "0.17.5"])
 def test_verified_or_older_mflux_does_not_warn(installed_mflux, installed: str) -> None:
     """Bug: the comparison is >= instead of > (the verified release itself warns), or older releases warn."""
     installed_mflux(installed)
@@ -97,7 +104,7 @@ def test_installed_mflux_version_is_none_when_the_package_is_absent(monkeypatch:
 def test_warning_points_at_the_callers_line(installed_mflux) -> None:
     """Bug: a wrong stacklevel attributes the warning to mlx_teacache internals (api.py or _mflux_versions.py), so a
     caller's module- or line-scoped warnings filter cannot target it."""
-    installed_mflux("0.22.0")
+    installed_mflux(NEWER)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         call_line = inspect.currentframe().f_lineno + 1
@@ -118,7 +125,7 @@ def test_every_other_test_starts_with_the_warning_already_shown() -> None:
 def test_pytest_ignores_exactly_this_warning(installed_mflux) -> None:
     """Bug: the warning is reworded (or the filter edited) so pytest's ignore entry stops matching, and every apply
     test fails under filterwarnings=error in the CI jobs that install a newer mflux."""
-    installed_mflux("0.22.0")
+    installed_mflux(NEWER)
     caught, _ = _apply()
     pyproject = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text())
     filters = pyproject["tool"]["pytest"]["ini_options"]["filterwarnings"]
@@ -141,7 +148,7 @@ def test_installed_mflux_version_reads_the_real_environment() -> None:
 def test_unmatched_model_raises_without_spending_the_untested_warning(installed_mflux) -> None:
     """Bug: warn_if_untested_mflux() moves above the registry loop, so a model apply_teacache refuses still emits
     the untested-mflux warning and uses up the once-per-process flag before any model is actually patched."""
-    installed_mflux("0.22.0")
+    installed_mflux(NEWER)
     turbo = SimpleNamespace(
         model_config=SimpleNamespace(aliases=["z-image-turbo"]),
         transformer=SimpleNamespace(),
@@ -159,11 +166,32 @@ def test_unmatched_model_raises_without_spending_the_untested_warning(installed_
     assert len(matched) == 1
 
 
+def test_zero_cond_t_qwen_model_raises_without_spending_the_untested_warning(installed_mflux) -> None:
+    """Bug: the zero_cond_t refusal sits in the Qwen integration's apply() instead of detection, so apply_teacache
+    emits the untested-mflux warning (and uses up the once-per-process flag) for a Qwen-Image-Edit-2511 transformer
+    it then refuses."""
+    installed_mflux(NEWER)
+    edit_2511 = SimpleNamespace(
+        model_config=SimpleNamespace(aliases=["qwen-image", "qwen"], model_name=None),
+        transformer=SimpleNamespace(zero_cond_t=True),
+        callbacks=FaithfulCallbackRegistry(),
+        generate_image=lambda **kw: "image",
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(IncompatibleModelError):
+            apply_teacache(edit_2511)
+    assert [w for w in caught if issubclass(w.category, TeaCacheUntestedMfluxWarning)] == []
+    matched, variant_ids = _apply()
+    assert variant_ids == ["flux1-dev"]
+    assert len(matched) == 1
+
+
 def test_a_raising_warnings_filter_does_not_silence_later_calls(installed_mflux) -> None:
     """Bug: the once-per-process flag is set before warnings.warn runs, so a caller's "error" filter that makes the
     first call raise also silences every later call, where the warning would otherwise reach a caller who relaxed
     the filter."""
-    installed_mflux("0.22.0")
+    installed_mflux(NEWER)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         for _ in range(2):

@@ -6,6 +6,11 @@ model_config.py:429-447): base = ["qwen-image", "qwen"], edit =
 Element-membership on the bare "qwen-image"/"qwen" strings matches base only —
 none of the edit aliases equals "qwen-image" or "qwen" as a list element, so the
 edit model correctly falls through to IncompatibleModelError.
+
+mflux 0.22 also builds Qwen-Image-Edit-2511 with `zero_cond_t` (its config sets
+`transformer_overrides={"zero_cond_t": True}`): the reference-image tokens take the
+timestep-0 modulation. The gated forward does not implement that path, so a config or a
+transformer with it on is not this variant. Text-to-image Qwen-Image always has it off.
 """
 
 from mlx_teacache.variants._pipeline_class import config_matches
@@ -18,10 +23,17 @@ MODEL_NAMES: tuple[str, ...] = ("qwen-image", "qwen")
 
 def matches_config(model_config: object, pipeline_class: type) -> bool:
     """True when `pipeline_class` building from `model_config` is this variant. Reads no weights."""
+    overrides = getattr(model_config, "transformer_overrides", None) or {}
+    if overrides.get("zero_cond_t"):
+        return False
     return config_matches(model_config, pipeline_class, _ALLOWED, MODEL_NAMES)
 
 
 def matches(flux: object) -> bool:
+    # Not a second copy of the config rule: this reads the BUILT transformer. A transformer built with
+    # zero_cond_t, or swapped in after the model config was made, is invisible to matches_config.
+    if getattr(getattr(flux, "transformer", None), "zero_cond_t", False):
+        return False
     return matches_config(getattr(flux, "model_config", None), type(flux))
 
 

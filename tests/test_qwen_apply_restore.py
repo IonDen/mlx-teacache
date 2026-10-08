@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mlx_teacache.variants.qwen_image.detect import matches
 from mlx_teacache.variants.qwen_image.integration import ProxyQwenTransformer, apply
 from tests._fakes import FaithfulCallbackRegistry
 
@@ -63,6 +64,31 @@ def test_apply_rollback_on_register_failure_qwen(monkeypatch) -> None:
     assert flux.transformer is original, "proxy transformer left installed"
     for name, expected in before.items():
         assert getattr(flux.callbacks, name) == expected, f"callback left in {name}"
+
+
+def _qwen_detected_flux(*, zero_cond_t: object) -> SimpleNamespace:
+    """A duck-typed model the qwen-image detector matches by alias, with a transformer carrying `zero_cond_t`."""
+    flux = _fake_flux()
+    flux.model_config = SimpleNamespace(aliases=["qwen-image", "qwen"], model_name=None)
+    flux.transformer.zero_cond_t = zero_cond_t
+    return flux
+
+
+def test_detection_refuses_a_transformer_built_with_zero_cond_t() -> None:
+    """Bug: TeaCache's Qwen forward does not implement zero_cond_t (mflux 0.22 modulates the reference-image tokens
+    with the timestep-0 embedding when it is set), so such a transformer would run a different model under TeaCache
+    without saying so."""
+    assert matches(_qwen_detected_flux(zero_cond_t=True)) is False
+
+
+def test_detection_accepts_a_transformer_with_zero_cond_t_off() -> None:
+    """Bug: the refusal tests for the attribute instead of its value, so every Qwen-Image load on mflux 0.22 (which
+    always sets `zero_cond_t`, False for text-to-image) is refused."""
+    flux = _qwen_detected_flux(zero_cond_t=False)
+    assert matches(flux) is True
+    handle = apply(flux, rel_l1_thresh=0.25)
+    assert isinstance(flux.transformer, ProxyQwenTransformer)
+    handle.restore()
 
 
 def test_proxy_delegates_parameters_to_inner() -> None:

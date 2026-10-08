@@ -9,9 +9,10 @@ from importlib.metadata import PackageNotFoundError, version
 
 from mlx_teacache.errors import TeaCacheUntestedMfluxWarning
 
-# The newest mflux release whose copied functions were fingerprinted and checked on real
-# weights. The [mflux] extra allows two minor versions past it.
-NEWEST_VERIFIED_MFLUX = "0.21.0"
+# The newest mflux release verified here: its row was recorded from the wheel's sources and the
+# test suite ran against it; the real-weights tests run when a copied forward changes what it
+# computes. The [mflux] extra allows two minor versions past it.
+NEWEST_VERIFIED_MFLUX = "0.22.0"
 
 _LEADING_RELEASE = re.compile(r"\d+(?:\.\d+)*")
 

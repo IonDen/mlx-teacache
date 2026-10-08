@@ -248,31 +248,49 @@ KNOWN: dict[str, dict[str, str]] = {
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
+    # 0.22.0, fingerprinted 2026-10-08 from the PyPI wheel (release commit 31c9640). Z-Image and FLUX.2 Klein match
+    # the main commit reviewed for 0.13.1 (e50215c: stream_t_emb, the generation_parameters metadata argument). New are
+    # the three Qwen functions (mflux PR 844): QwenTransformer.__call__ builds a timestep-0 embedding and a reference-
+    # token mask when the transformer has zero_cond_t and an edit passes cond_image_grid, and the block and its static
+    # _modulate take them as optional arguments. Text-to-image Qwen-Image never sets zero_cond_t, so the copy, which
+    # passes neither argument, runs the same arithmetic (tests/test_qwen_forward_parity.py), and apply() refuses a
+    # transformer that has it on. Off these fourteen targets, mflux PR 839 now loads the norm_out bias for FLUX.1 and
+    # Qwen-Image; both copies call mflux's norm_out module, so they follow it.
+    "0.22.0": {
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
+        "z_image.ZImageTransformer.__call__": "600eb723a0529715",
+        "qwen.QwenTransformer.__call__": "c146cc8c49bcce09",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "57a729e7440e6e76",
+        "qwen.QwenTransformerBlock._modulate": "112f10214c4791bf",
+        "flux1.Flux1.generate_image": "879f66c3de7a0b52",
+        "flux2.Flux2Klein.generate_image": "9a8e2c4041f54e75",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "a0e64be2aa3d8bc9",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
+    },
 }
 
 
 # A git install of mflux main keeps reporting the last release's version, so it cannot be judged by
-# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-05
-# (the four mflux PRs merged after 822: 820 opt-in float16 attention/feed-forward compute, on top of PR 803, the
-# bfloat16 Z-Image stream; 824 folds a baked LoRA into the dense weights before quantization (initializers pass
-# `dense_weights=`, lora_saver bakes earlier); 813 changes test tolerances; 828 silences the missing-files warning
-# for an mflux-saved checkpoint passed as --model; those three are off TeaCache's copied paths). Against KNOWN["0.21.0"] only the Z-Image transformer forward (which gained
-# `stream_t_emb`) and the Z-Image and FLUX.2 generate_image functions (the generation_parameters
-# metadata argument, off the copied path) differ. The float16 setting lives on the attention and
-# feed-forward modules, which the copied forwards call without reading it. Bump it, commit and digests together, after
-# reviewing a newer main. Applies to git+URL installs only: an editable checkout writes `dir_info`, not
-# `vcs_info`, and is judged by its version string like a wheel.
+# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-08,
+# 52295bc, which is the 0.22.0 release commit plus a contributor-docs change (mflux PR 837), so it equals
+# KNOWN["0.22.0"]. Bump it, commit and digests together, after reviewing a newer main. Applies to git+URL installs
+# only: an editable checkout writes `dir_info`, not `vcs_info`, and is judged by its version string like a wheel.
 REVIEWED_MAIN: dict[str, Any] = {
-    "commit": "e50215c1781ce5a82e9d6e68f90f820ae23c2404",
+    "commit": "52295bc4d6309917639c885e2d0218d89b49525d",
     "fingerprints": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
         "z_image.ZImageTransformer.__call__": "600eb723a0529715",
-        "qwen.QwenTransformer.__call__": "b12184fbe7e98fe8",
+        "qwen.QwenTransformer.__call__": "c146cc8c49bcce09",
         "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
         "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
-        "qwen.QwenTransformerBlock.__call__": "581446ca347138fd",
-        "qwen.QwenTransformerBlock._modulate": "b84461ff22355cb1",
+        "qwen.QwenTransformerBlock.__call__": "57a729e7440e6e76",
+        "qwen.QwenTransformerBlock._modulate": "112f10214c4791bf",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "9a8e2c4041f54e75",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",

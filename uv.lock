@@ -700,11 +700,11 @@ wheels = [
 
 [[package]]
 name = "fsspec"
-version = "2026.4.0"
+version = "2026.9.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d5/8d/1c51c094345df128ca4a990d633fe1a0ff28726c9e6b3c41ba65087bba1d/fsspec-2026.4.0.tar.gz", hash = "sha256:301d8ac70ae90ef3ad05dcf94d6c3754a097f9b5fe4667d2787aa359ec7df7e4", size = 312760, upload-time = "2026-04-29T20:42:38.635Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/cd/9be253869fc42e764de7f3dedd6969af7d44ff9c3375214a3442a6f3fc08/fsspec-2026.9.0.tar.gz", hash = "sha256:0f08147951c8cb31d844c3547d631053b127863b60be04cf06e121333ee0e2fe", size = 333545, upload-time = "2026-09-18T17:50:42.825Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/0c/043d5e551459da400957a1395e0febbf771446ff34291afcbe3d8be2a279/fsspec-2026.4.0-py3-none-any.whl", hash = "sha256:11ef7bb35dab8a394fde6e608221d5cf3e8499401c249bebaeaad760a1a8dec2", size = 203402, upload-time = "2026-04-29T20:42:36.842Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl", hash = "sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f", size = 221738, upload-time = "2026-09-18T17:50:41.341Z" },
 ]
 
 [[package]]
@@ -1373,13 +1373,14 @@ wheels = [
 
 [[package]]
 name = "mflux"
-version = "0.21.0"
+version = "0.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.15'" },
     { name = "anyio", version = "4.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.15'" },
     { name = "filelock" },
     { name = "fonttools" },
+    { name = "fsspec" },
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "matplotlib" },
@@ -1405,9 +1406,9 @@ dependencies = [
     { name = "transformers" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/04/a9/e9f741cc47906fd3a87b291949314c3bde211389d67eff50e878914500d7/mflux-0.21.0.tar.gz", hash = "sha256:508ac1f0491a204968391eae0d507d77bd54941a1eea37d080ab3e33d53794f6", size = 1080447, upload-time = "2026-10-03T19:24:59.256Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/14/eb/4b735bf57dfcf0aea6ff0ad95d81852759b76f64a0b641422d279e36b74c/mflux-0.22.0.tar.gz", hash = "sha256:8a9a9c92c47ed4a35d8e7e962ca684ef6c81c1350b943044962aa0b9cd4e5790", size = 1104393, upload-time = "2026-10-08T11:03:59.509Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/b7/3e0e6577e90cc8bd13aecc50524e2cbeabaf548896de960fede2e9e82b5a/mflux-0.21.0-py3-none-any.whl", hash = "sha256:b2e38fd3cd4e50d497cc226e01555b8fc7856181c9421bde2e043bc53ac12d2e", size = 1454544, upload-time = "2026-10-03T19:24:56.99Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/32/0f6d908fa4c0baa2c40ef883b5d9b9519718338c82660d7444b3b9c59cb8/mflux-0.22.0-py3-none-any.whl", hash = "sha256:b3c863f1e64718f1fed657448307d00a5702870b9e8fce18c547f5a16f9851dd", size = 1487763, upload-time = "2026-10-08T11:03:57.988Z" },
 ]
 
 [[package]]
@@ -1561,7 +1562,7 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17.5,<0.24" },
+    { name = "mflux", marker = "extra == 'mflux'", specifier = ">=0.17.5,<0.25" },
     { name = "mlx", specifier = ">=0.31" },
 ]
 provides-extras = ["mflux"]
@@ -1577,7 +1578,7 @@ test-core = [
 ]
 test-mflux = [
     { name = "hypothesis", specifier = ">=6" },
-    { name = "mflux", specifier = ">=0.17.5,<0.24" },
+    { name = "mflux", specifier = ">=0.17.5,<0.25" },
     { name = "mlx-taef", specifier = ">=0.1.1" },
     { name = "numpy" },
     { name = "pytest", specifier = ">=8" },

@@ -24,6 +24,7 @@ MFLUX_FILES = build_allowlist(
         "test_forward_z_image_fake.py",  # imports the z-image-base integration module
         "test_flux2_float16_compute_parity.py",  # real mflux Flux2Transformer; float16 cases skip on releases without the option
         "test_zimage_bf16_stream_parity.py",  # real mflux ZImageTransformer; skips without stream_t_emb
+        "test_qwen_forward_parity.py",  # real mflux QwenTransformer, weight-free
         "test_cfg_branch_independence.py",  # calls flux2_cfg_forward_with_gate which lazily imports mflux
         "test_api.py",
         "test_parity_flux1.py",

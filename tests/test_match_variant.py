@@ -95,6 +95,25 @@ def test_qwen_calibrated_follows_the_checkpoint_the_config_names(
     assert info.calibrated is calibrated
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [({"zero_cond_t": True}, None), ({"zero_cond_t": False}, "qwen-image"), ({}, "qwen-image")],
+    ids=["zero_cond_t-on", "zero_cond_t-off", "no-overrides"],
+)
+def test_qwen_config_with_zero_cond_t_is_refused_like_apply_teacache_refuses_it(
+    overrides: dict[str, bool], expected: str | None
+) -> None:
+    """Bug: the zero_cond_t refusal (mflux 0.22's Qwen-Image-Edit-2511 transformer, which TeaCache's Qwen forward
+    does not implement) is checked only after loading, so match_variant says yes to a config apply_teacache then
+    refuses; or the check reads the key's presence instead of its value and refuses text-to-image configs."""
+    config = types.SimpleNamespace(
+        aliases=["qwen-image", "qwen"], model_name=None, transformer_overrides=overrides
+    )
+    cls = _mflux_class("QwenImage")
+    info = match_variant(config, cls)
+    assert (None if info is None else info.variant_id) == expected == _apply_dispatch(config, cls)
+
+
 def test_a_variant_without_a_checkpoint_check_is_always_calibrated() -> None:
     """Bug: calibrated is computed for every variant by comparing META's hf_model_id with model_name, so the library
     reports a Z-Image finetune as uncalibrated; for Z-Image that warning belongs

@@ -49,7 +49,7 @@ jobs:
     # extra is NOT installed — we still need MLX itself as a hard dependency.
     # Runs on the floor interpreter so the mflux-free import contract is
     # proven at 3.10 (the test-mflux matrix covers 3.11-3.13 on its side).
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,7 +69,7 @@ jobs:
           path: coverage-core.xml
 
   test-mflux:
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
@@ -92,7 +92,7 @@ jobs:
           path: coverage-mflux-${{ matrix.python-version }}.xml
 
   test-mflux-floor:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +114,7 @@ jobs:
           uv run --no-sync pytest -m "not parity and not slow and not benchmark and not network"
 
   test-mflux-latest:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,7 +143,7 @@ jobs:
     # Early warning for the next mflux release: the fast lane, drift guard included, against
     # mflux's main branch. Upstream main can move at any time, so this job never blocks a
     # merge; read its log when it goes red.
-    runs-on: macos-14
+    runs-on: macos-15
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,7 +173,7 @@ jobs:
         run: echo "::warning::mflux main broke the fast lane"
 
   sdist-smoke:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -302,7 +302,7 @@ jobs:
     # and an HF auth token. They are inherently local/nightly, not a
     # per-PR gate. Trigger manually via `gh workflow run CI` when needed.
     if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
+    runs-on: macos-15
     needs: test-mflux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

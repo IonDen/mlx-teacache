@@ -130,10 +130,13 @@ jobs:
       # after a real-weights parity run.
       # Sync from uv.lock, then reinstall mflux. `uv pip install` re-resolves mflux's own dependencies,
       # so mlx and others can move off the lock too.
+      # pillow<13: every mflux release up to 0.23.0 imports PIL._typing, which fails to import under pillow 13.0.0
+      # on Python < 3.15. Fixed in mflux by https://github.com/mflux-community/mflux/pull/890; drop the
+      # constraint once a release containing it is the newest in range.
       - name: Install test-mflux, then upgrade mflux to the newest in-range
         run: |
           uv sync --locked --group test-mflux
-          uv pip install --upgrade "mflux>=0.17.5,<0.25"
+          uv pip install --upgrade "mflux>=0.17.5,<0.26" "pillow<13"
       - name: Show resolved mflux and run the fast lane without re-syncing
         run: |
           uv run --no-sync python -c "import importlib.metadata as m; print('mflux', m.version('mflux'))"

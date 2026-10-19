@@ -272,6 +272,26 @@ KNOWN: dict[str, dict[str, str]] = {
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
+    # 0.23.0, fingerprinted 2026-10-19 from the PyPI wheel: all fourteen equal 0.22.0. The release's Qwen work is in
+    # the separate Qwen-Image-2.1 package (models/qwen21), not the Qwen-Image transformer copied here; FLUX.2 Klein's
+    # text encoder gained an optional position_ids argument outside the transformer; built-in models now load from a
+    # pinned Hugging Face commit (mflux PR 872), which changes which snapshot a repo name resolves to, not the code.
+    "0.23.0": {
+        "flux1.Transformer.__call__": "06ef78be1cd4e97c",
+        "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
+        "z_image.ZImageTransformer.__call__": "600eb723a0529715",
+        "qwen.QwenTransformer.__call__": "c146cc8c49bcce09",
+        "flux2.Flux2TransformerBlock.__call__": "ede07d21519550be",
+        "flux2.Flux2Modulation.__call__": "634d78cbbe8dd7a5",
+        "qwen.QwenTransformerBlock.__call__": "57a729e7440e6e76",
+        "qwen.QwenTransformerBlock._modulate": "112f10214c4791bf",
+        "flux1.Flux1.generate_image": "879f66c3de7a0b52",
+        "flux2.Flux2Klein.generate_image": "9a8e2c4041f54e75",
+        "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
+        "z_image.ZImage.generate_image": "a0e64be2aa3d8bc9",
+        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
+    },
 }
 
 

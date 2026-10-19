@@ -20,6 +20,7 @@ from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
 from mlx_teacache._kernel.window import check_step_window
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
+from mlx_teacache.variants._proxy_restore import make_restore_transformer
 
 from .config import COEFFICIENTS, DEFAULT_THRESH
 
@@ -492,9 +493,10 @@ def apply(
         raise
 
     # 7. Build VariantPatch: rollback restores transformer + unsubscribes the
-    #    callback + restores generate_image. No stats finalize call.
-    def _restore_transformer() -> None:
-        flux.transformer = original_transformer
+    #    callback + restores generate_image. No stats finalize call. The
+    #    transformer rollback holds the proxy weakly so mflux's MemorySaver can
+    #    free the original (see _proxy_restore).
+    _restore_transformer = make_restore_transformer(flux, proxy)
 
     def _unsubscribe_callback() -> None:
         from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity as _rcbi

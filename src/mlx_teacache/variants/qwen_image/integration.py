@@ -24,6 +24,7 @@ from mlx_teacache.errors import (
 )
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
+from mlx_teacache.variants._proxy_restore import make_restore_transformer
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH, META
 from .detect import is_calibrated_checkpoint
@@ -465,8 +466,8 @@ def apply(
                 _undo()
         raise
 
-    def _restore_transformer() -> None:
-        flux.transformer = original_transformer
+    # Holds the proxy weakly so mflux's MemorySaver can free the original (see _proxy_restore).
+    _restore_transformer = make_restore_transformer(flux, proxy)
 
     def _restore_generate_image() -> None:
         if internal._generate_image_was_instance_attr:

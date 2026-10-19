@@ -1,11 +1,13 @@
 """mflux 0.21 deletes the per-generation predict closure before the after-loop callbacks so that --low-ram can free
 the transformer before decoding (Z-Image and FLUX.2 Klein). With TeaCache applied, nothing else may keep the
-transformer reachable once that closure is gone. No weights: duck-typed models and the tiny fake transformers of the
+transformer reachable once that closure is gone. The proxy variants (FLUX.1, Qwen-Image) have the same duty when
+mflux's MemorySaver sets `model.transformer = None`. No weights: duck-typed models and the tiny fake transformers of the
 forward tests. The FLUX.2 cases call a forward that imports mflux inside the function, so the file is in the
 mflux lane."""
 
 import gc
 import importlib
+import inspect
 import warnings
 import weakref
 from types import SimpleNamespace
@@ -78,23 +80,141 @@ def test_with_teacache_applied_dropping_the_closure_frees_the_transformer(varian
     assert handle.variant_id == variant_id  # the handle is still alive and patched
 
 
-@pytest.mark.xfail(strict=True, reason="the FLUX.1 rollback holds the original transformer until restore()")
-@pytest.mark.parametrize("variant_id", ["flux1-dev", "flux1-krea-dev", "qwen-image"])
-def test_proxy_variants_free_the_transformer_once_the_pipeline_drops_it(variant_id: str) -> None:
-    """Bug (known gap): the proxy variants' rollback holds the original transformer so restore() can put it back,
-    so dropping flux.transformer frees nothing while the handle lives and --low-ram cannot reclaim it. Strict xfail:
-    when the transformer does get freed this test turns red and asks for the xfail mark to be removed."""
+_PROXY_VARIANTS = ["flux1-dev", "flux1-krea-dev", "flux1-schnell", "qwen-image"]
+
+
+def _apply_proxy_variant(variant_id: str) -> tuple[Any, Any, Any, Any]:
+    """(fake, handle, weakref to the original transformer, original generate_image) with TeaCache applied."""
     fake = fake_for_variant(variant_id)
     fake.transformer = _Transformer()
     ref = weakref.ref(fake.transformer)
+    original_generate = fake.generate_image
     with warnings.catch_warnings():
         # Qwen-Image's alias warns about an uncalibrated checkpoint on mflux >= 0.19; irrelevant here.
         warnings.simplefilter("ignore")
         handle = apply_teacache(fake)
+    return fake, handle, ref, original_generate
+
+
+@pytest.mark.parametrize("variant_id", _PROXY_VARIANTS)
+def test_proxy_variants_free_the_transformer_once_the_pipeline_drops_it(variant_id: str) -> None:
+    """Bug: the proxy variants' rollback holds the original transformer so restore() can put it back, so mflux's
+    MemorySaver setting `model.transformer = None` (--low-ram, --pid-decode) frees nothing while the handle lives and
+    the weights stay resident through the VAE decode."""
+    fake, handle, ref, _ = _apply_proxy_variant(variant_id)
     fake.transformer = None
     gc.collect()
     assert handle.variant_id == variant_id
     assert ref() is None
+
+
+@pytest.mark.parametrize("variant_id", _PROXY_VARIANTS)
+def test_restore_after_the_pipeline_dropped_the_transformer_undoes_the_rest(variant_id: str) -> None:
+    """Bug: restore() after mflux dropped the transformer either raises (the command's teardown crashes after a
+    finished image) or puts back a transformer that mflux meant to free. It must leave the slot empty and still undo
+    the generate_image wrapper, the callback and the double-apply sentinel."""
+    fake, handle, _, original_generate = _apply_proxy_variant(variant_id)
+    # The patch is really installed, so the assertions after restore() are not vacuous.
+    assert fake.generate_image is not original_generate
+    assert fake._teacache_handle is handle
+    fake.transformer = None
+    gc.collect()
+
+    handle.restore()
+
+    assert fake.transformer is None
+    assert fake.generate_image is original_generate
+    assert fake.callbacks.before_loop == [] and fake.callbacks.after_loop == []
+    assert not hasattr(fake, "_teacache_handle")
+
+
+@pytest.mark.parametrize("variant_id", _PROXY_VARIANTS)
+def test_restore_leaves_the_slot_empty_while_something_else_still_holds_the_proxy(variant_id: str) -> None:
+    """Bug: restore() decides on whether the proxy is still alive instead of whether the pipeline still holds it, so a
+    stray reference (a notebook variable, a REPL's `_`) makes restore() put back the transformer mflux dropped."""
+    fake, handle, _, _ = _apply_proxy_variant(variant_id)
+    held = fake.transformer
+    fake.transformer = None
+
+    handle.restore()
+
+    assert fake.transformer is None
+    del held
+
+
+@pytest.mark.parametrize("variant_id", _PROXY_VARIANTS)
+def test_restore_keeps_a_transformer_the_caller_installed_after_apply(variant_id: str) -> None:
+    """Bug: restore() overwrites a transformer the caller swapped in after apply_teacache whenever the proxy is still
+    referenced somewhere, so the outcome depends on reference counts instead of on the model's state."""
+    fake, handle, _, _ = _apply_proxy_variant(variant_id)
+    held = fake.transformer
+    replacement = _Transformer()
+    fake.transformer = replacement
+
+    handle.restore()
+
+    assert fake.transformer is replacement
+    del held
+
+
+def test_flux1_mfluxs_memory_saver_frees_the_transformer_during_a_teacache_generation() -> None:
+    """Bug: TeaCache keeps the FLUX.1 transformer reachable through a real generation, so mflux's own MemorySaver
+    (keep_transformer=False, what --low-ram registers for one seed) frees nothing before the decode. Runs the fake's
+    denoising loop, so forward steps go through the proxy before the eviction."""
+    from mflux.callbacks.instances.memory_saver import MemorySaver
+
+    if "num_seeds" not in inspect.signature(MemorySaver.__init__).parameters:
+        # mflux 0.17.5: no num_seeds, and the constructor always sets the process-wide MLX cache limit.
+        pytest.skip("this mflux's MemorySaver predates num_seeds and an optional cache limit")
+    fake = fake_for_variant("flux1-dev")
+    ref = weakref.ref(fake.transformer)
+    handle = apply_teacache(fake)
+    fake.callbacks.register(
+        MemorySaver(model=fake, keep_transformer=False, cache_limit_bytes=None, num_seeds=1)
+    )
+
+    assert fake.generate_image(seed=0, prompt="", num_inference_steps=4) == "image"
+
+    assert fake.transformer is None
+    assert ref() is None
+    assert (
+        len(handle.stats.last_generation.decisions) == 4
+    )  # the generation completed and committed its stats
+    handle.restore()
+    assert fake.transformer is None
+
+
+def test_qwen_image_frees_the_transformer_after_gated_forward_steps() -> None:
+    """Bug: Qwen-Image's gated forward or its CFG pairer stores the real transformer on the handle or on itself while
+    stepping, so it stays reachable after mflux drops the proxy. Two positive/negative step pairs through a tiny real
+    mflux QwenTransformer, then the eviction."""
+    from tests.test_qwen_forward_parity import _config, _inputs, _tiny_transformer
+
+    fake = fake_for_variant("qwen-image")
+    fake.transformer = _tiny_transformer("bf16")
+    ref = weakref.ref(fake.transformer)
+    handle = apply_teacache(fake)
+    config = _config()
+    config.init_time_step = 0
+    for callback in fake.callbacks.before_loop:
+        callback.call_before_loop(seed=0, prompt="", latents=None, config=config)
+    latents, positive, negative, mask = _inputs()
+    for t in range(2):
+        for prompt in (positive, negative):
+            mx.eval(
+                fake.transformer(
+                    t=t, config=config, hidden_states=latents, encoder_hidden_states=prompt,
+                    encoder_hidden_states_mask=mask,
+                )
+            )  # fmt: skip
+    for callback in list(fake.callbacks.after_loop):
+        callback.call_after_loop(seed=0, prompt="", latents=latents, config=config)
+
+    fake.transformer = None
+    gc.collect()
+
+    assert ref() is None
+    assert handle.variant_id == "qwen-image"
 
 
 @pytest.mark.parametrize(

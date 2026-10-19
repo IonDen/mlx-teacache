@@ -55,6 +55,11 @@ class TeaCacheHandle:
         self.restore()
 
     def restore(self) -> None:
+        """Undo every patch apply_teacache installed; a second call does nothing.
+
+        If mflux's memory saver dropped the transformer after the denoising loop, the transformer slot stays empty
+        (as with plain mflux) and the rest of the patch is still undone. On a teardown error the first error is
+        re-raised and the handle can be restored again."""
         if self._torn_down:
             return
         errors: list[BaseException] = []

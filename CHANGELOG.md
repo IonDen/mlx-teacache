@@ -7,6 +7,24 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.3] — 2026-10-19
+
+A memory fix for FLUX.1 and Qwen-Image, and mflux 0.23 support. The gate, the default thresholds and the coefficients are unchanged, and there are no new speed measurements.
+
+For a single seed, mflux's memory saver (`--low-ram`, or `--pid-decode`) drops the transformer after the denoising loop by setting `model.transformer = None`, so the decode runs without the transformer's weights in memory. With TeaCache applied to FLUX.1 dev, FLUX.1 Krea [dev], FLUX.1 schnell or Qwen-Image, dropping it freed nothing, because the handle kept its own reference to the original transformer so that `restore()` could put it back. The handle now holds the TeaCache wrapper only weakly and reads the original from it, so the wrapper in `model.transformer` is the only strong reference, and both are freed when mflux drops it. We checked this once with real weights: 4-bit FLUX.1-dev, 512×512, 8 steps, mflux 0.23.0, on an M1 Max. With this release, MLX's active memory going into the decode was 0.01 GiB; with one extra reference kept the way 0.13.2 kept it, it was 6.25 GiB. Whether the run's overall peak drops depends on whether the decode or the denoising loop is the larger of the two at your image size. Qwen-Image uses the same code and was checked with weight-free tests, not on real weights. FLUX.2 Klein and Z-Image already freed the transformer.
+
+`restore()` after mflux has dropped the transformer leaves `model.transformer` as `None`, the same as plain mflux, and still removes the rest of the patch. `restore()` only puts the original back while the TeaCache wrapper is still the model's transformer, so it also leaves alone a transformer you installed yourself after `apply_teacache`.
+
+mflux 0.23.0 now counts as checked, so it no longer triggers `TeaCacheUntestedMfluxWarning`. No mflux function that TeaCache copies changed in 0.23.0, so the only real-weights run on it was the FLUX.1-dev memory check above; the other variants were not re-run. If you install any mflux release up to 0.23.0 together with pillow 13.0.0 on Python 3.11 to 3.14, importing mflux's model classes or running its commands fails, because mflux reads a private pillow module that pillow 13 broke. mflux has fixed this on its main branch (https://github.com/mflux-community/mflux/pull/890). Until a release with that fix is out, install `pillow<13` next to it.
+
+### Fixed
+- FLUX.1 dev, Krea [dev], schnell and Qwen-Image: when mflux's memory saver drops the transformer (`--low-ram` or `--pid-decode`, for a single seed), it is freed before the decode.
+- `restore()` puts the original transformer back only while the TeaCache wrapper is still installed.
+
+### Changed
+- The `[mflux]` extra now allows `mflux>=0.17.5,<0.26`: the releases checked here (0.17.5 through 0.23.0) plus the next two minor versions.
+- For contributors: the development lock moves to mflux 0.23.0, with pillow staying on 12.3.0. The drift test records mflux 0.23.0. CI's newest-mflux job installs `pillow<13` until an mflux release with the pillow fix is the newest one in range.
+
 ## [0.13.2] — 2026-10-08
 
 mflux 0.22 support. The gate, the default thresholds, the coefficients and the copied forwards are unchanged. 0.22.0 is now the newest mflux release this library is checked against, so it no longer triggers `TeaCacheUntestedMfluxWarning`. The checks were the fast test suite, a comparison of the copied functions against mflux 0.22.0's source, a new weight-free test that runs a two-block mflux Qwen-Image transformer with random weights, and a real-weights check of FLUX.1-dev (4-bit, from the original Hugging Face weights): at threshold 0, TeaCache's latents are bit-identical to plain mflux for text-to-image and for image-to-image at strengths 0.5 and 0.7, and `restore()` leaves no trace. The other variants were not re-run on real weights, and there are no new speed measurements.

@@ -88,7 +88,7 @@ import mlx.core as mx
 import numpy as np
 from _memory_saver import make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
-from _qwen_config import QWEN_ORIGINAL, qwen_config
+from _qwen_config import QWEN_2512, QWEN_ORIGINAL, qwen_config
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # reuse the RUNTIME signal fn
 from mlx_teacache.variants.qwen_image.integration import (
@@ -136,6 +136,8 @@ CALIBRATION_PROMPTS = (
 N_HELDOUT = 3
 
 OUTPUT_JSON = "_calibration_qwen.json"
+# Checkpoints whose fit is committed under a fixed name in scripts/ (the variant configs are pinned to them).
+KNOWN_OUTPUT_JSON = {QWEN_ORIGINAL: OUTPUT_JSON, QWEN_2512: "_calibration_qwen_2512.json"}
 CHUNK_DIR_DEFAULT = Path(__file__).parent / "_calib_qwen_chunks"
 
 
@@ -459,15 +461,23 @@ def _capture_one_prompt(flux: Any, prompt: str, *, steps: int = NUM_INFERENCE_ST
 
 
 def _chunk_from_reducer(
-    reducer: _QwenPairReducer, *, prompt_idx: int, prompt: str, steps: int, model: str
+    reducer: _QwenPairReducer,
+    *,
+    prompt_idx: int,
+    prompt: str,
+    steps: int,
+    model: str,
+    generation_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """The per-prompt chunk: both signals' (x, y) series plus the process's MLX peak."""
+    """The per-prompt chunk: both signals' (x, y) series, the process's MLX peak and the prompt's generation time
+    (the aggregate sums these into ``elapsed_seconds``)."""
     chunk: dict[str, Any] = {
         "idx": prompt_idx,
         "model": model,
         "prompt": prompt,
         "num_captures": reducer.steps,
         "steps": steps,
+        "generation_seconds": generation_seconds,
     }
     for sig in ("A", "B"):
         xs, ys = reducer.series(sig)
@@ -566,22 +576,32 @@ def _run_worker(prompt_idx: int, *, steps: int, chunk_dir: Path, dry_run: bool, 
     from mflux.callbacks.instances.memory_saver import MemorySaver
 
     _register_memory_saver(flux, MemorySaver)
+    t0 = time.time()
     reducer = _capture_one_prompt(flux, prompt, steps=steps)
+    generation_seconds = time.time() - t0
     assert reducer.steps == steps, f"expected {steps} captures, got {reducer.steps}"
-    chunk = _chunk_from_reducer(reducer, prompt_idx=prompt_idx, prompt=prompt, steps=steps, model=model)
+    chunk = _chunk_from_reducer(
+        reducer,
+        prompt_idx=prompt_idx,
+        prompt=prompt,
+        steps=steps,
+        model=model,
+        generation_seconds=generation_seconds,
+    )
     out.write_text(json.dumps(chunk, indent=2))
     print(f"[worker {prompt_idx}] wrote {out} (peak {chunk['peak_memory_gb']:.2f} GB)", flush=True)
 
 
 def calibration_paths(model: str) -> tuple[Path, str]:
-    """Default chunk dir and output file name for ``model``. The original checkpoint keeps the committed
-    names; any other checkpoint gets a subfolder of the (gitignored) default chunk dir, and its fit is written
-    inside that folder, so its captures and fit can neither mix with nor overwrite the committed calibration."""
-    if model == QWEN_ORIGINAL:
-        return CHUNK_DIR_DEFAULT, OUTPUT_JSON
+    """Default chunk dir and output file name for ``model``. The original checkpoint keeps its chunks in the
+    default chunk dir; every other checkpoint gets a subfolder of the (gitignored) default chunk dir, so its
+    captures can neither mix with nor overwrite another checkpoint's. A known checkpoint (``KNOWN_OUTPUT_JSON``)
+    has a fixed output name whose fit is written to ``scripts/``; any other checkpoint's fit is written inside
+    its chunk folder under a slug name."""
     slug = re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
     # Nested under the gitignored default chunk dir so a non-default run can never reach git or the sdist.
-    return CHUNK_DIR_DEFAULT / slug, f"_calibration_qwen_{slug}.json"
+    chunk_dir = CHUNK_DIR_DEFAULT if model == QWEN_ORIGINAL else CHUNK_DIR_DEFAULT / slug
+    return chunk_dir, KNOWN_OUTPUT_JSON.get(model, f"_calibration_qwen_{slug}.json")
 
 
 def _check_chunk_models(chunks: list[dict[str, Any]], model: str) -> None:
@@ -596,14 +616,33 @@ def _check_chunk_models(chunks: list[dict[str, Any]], model: str) -> None:
             )
 
 
+def _variant_label(model: str) -> str:
+    """The variant id the aggregate names: the 2512 checkpoint has its own variant; the original and any other
+    Qwen-Image checkpoint fall back to the original's ``qwen-image``."""
+    return "qwen-image-2512" if model == QWEN_2512 else "qwen-image"
+
+
+def _elapsed_seconds(chunks: list[dict[str, Any]]) -> float | None:
+    """The calibration's generation time: the sum of the chunks' ``generation_seconds``, or None when any chunk lacks
+    one (chunks from older runs). Never the orchestrator's own wall time, which is near zero on a resume that only
+    aggregates."""
+    total = 0.0
+    for chunk in chunks:
+        value = chunk.get("generation_seconds")
+        if not isinstance(value, (int, float)):
+            return None
+        total += value
+    return total
+
+
 def _aggregate_path(chunk_dir: Path, *, dry_run: bool, model: str = QWEN_ORIGINAL) -> Path:
-    """Where the final aggregated calibration JSON lands. The committed
-    scripts/_calibration_qwen.json is written ONLY by a real run of the original checkpoint into the
-    default chunk dir; a dry-run, a custom chunk dir or another checkpoint writes beside its chunks so
-    a smoke or a 2512 run never clobbers the committed artifact."""
-    _, out_name = calibration_paths(model)
-    if not dry_run and model == QWEN_ORIGINAL and chunk_dir.resolve() == CHUNK_DIR_DEFAULT.resolve():
-        return Path(__file__).parent / OUTPUT_JSON
+    """Where the final aggregated calibration JSON lands. A known checkpoint's committed
+    scripts/<name> is written ONLY by a real run into that checkpoint's own default chunk dir; a dry-run,
+    a custom chunk dir or an unknown checkpoint writes beside its chunks so a smoke or a custom run never
+    clobbers a committed artifact."""
+    default_chunk_dir, out_name = calibration_paths(model)
+    if not dry_run and model in KNOWN_OUTPUT_JSON and chunk_dir.resolve() == default_chunk_dir.resolve():
+        return Path(__file__).parent / out_name
     return chunk_dir / out_name
 
 
@@ -620,7 +659,6 @@ def _run_orchestrator(
         f"[orchestrator] {n_prompts} prompts, {done} already done, {len(pending)} pending: {pending}",
         flush=True,
     )
-    t0 = time.time()
     for idx in pending:
         cmd = [
             sys.executable,
@@ -649,15 +687,15 @@ def _run_orchestrator(
                 f"[orchestrator] worker for prompt {idx} failed (rc={result.returncode}); chunk not "
                 f"written. Fix the cause and rerun — completed chunks in {chunk_dir} are reused."
             )
-    gen_seconds = time.time() - t0
 
     # All chunks present -> aggregate + fit. Same report schema as the monolith.
     chunks = [json.loads((chunk_dir / _chunk_filename(i)).read_text()) for i in range(n_prompts)]
     _check_chunk_models(chunks, model)
     n_fit = _n_fit(n_prompts, N_HELDOUT)
     acc = _accumulate_chunks(chunks, n_fit)
+    gen_seconds = _elapsed_seconds(chunks)
     report: dict[str, Any] = {
-        "variant": "qwen-image",
+        "variant": _variant_label(model),
         "model": model,
         "num_inference_steps": steps,
         "guidance": GUIDANCE,
@@ -695,7 +733,8 @@ def _run_orchestrator(
 
     out = _aggregate_path(chunk_dir, dry_run=dry_run, model=model)
     out.write_text(json.dumps(report, indent=2))
-    print(f"\n[orchestrator] aggregated {n_prompts} chunks ({gen_seconds:.1f}s generation). Wrote {out}")
+    timing = "generation time unknown" if gen_seconds is None else f"{gen_seconds:.1f}s generation"
+    print(f"\n[orchestrator] aggregated {n_prompts} chunks ({timing}). Wrote {out}")
     print(
         "Signal SELECTION (A vs B) happens after the variant integration via the "
         "Qwen threshold sweep (usable-curve screen + held-out skip-vs-SSIM knee)."
@@ -707,9 +746,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=QWEN_ORIGINAL,
-        help="Qwen-Image checkpoint to calibrate (default: the original, which the shipped coefficients came "
-        "from). Another checkpoint writes its chunks and fit under scripts/_calib_qwen_chunks/<model>/, "
-        "never the committed calibration.",
+        help="Qwen-Image checkpoint to calibrate (default: the original, which writes "
+        "scripts/_calibration_qwen.json). Qwen/Qwen-Image-2512 writes the committed "
+        "scripts/_calibration_qwen_2512.json. Any other checkpoint writes its chunks and fit under "
+        "scripts/_calib_qwen_chunks/<model>/ and never touches a committed calibration.",
     )
     parser.add_argument("--fit-mode", default="origin", choices=["free", "origin"])
     parser.add_argument(

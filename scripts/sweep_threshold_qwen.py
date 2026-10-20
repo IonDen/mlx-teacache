@@ -33,10 +33,17 @@ generation's peak isolated.
 
 Produces tests/_artifacts/sweep_qwen/{vanilla,t<thresh>}.png + results_qwen.json
 (aggregated from the per-unit chunks once all are present).
+
+ANOTHER CHECKPOINT: `--model Qwen/Qwen-Image-2512` sweeps that checkpoint instead of the
+original `Qwen/Qwen-Image` (the default). Its chunks, PNGs and results JSON go into a slug
+subfolder of the same directories (e.g. _chunks_plainq4/qwen-qwen-image-2512/), and every chunk
+and the results JSON record the `model`. `apply_teacache` picks the matching variant's
+coefficients on its own.
 """
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -48,7 +55,7 @@ import numpy as np
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _memory_saver import make_memory_saver as _make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
-from _qwen_config import qwen_original_config
+from _qwen_config import QWEN_ORIGINAL, qwen_config
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
@@ -86,10 +93,25 @@ def _units(thresholds: list[float] | None = None) -> list[str]:
     return ["vanilla"] + [_threshold_name(t) for t in (THRESHOLDS if thresholds is None else thresholds)]
 
 
-def _image_dir(plain_q4: bool) -> Path:
+def _model_slug(model: str) -> str:
+    """Folder name of a checkpoint (same rule as calibrate_qwen.calibration_paths)."""
+    return re.sub(r"[^a-z0-9]+", "-", model.lower()).strip("-")
+
+
+def _image_dir(plain_q4: bool, model: str = QWEN_ORIGINAL) -> Path:
     """Per-build image directory so a plain-q4 sweep never overwrites the
-    mixed-precision PNGs the June sweep produced."""
-    return OUT_DIR / "plainq4" if plain_q4 else OUT_DIR
+    mixed-precision PNGs the June sweep produced. The original checkpoint keeps
+    today's directory; any other checkpoint gets a slug subfolder, so its vanilla.png
+    (the SSIM reference) can neither be read by nor overwrite another checkpoint's."""
+    base = OUT_DIR / "plainq4" if plain_q4 else OUT_DIR
+    return base if model == QWEN_ORIGINAL else base / _model_slug(model)
+
+
+def _default_chunk_dir(plain_q4: bool, model: str = QWEN_ORIGINAL) -> Path:
+    """Per-build, per-checkpoint chunk dir; the original keeps today's dirs and any other
+    checkpoint gets a slug subfolder of the build's chunk dir."""
+    base = OUT_DIR / "_chunks_plainq4" if plain_q4 else CHUNK_DIR_DEFAULT
+    return base if model == QWEN_ORIGINAL else base / _model_slug(model)
 
 
 def _chunk_filename(unit: str) -> str:
@@ -107,6 +129,7 @@ def _build_summary(
     *,
     build: str = "mixed-precision",
     memory_saver: bool = False,
+    model: str = QWEN_ORIGINAL,
 ) -> dict[str, Any]:
     """Assemble results_qwen.json from the per-threshold chunks + the vanilla
     timing. Speedup is derived here from a single vanilla_seconds source. Pure.
@@ -128,7 +151,9 @@ def _build_summary(
         key=lambda r: r["threshold"],
     )
     return {
-        "variant": "qwen-image",
+        # The variant apply_teacache matched while sweeping (chunks written before --model say nothing).
+        "variant": next((str(c["variant"]) for c in threshold_chunks if "variant" in c), "qwen-image"),
+        "model": model,
         "signal": "A",
         "build": build,
         "memory_saver": memory_saver,
@@ -175,7 +200,13 @@ def _load(path: Path) -> np.ndarray:
 
 
 def _run_worker(
-    unit: str, *, chunk_dir: Path, dry_run: bool, plain_q4: bool = False, headroom_gib: float = 4.0
+    unit: str,
+    *,
+    chunk_dir: Path,
+    dry_run: bool,
+    plain_q4: bool = False,
+    headroom_gib: float = 4.0,
+    model: str = QWEN_ORIGINAL,
 ) -> None:
     """Run ONE sweep unit (vanilla or a single threshold) and write its chunk.
     A fresh subprocess per unit = isolated peak memory + a durable checkpoint."""
@@ -184,11 +215,17 @@ def _run_worker(
 
     if dry_run:
         if unit == "vanilla":
-            chunk: dict[str, Any] = {"unit": "vanilla", "vanilla_seconds": 10.0, "dry_run": True}
+            chunk: dict[str, Any] = {
+                "unit": "vanilla",
+                "model": model,
+                "vanilla_seconds": 10.0,
+                "dry_run": True,
+            }
         else:
             t = float(unit[1:])
             chunk = {
                 "unit": unit,
+                "model": model,
                 "threshold": t,
                 "dry_run": True,
                 "wrapper_seconds": round(10.0 - 5.0 * t, 4),
@@ -224,7 +261,7 @@ def _run_worker(
 
     from mlx_teacache import apply_teacache
 
-    img_dir = _image_dir(plain_q4)
+    img_dir = _image_dir(plain_q4, model)
     img_dir.mkdir(parents=True, exist_ok=True)
     build = "plain-q4" if plain_q4 else "mixed-precision"
     if not plain_q4:
@@ -237,8 +274,8 @@ def _run_worker(
         from qwen_mixed_precision import enable_qwen_mixed_precision
 
         enable_qwen_mixed_precision()
-    print(f"[worker {unit}] loading qwen-image ({build}) ...", flush=True)
-    flux = QwenImage(quantize=QUANTIZE, model_config=qwen_original_config())
+    print(f"[worker {unit}] loading {model} ({build}) ...", flush=True)
+    flux = QwenImage(quantize=QUANTIZE, model_config=qwen_config(model))
     flux.freeze()
     # mflux's MemorySaver frees the Qwen2.5-VL text encoder (several GB at q4) once the
     # prompt is encoded, before the denoising loop. Without it this recipe sits within
@@ -253,7 +290,14 @@ def _run_worker(
         van_t = _gen(flux, save_path=img_dir / "vanilla.png")
         out.write_text(
             json.dumps(
-                {"unit": "vanilla", "vanilla_seconds": van_t, "build": build, "memory_saver": True}, indent=2
+                {
+                    "unit": "vanilla",
+                    "model": model,
+                    "vanilla_seconds": van_t,
+                    "build": build,
+                    "memory_saver": True,
+                },
+                indent=2,
             )
         )
         print(
@@ -270,9 +314,12 @@ def _run_worker(
         wrap_t = _gen(flux, save_path=img_dir / f"{unit}.png")
         skipped, computed = h.stats.skipped_count, h.stats.computed_count
         telemetry = _streak_telemetry(h.stats)
+        variant_id = h.variant_id
     score = float(ssim(_load(van_path), _load(img_dir / f"{unit}.png"), channel_axis=-1, data_range=255))
     chunk = {
         "unit": unit,
+        "model": model,
+        "variant": variant_id,
         "threshold": t,
         "build": build,
         "memory_saver": True,
@@ -298,6 +345,7 @@ def _run_orchestrator(
     plain_q4: bool = False,
     max_units: int | None = None,
     headroom_gib: float = 4.0,
+    model: str = QWEN_ORIGINAL,
 ) -> None:
     """Run the vanilla reference, then one worker SUBPROCESS per threshold
     (sequential — never two 20B loads at once); resume by skipping units whose
@@ -321,6 +369,8 @@ def _run_orchestrator(
             unit,
             "--chunk-dir",
             str(chunk_dir),
+            "--model",
+            model,
         ]
         if dry_run:
             cmd.append("--dry-run")
@@ -345,24 +395,29 @@ def _run_orchestrator(
         print(f"[orchestrator] PARTIAL: {len(remaining)} unit(s) pending {remaining}; re-invoke to continue.")
         sys.exit(PARTIAL_EXIT_CODE)
 
-    vanilla_seconds = json.loads((chunk_dir / _chunk_filename("vanilla")).read_text())["vanilla_seconds"]
+    vanilla_chunk = json.loads((chunk_dir / _chunk_filename("vanilla")).read_text())
+    vanilla_seconds = vanilla_chunk["vanilla_seconds"]
     threshold_chunks = [
         json.loads((chunk_dir / _chunk_filename(_threshold_name(t))).read_text()) for t in sweep
     ]
+    _check_chunk_models([vanilla_chunk, *threshold_chunks], model)
     build = "plain-q4" if plain_q4 else "mixed-precision"
     memory_saver = any(bool(c.get("memory_saver")) for c in threshold_chunks)
-    summary = _build_summary(threshold_chunks, vanilla_seconds, build=build, memory_saver=memory_saver)
+    summary = _build_summary(
+        threshold_chunks, vanilla_seconds, build=build, memory_saver=memory_saver, model=model
+    )
     # Real default-chunk-dir run -> the canonical results file for that build; a
     # dry-run or custom chunk dir writes beside its chunks so a smoke never touches
     # the real artifact.
     canonical_name = "results_qwen_plainq4.json" if plain_q4 else "results_qwen.json"
     out = (
-        OUT_DIR / canonical_name
-        if not dry_run and chunk_dir.resolve() == _default_chunk_dir(plain_q4).resolve()
+        _model_out_dir(model) / canonical_name
+        if not dry_run and chunk_dir.resolve() == _default_chunk_dir(plain_q4, model).resolve()
         else chunk_dir / canonical_name
     )
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2))
-    print(f"\n[orchestrator] aggregated {len(sweep)} thresholds ({build}). Wrote {out}")
+    print(f"\n[orchestrator] aggregated {len(sweep)} thresholds ({model}, {build}). Wrote {out}")
     for r in summary["thresholds"]:
         print(
             f"  t={r['threshold']:.3f} skipped={r['skipped']} streak={r['max_consecutive_skips']} "
@@ -371,8 +426,21 @@ def _run_orchestrator(
         )
 
 
-def _default_chunk_dir(plain_q4: bool) -> Path:
-    return OUT_DIR / "_chunks_plainq4" if plain_q4 else CHUNK_DIR_DEFAULT
+def _model_out_dir(model: str) -> Path:
+    """Where a checkpoint's canonical results JSON lands: OUT_DIR for the original, a slug folder otherwise."""
+    return OUT_DIR if model == QWEN_ORIGINAL else OUT_DIR / _model_slug(model)
+
+
+def _check_chunk_models(chunks: list[dict[str, Any]], model: str) -> None:
+    """Refuse to aggregate chunks measured on a different checkpoint. Chunks without a ``model``
+    key (written before --model existed) count as the original ``Qwen/Qwen-Image``."""
+    for chunk in chunks:
+        found = chunk.get("model", QWEN_ORIGINAL)
+        if found != model:
+            raise SystemExit(
+                f"[orchestrator] chunk {chunk.get('unit')} was measured on {found}, not {model}; "
+                "refusing to aggregate. Use a separate --chunk-dir per checkpoint."
+            )
 
 
 def _parse_thresholds(text: str | None) -> list[float] | None:
@@ -397,6 +465,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="synthetic chunks, no model load — validates the plumbing"
+    )
+    parser.add_argument(
+        "--model",
+        default=QWEN_ORIGINAL,
+        help="Qwen-Image family checkpoint to sweep (default: the original Qwen/Qwen-Image). Another checkpoint "
+        "keeps its chunks, images and results in its own slug subfolder.",
     )
     parser.add_argument(
         "--plain-q4",
@@ -424,7 +498,9 @@ def main() -> None:
         help="run at most this many pending units this invocation, then exit 3 if any remain",
     )
     args = parser.parse_args()
-    chunk_dir: Path = args.chunk_dir if args.chunk_dir is not None else _default_chunk_dir(args.plain_q4)
+    chunk_dir: Path = (
+        args.chunk_dir if args.chunk_dir is not None else _default_chunk_dir(args.plain_q4, args.model)
+    )
 
     if args.worker:
         if args.unit is None:
@@ -435,6 +511,7 @@ def main() -> None:
             dry_run=args.dry_run,
             plain_q4=args.plain_q4,
             headroom_gib=args.headroom_gib,
+            model=args.model,
         )
         return
     _run_orchestrator(
@@ -444,6 +521,7 @@ def main() -> None:
         plain_q4=args.plain_q4,
         max_units=args.max_units,
         headroom_gib=args.headroom_gib,
+        model=args.model,
     )
 
 

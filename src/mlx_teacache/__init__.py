@@ -6,8 +6,8 @@ Public API:
         Enable TeaCache on a supported mflux FLUX, Qwen-Image, or Z-Image model.
         rel_l1_thresh defaults to a per-variant value (see apply_teacache's docstring):
         0.20 flux1-dev / flux1-schnell, 0.30 flux1-krea-dev, 0.17 flux2-klein-base-4b /
-        -base-9b, 0.12 z-image-base, 0.30 qwen-image. Distilled flux2-klein-4b / -9b have
-        none and use 0.20.
+        -base-9b, 0.12 z-image-base, 0.30 qwen-image, 0.25 qwen-image-2512. Distilled
+        flux2-klein-4b / -9b have none and use 0.20.
 
     match_variant(model_config, pipeline_class) -> VariantInfo | None
         Weight-free support check: the variant apply_teacache would use for a model that

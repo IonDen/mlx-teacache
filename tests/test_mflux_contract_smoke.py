@@ -24,6 +24,7 @@ from mlx_teacache.variants.flux2_klein_9b import detect as flux2_klein_9b_detect
 from mlx_teacache.variants.flux2_klein_base_4b import detect as flux2_klein_base_4b_detect
 from mlx_teacache.variants.flux2_klein_base_9b import detect as flux2_klein_base_9b_detect
 from mlx_teacache.variants.qwen_image import detect as qwen_detect
+from mlx_teacache.variants.qwen_image_2512 import detect as qwen_2512_detect
 from mlx_teacache.variants.z_image_base import detect as zimage_detect
 from tests._mflux_surface import assigned_attributes, return_tuple_arities
 
@@ -57,7 +58,6 @@ def test_modelconfig_precision_is_bfloat16() -> None:
         (flux2_klein_4b_detect.matches, "flux2_klein_4b"),
         (flux2_klein_9b_detect.matches, "flux2_klein_9b"),
         (flux2_klein_base_9b_detect.matches, "flux2_klein_base_9b"),
-        (qwen_detect.matches, "qwen_image"),
         (zimage_detect.matches, "z_image"),
     ],
 )
@@ -70,6 +70,19 @@ def test_detect_matches_real_modelconfig(matches, factory_name: str) -> None:
     model_config = getattr(ModelConfig, factory_name)()
     flux_stub = SimpleNamespace(model_config=model_config)
     assert matches(flux_stub) is True, f"{factory_name}: detect.matches() returned False on real ModelConfig"
+
+
+def test_qwen_detectors_match_the_real_modelconfigs() -> None:
+    """The qwen_image factory config is Qwen-Image-2512 on mflux 0.19+ (it carries the 2512 aliases) and belongs to the
+    2512 variant there, to the original variant before; the original checkpoint by repo id always belongs to the
+    original variant. Catches an alias rename/retype that would leave either Qwen checkpoint undetected."""
+    from mflux.models.common.config.model_config import ModelConfig
+
+    factory = ModelConfig.qwen_image()
+    owner = qwen_2512_detect if "qwen-image-2512" in factory.aliases else qwen_detect
+    assert owner.matches(SimpleNamespace(model_config=factory)) is True
+    original = ModelConfig.from_name("Qwen/Qwen-Image")
+    assert qwen_detect.matches(SimpleNamespace(model_config=original)) is True
 
 
 # ---------------------------------------------------------------------------

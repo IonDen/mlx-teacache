@@ -57,7 +57,7 @@ def test_duplicate_variant_id_raises_naming_both_subpackages() -> None:
     assert sources == {"flux1-dev": "flux1_dev"}
 
 
-def test_registry_holds_exactly_the_nine_shipped_variant_ids() -> None:
+def test_registry_holds_exactly_the_ten_shipped_variant_ids() -> None:
     """Bug caught: a variant silently dropped or shadowed by the registry walk."""
     from mlx_teacache.variants import _REGISTRY
 
@@ -70,5 +70,6 @@ def test_registry_holds_exactly_the_nine_shipped_variant_ids() -> None:
         "flux2-klein-base-4b",
         "flux2-klein-base-9b",
         "qwen-image",
+        "qwen-image-2512",
         "z-image-base",
     ]

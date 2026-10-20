@@ -13,53 +13,64 @@ def _mflux_class(name: str) -> type:
     return type(name, (), {"__module__": f"mflux.models.fake.{name.lower()}"})
 
 
-def _instance(cls: type, alias: str) -> object:
+_ALIASES_2512 = ["qwen-image", "qwen", "qwen-image-2512", "qwen-2512"]  # mflux 0.19+ qwen-image config
+
+
+def _instance(cls: type, alias: str | list[str], model_name: str | None = None) -> object:
     obj = cls()
-    obj.model_config = types.SimpleNamespace(aliases=[alias], model_name=None)
+    aliases = [alias] if isinstance(alias, str) else alias
+    obj.model_config = types.SimpleNamespace(aliases=aliases, model_name=model_name)
     return obj
 
 
 @pytest.mark.parametrize(
-    ("cls_name", "alias"),
+    ("cls_name", "alias", "model_name"),
     [
         (
             "Flux2KleinEdit",
             "flux2-klein-base-4b",
+            None,
         ),  # bug: Edit calls predict(image_latents=...) -> TypeError step 0
-        ("Flux1Concept", "schnell"),  # bug: unpacks (noise, attention) from a one-array proxy
-        ("Flux1ConceptFromImage", "schnell"),
-        ("Flux1InContextDev", "dev"),  # bug: silently runs at an unverified operating point
-        ("Flux1InContextFill", "dev"),
-        ("Flux1Redux", "dev"),
-        ("Flux1Controlnet", "dev"),
-        ("QwenImageEdit", "qwen-image"),
+        ("Flux1Concept", "schnell", None),  # bug: unpacks (noise, attention) from a one-array proxy
+        ("Flux1ConceptFromImage", "schnell", None),
+        ("Flux1InContextDev", "dev", None),  # bug: silently runs at an unverified operating point
+        ("Flux1InContextFill", "dev", None),
+        ("Flux1Redux", "dev", None),
+        ("Flux1Controlnet", "dev", None),
+        ("QwenImageEdit", "qwen-image", None),
+        ("QwenImageEdit", _ALIASES_2512, "Qwen/Qwen-Image-2512"),  # bug: the 2512 allowlist lets Edit through
     ],
 )
-def test_unsupported_mflux_pipeline_is_refused_before_patching(cls_name: str, alias: str) -> None:
+def test_unsupported_mflux_pipeline_is_refused_before_patching(
+    cls_name: str, alias: str | list[str], model_name: str | None
+) -> None:
     """Bug caught: detect keyed on aliases only lets these classes through."""
-    flux = _instance(_mflux_class(cls_name), alias)
+    flux = _instance(_mflux_class(cls_name), alias, model_name)
     with pytest.raises(IncompatibleModelError, match=cls_name):
         apply_teacache(flux)
     assert not hasattr(flux, "_teacache_handle")
 
 
 @pytest.mark.parametrize(
-    ("cls_name", "alias", "variant_id"),
+    ("cls_name", "alias", "model_name", "variant_id"),
     [
-        ("Flux1", "dev", "flux1-dev"),
-        ("Flux1", "krea-dev", "flux1-krea-dev"),
-        ("Flux1", "schnell", "flux1-schnell"),
-        ("Flux2Klein", "flux2-klein-4b", "flux2-klein-4b"),
-        ("Flux2Klein", "flux2-klein-9b", "flux2-klein-9b"),
-        ("Flux2Klein", "flux2-klein-base-4b", "flux2-klein-base-4b"),
-        ("Flux2Klein", "flux2-klein-base-9b", "flux2-klein-base-9b"),
-        ("ZImage", "z-image", "z-image-base"),
-        ("QwenImage", "qwen-image", "qwen-image"),
+        ("Flux1", "dev", None, "flux1-dev"),
+        ("Flux1", "krea-dev", None, "flux1-krea-dev"),
+        ("Flux1", "schnell", None, "flux1-schnell"),
+        ("Flux2Klein", "flux2-klein-4b", None, "flux2-klein-4b"),
+        ("Flux2Klein", "flux2-klein-9b", None, "flux2-klein-9b"),
+        ("Flux2Klein", "flux2-klein-base-4b", None, "flux2-klein-base-4b"),
+        ("Flux2Klein", "flux2-klein-base-9b", None, "flux2-klein-base-9b"),
+        ("ZImage", "z-image", None, "z-image-base"),
+        ("QwenImage", "qwen-image", None, "qwen-image"),
+        ("QwenImage", _ALIASES_2512, "Qwen/Qwen-Image-2512", "qwen-image-2512"),
     ],
 )
-def test_supported_mflux_pipeline_still_matches(cls_name: str, alias: str, variant_id: str) -> None:
+def test_supported_mflux_pipeline_still_matches(
+    cls_name: str, alias: str | list[str], model_name: str | None, variant_id: str
+) -> None:
     """Bug caught: an allowlist typo refuses a supported model."""
-    flux = _instance(_mflux_class(cls_name), alias)
+    flux = _instance(_mflux_class(cls_name), alias, model_name)
     assert _REGISTRY[variant_id]["matches"](flux)
 
 

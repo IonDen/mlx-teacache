@@ -65,6 +65,7 @@ def apply_teacache(
       - flux2-klein-base-4b, -base-9b .... 0.17
       - z-image-base ..................... 0.12
       - qwen-image ....................... 0.30
+      - qwen-image-2512 .................. 0.25
       - flux1-krea-dev ................... 0.30
       - flux2-klein-4b, flux2-klein-9b ... no per-variant default; fall back to
         0.20 (these distilled 4-8 step schedules skip 0 steps at any reasonable

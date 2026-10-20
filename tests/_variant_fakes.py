@@ -126,6 +126,7 @@ _DUCK_ALIASES = {
     "flux2-klein-base-9b": "flux2-klein-base-9b",
     "z-image-base": "z-image",
     "qwen-image": "qwen-image",
+    "qwen-image-2512": "qwen-image-2512",
 }
 
 
@@ -150,6 +151,10 @@ def fake_for_variant(variant_id: str) -> Any:
         from mlx_teacache.variants.qwen_image.config import META
 
         model_config["model_name"] = META["hf_model_id"]
+    elif variant_id == "qwen-image-2512":
+        # mflux 0.19+'s qwen-image config: all four aliases, the 2512 checkpoint.
+        model_config["aliases"] = ["qwen-image", "qwen", "qwen-image-2512", "qwen-2512"]
+        model_config["model_name"] = "Qwen/Qwen-Image-2512"
     return SimpleNamespace(
         model_config=SimpleNamespace(**model_config),
         transformer=SimpleNamespace(name="real-transformer"),

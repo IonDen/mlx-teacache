@@ -135,6 +135,43 @@ def test_qwen_calibration_r_squared_in_unit_range(signal: str) -> None:
         assert 0.0 <= r2 <= 1.0, f"signal {signal}: {key}={r2} outside [0, 1] (broken fit?)"
 
 
+_QWEN_2512_CALIB = _REPO_ROOT / "scripts" / "_calibration_qwen_2512.json"
+
+
+def _load_qwen_2512_calibration() -> dict:
+    return json.loads(_QWEN_2512_CALIB.read_text())
+
+
+@pytest.mark.parametrize("signal", ["A", "B"])
+def test_qwen_2512_calibration_signal_coefficients_length5_finite(signal: str) -> None:
+    coeffs = _load_qwen_2512_calibration()["signals"][signal]["coefficients_c4_to_c0"]
+    assert len(coeffs) == 5
+    assert all(math.isfinite(float(c)) for c in coeffs)
+
+
+@pytest.mark.parametrize("signal", ["A", "B"])
+def test_qwen_2512_calibration_r_squared_in_unit_range(signal: str) -> None:
+    sig = _load_qwen_2512_calibration()["signals"][signal]
+    assert 0.0 < sig["fit_r_squared"] <= 1.0
+    assert 0.0 < sig["heldout_r_squared"] <= 1.0
+
+
+def test_qwen_2512_calibration_is_the_recorded_2512_fit() -> None:
+    """Bug: the committed file was aggregated from the wrong checkpoint's chunks or fewer prompts (the later
+    variant config is pinned against these numbers), or with another fit/held-out split, which the weight-free
+    gate replay (it slices the fit traces by 7 prompts of 49 consecutive deltas) would then misread."""
+    calib = _load_qwen_2512_calibration()
+    assert calib["model"] == "Qwen/Qwen-Image-2512"
+    assert calib["variant"] == "qwen-image-2512"
+    assert calib["num_prompts"] == 10
+    assert calib["n_fit_prompts"] == 7
+    assert calib["n_heldout_prompts"] == 3
+    sig_a = calib["signals"]["A"]
+    assert len(sig_a["x_values"]) == 7 * 49
+    assert sig_a["fit_r_squared"] == pytest.approx(0.8183, abs=5e-4)
+    assert sig_a["heldout_r_squared"] == pytest.approx(0.7852, abs=5e-4)
+
+
 def test_qwen_config_coefficients_match_calibration_signal_a() -> None:
     """The shipped qwen-image config is read verbatim from signal A of the committed
     calibration. Signal A is the SELECTED gate signal (caption-independent + cheaper
@@ -148,6 +185,15 @@ def test_qwen_config_coefficients_match_calibration_signal_a() -> None:
         f"qwen-image config COEFFICIENTS {COEFFICIENTS} drifted from "
         f"scripts/_calibration_qwen.json signal A {json_a}"
     )
+
+
+def test_qwen_2512_config_matches_its_calibration() -> None:
+    """Bug: the 2512 config ships the original checkpoint's tuple or range, or a hand-edited copy of its own fit."""
+    from mlx_teacache.variants.qwen_image_2512 import config
+
+    sig_a = _load_qwen_2512_calibration()["signals"]["A"]
+    assert tuple(sig_a["coefficients_c4_to_c0"]) == config.COEFFICIENTS
+    assert (sig_a["x_min"], sig_a["x_max"]) == config.CALIBRATED_RANGE
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +244,7 @@ def test_krea_config_coefficients_match_the_committed_fit() -> None:
         ("flux2_klein_base_4b", "_calibration_flux2_klein_base_4b.json", None),
         ("z_image_base", "_calibration_z_image.json", "B"),
         ("qwen_image", "_calibration_qwen.json", "A"),
+        ("qwen_image_2512", "_calibration_qwen_2512.json", "A"),
     ],
 )
 def test_calibrated_range_is_the_x_range_of_the_fit_the_coefficients_came_from(
@@ -229,4 +276,10 @@ def test_only_the_origin_constrained_in_repo_fits_declare_a_calibrated_range() -
             config = importlib.import_module(f"mlx_teacache.variants.{subname}.config")
             if hasattr(config, "CALIBRATED_RANGE"):
                 declared.append(config.META["variant_id"])
-    assert sorted(declared) == ["flux2-klein-base-4b", "flux2-klein-base-9b", "qwen-image", "z-image-base"]
+    assert sorted(declared) == [
+        "flux2-klein-base-4b",
+        "flux2-klein-base-9b",
+        "qwen-image",
+        "qwen-image-2512",
+        "z-image-base",
+    ]

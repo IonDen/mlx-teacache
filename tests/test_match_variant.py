@@ -153,6 +153,7 @@ _GRID_CONFIGS = [
     _config("flux2-klein-base-4b"),
     _config("flux2-klein-base-9b"),
     _config("qwen-image", "qwen"),
+    _config("qwen-image", "qwen", "qwen-image-2512", "qwen-2512"),
     _config("z-image", "zimage"),
     _config("z-image-turbo", "zimage-turbo"),
     _config("dev-kontext"),

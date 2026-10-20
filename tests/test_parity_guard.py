@@ -25,7 +25,10 @@ def restore_flag(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _item(*marks: str) -> SimpleNamespace:
-    return SimpleNamespace(get_closest_marker=lambda name: object() if name in marks else None)
+    return SimpleNamespace(
+        nodeid="tests/test_fake.py::test_fake",  # every real pytest item has one; the collection hook reads it
+        get_closest_marker=lambda name: object() if name in marks else None,
+    )
 
 
 def test_unarmed_when_no_parity_item_selected(tmp_path: Path) -> None:
@@ -153,10 +156,50 @@ def test_conftest_hook_hands_the_final_item_list_to_the_guard(monkeypatch: pytes
     monkeypatch.setattr(conftest, "arm_parity_guard", lambda items, *, capture: seen.append((items, capture)))
     items = [_item("parity")]
     plugins = SimpleNamespace(getplugin=lambda name: capture if name == "capturemanager" else None)
-    conftest.pytest_collection_finish(
-        SimpleNamespace(items=items, config=SimpleNamespace(pluginmanager=plugins))
-    )
+    conftest.pytest_collection_finish(_session(items, plugins=plugins))
     assert seen == [(items, capture)]
+
+
+def _session(
+    items: list[SimpleNamespace], *, collectonly: bool = False, plugins: object = None
+) -> SimpleNamespace:
+    """The slice of a pytest Session the collection hook reads."""
+    if plugins is None:
+        plugins = SimpleNamespace(getplugin=lambda name: None)
+    return SimpleNamespace(
+        items=items,
+        config=SimpleNamespace(pluginmanager=plugins, option=SimpleNamespace(collectonly=collectonly)),
+    )
+
+
+def _qwen_item(param_id: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        nodeid=f"tests/test_parity_qwen.py::test_a[{param_id}]",
+        get_closest_marker=lambda name: object() if name == "parity" else None,
+    )
+
+
+def test_conftest_hook_does_not_refuse_a_collect_only_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug: `pytest --collect-only` (IDE test discovery) exits 2 on the whole tree because the one-checkpoint
+    refusal also fires when nothing will run, so the editor shows no tests."""
+    from tests import conftest
+
+    monkeypatch.setattr(conftest, "arm_parity_guard", lambda items, *, capture: None)
+    conftest.pytest_collection_finish(
+        _session([_qwen_item("original"), _qwen_item("2512")], collectonly=True)
+    )
+
+
+def test_conftest_hook_refuses_a_running_session_with_both_qwen_checkpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug: the collect-only exemption widened to every session, so a real run loads both checkpoints."""
+    from tests import conftest
+
+    monkeypatch.setattr(conftest, "arm_parity_guard", lambda items, *, capture: None)
+    with pytest.raises(pytest.exit.Exception) as exc:
+        conftest.pytest_collection_finish(_session([_qwen_item("original"), _qwen_item("2512")]))
+    assert exc.value.returncode == 2
 
 
 # --- stale artifact ---------------------------------------------------------
@@ -343,3 +386,140 @@ def test_abort_line_goes_to_the_saved_stderr_fd_without_a_capture_plugin(
         os.close(read_fd)
         if write_fd >= 0:
             os.close(write_fd)
+
+
+# --- one checkpoint per process in tests/test_parity_qwen.py ----------------------------------------------------
+
+_QWEN_FILE = "tests/test_parity_qwen.py"
+
+
+def _qwen_ids(*param_ids: str) -> list[str]:
+    return [f"{_QWEN_FILE}::{test}[{pid}]" for pid in param_ids for test in ("test_a", "test_b", "test_c")]
+
+
+def test_both_qwen_checkpoints_in_one_session_are_refused_with_the_per_id_commands() -> None:
+    """Bug: a bare `pytest -m parity tests/test_parity_qwen.py` loads two 20B checkpoints in one process (the OOM
+    trap the module docstring warns about) with no word from the harness."""
+    message = mg.one_model_per_process_conflict(_qwen_ids("original", "2512"))
+    assert message is not None
+    assert "-k original" in message
+    assert "-k 2512" in message
+
+
+@pytest.mark.parametrize("only", ["original", "2512"])
+def test_a_single_qwen_checkpoint_is_not_refused(only: str) -> None:
+    """Bug: the refusal fires on one id too, so `-k original` and `-k 2512` (the documented way to run the file)
+    stop working."""
+    assert mg.one_model_per_process_conflict(_qwen_ids(only)) is None
+
+
+def test_the_same_param_ids_in_another_file_do_not_count_toward_the_qwen_refusal() -> None:
+    """Bug: the rule matches param ids anywhere, so a session that selects `[2512]` from one file and `[original]`
+    from another (different models, different files) is refused."""
+    mixed = [f"{_QWEN_FILE}::test_a[original]", "tests/test_parity_other.py::test_a[2512]"]
+    assert mg.one_model_per_process_conflict(mixed) is None
+
+
+def test_unparametrized_items_and_other_param_ids_in_the_qwen_file_are_ignored() -> None:
+    """Bug: any second item from the qwen file counts as a second checkpoint."""
+    ids = [
+        f"{_QWEN_FILE}::test_2512_helper",  # a checkpoint id inside a test name is not a param id
+        f"{_QWEN_FILE}::test_a[original]",
+        f"{_QWEN_FILE}::test_b[other]",
+    ]
+    assert mg.one_model_per_process_conflict(ids) is None
+
+
+def test_the_collection_hook_refuses_a_session_that_selects_both_qwen_checkpoints() -> None:
+    """Bug: the helper is right but never wired (or keyed on param ids the file no longer produces), so a real
+    combined session is not refused; or the refusal also fires on --collect-only and breaks IDE discovery.
+    --setup-plan runs the collection hook like a real session but executes no fixture and no test, so no weights
+    load and nothing generates."""
+    import subprocess
+
+    pytest.importorskip("PIL.Image")  # the qwen parity module skips itself at collection without these
+    pytest.importorskip("skimage.metrics")
+    repo = Path(__file__).resolve().parents[1]
+
+    def run(mode: str, *selection: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", _QWEN_FILE, "-m", "parity", mode, "-q", *selection],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+
+    both = run("--setup-plan")
+    assert both.returncode == 2, both.stdout + both.stderr
+    assert "-k original" in both.stdout + both.stderr
+    discovery = run("--collect-only")
+    assert discovery.returncode == 0, discovery.stdout + discovery.stderr
+    for single in ("original", "2512"):
+        assert f"[{single}]" in discovery.stdout
+        one = run("--setup-plan", "-k", single)
+        assert one.returncode == 0, one.stdout + one.stderr
+        assert f"[{single}]" in one.stdout
+
+
+# --- releasing a module-scoped real-weights model at fixture teardown -------------------------------------------
+
+
+def _loaded_model_holding_a_cycle() -> tuple[object, dict[str, object]]:
+    """A stand-in for a loaded mflux QwenImage: an mlx nn.Module whose heavy parts are submodules, a callback
+    registry whose hook (like mflux's MemorySaver) points back at the model, and a prompt cache."""
+    import weakref
+
+    import mlx.core as mx
+    import mlx.nn as nn
+
+    class _Saver:
+        def __init__(self, model: object) -> None:
+            self.model = model
+
+        def call_after_loop(self) -> None:
+            pass
+
+    model = nn.Module()
+    model.transformer = nn.Linear(4, 4)
+    model.vae = nn.Linear(4, 4)
+    model.text_encoder = nn.Linear(4, 4)
+    model.qwen_vl_encoder = nn.Sequential(model.text_encoder)  # mflux's VL encoder wraps the text encoder
+    model.prompt_cache = {"a prompt": mx.zeros((4,))}
+    saver = _Saver(model)
+    model.callbacks = SimpleNamespace(before_loop=[saver], in_loop=[], after_loop=[saver], interrupt=[saver])
+    refs = {name: weakref.ref(getattr(model, name)) for name in ("transformer", "vae", "text_encoder")}
+    refs["saver"] = weakref.ref(saver)
+    return model, refs
+
+
+def test_release_model_frees_the_weights_while_pytest_still_holds_the_model() -> None:
+    """Bug: the fixture's teardown only `del`s its own names; pytest keeps the yielded object as the fixture's cached
+    result during teardown, so the next checkpoint (or the rest of the session) loads with the first model's 20B
+    weights still alive."""
+    import gc
+
+    model, refs = _loaded_model_holding_a_cycle()  # `model` stays referenced, as pytest's cached_result does
+    cleared: list[str] = []
+    mg.release_model(model, clear_cache=lambda: cleared.append("clear"))
+    gc.collect()
+    assert {name: ref() is None for name, ref in refs.items()} == {
+        "transformer": True,
+        "vae": True,
+        "text_encoder": True,
+        "saver": True,
+    }
+    assert model.prompt_cache == {}  # type: ignore[attr-defined]
+    assert cleared == ["clear"]
+
+
+def test_release_model_skips_attributes_the_model_does_not_have() -> None:
+    """Bug: the release assumes every mflux model has a VL encoder, a prompt cache and callbacks, and raises in the
+    teardown of one that does not, which turns a passing parity session into an error."""
+    import mlx.nn as nn
+
+    model = nn.Module()
+    model.transformer = nn.Linear(2, 2)
+    mg.release_model(model, clear_cache=lambda: None)
+    assert getattr(model, "transformer", "missing") is None

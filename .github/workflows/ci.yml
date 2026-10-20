@@ -307,6 +307,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     needs: test-mflux
+    # Job-level so all three pytest steps below (each its own session) get the same backstop; HF_TOKEN stays
+    # on the pytest steps only, out of the install steps.
+    env:
+      # The full parity lane runs ~9 h; the session wall backstop defaults to 3 h.
+      PYTEST_PARITY_WALL_S: "43200"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -318,9 +323,20 @@ jobs:
         run: pip install uv
       - name: Install test-mflux
         run: uv sync --locked --group test-mflux
-      - name: Run parity tests
+      # One pytest process per Qwen checkpoint: tests/conftest.py refuses a session that selects both
+      # (two 20B models in one process), so the file runs once per id and the rest of the lane without it.
+      # `!cancelled()` keeps the later steps running after a red one; each red step still fails the job.
+      - name: Run parity tests (all but Qwen)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          # The full parity lane runs ~9 h; the session wall backstop defaults to 3 h.
-          PYTEST_PARITY_WALL_S: "43200"
-        run: uv run pytest -m parity -v
+        run: uv run pytest -m parity -v --ignore=tests/test_parity_qwen.py
+      - name: Run Qwen-Image parity (original checkpoint)
+        if: ${{ !cancelled() }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run pytest tests/test_parity_qwen.py -m parity -v -k original
+      - name: Run Qwen-Image parity (2512 checkpoint)
+        if: ${{ !cancelled() }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run pytest tests/test_parity_qwen.py -m parity -v -k 2512

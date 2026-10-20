@@ -16,7 +16,8 @@ never against an older, non-adjacent step.
 
 ## Calibrated range
 
-The FLUX.2 Klein base, Z-Image and Qwen-Image fits are origin-constrained: the
+The FLUX.2 Klein base, Z-Image, Qwen-Image and Qwen-Image-2512 fits are
+origin-constrained: the
 polynomial is forced through zero. Below the smallest delta the calibration
 produced, that constraint decides the prediction, not the data. The base-4b
 polynomial gives 0.027 at a delta of 0.0035, while the smallest output change
@@ -26,7 +27,7 @@ threshold down to 0.08.
 
 Since 0.12.0 each of these variants records the range its fit was made on as
 `CALIBRATED_RANGE` in its `config.py`, copied from `x_min` / `x_max` of the
-calibration JSON (signal B for Z-Image, signal A for Qwen-Image; klein-base-9b
+calibration JSON (signal B for Z-Image, signal A for both Qwen-Image checkpoints; klein-base-9b
 takes base-4b's along with its coefficients). The gate clamps the measured
 delta into that range before evaluating the polynomial, so a delta below it is
 priced like the smallest calibrated one. A delta above it is a larger change
@@ -40,10 +41,13 @@ below its data rather than less), the distilled Klein variants and
 user-supplied coefficients are evaluated unclamped.
 
 Every clamped polynomial stays positive over its range, and its lowest value is
-at the lower end: 0.144 for Klein base, 0.082 for Z-Image, 0.067 for Qwen-Image.
+at the lower end: 0.144 for Klein base, 0.082 for Z-Image, 0.067 for Qwen-Image
+and 0.038 for Qwen-Image-2512.
 Each skip therefore adds at least that much to the accumulator, which caps the
 longest possible run of skips at the shipped thresholds at 1 for Klein base and
-Z-Image and 4 for Qwen-Image, the same streaks the benches show.
+Z-Image, 4 for Qwen-Image and 6 for Qwen-Image-2512 (0.25 / 0.038 allows six).
+The benches show the same streaks for the first three; the 2512 sweep observed
+4 at its 0.25 default, under that bound.
 
 At the committed bench recipes this changed one decision: klein-base-4b at
 50 steps / g=4.0 now computes step 6 (8 skips instead of 9, 1.20× instead of
@@ -52,17 +56,21 @@ you re-calibrate one of these variants, update `CALIBRATED_RANGE` together with
 the coefficients; `tests/test_calibration_artifacts.py` fails when they drift
 apart.
 
+Qwen-Image-2512 joined in 0.14.0 with its own fit and range (input changes
+from 0.0809 to 0.4706), so the gate clamps it the same way from its first
+release.
+
 ## Runaway guard
 
 The gate accumulates the polynomial's predicted change across consecutive
 skips and resets it to zero on every real compute. The
 origin-constrained in-repo fits are positive for small deltas but cross zero
-at large ones (base-4b at x≈0.24, z-image at x≈0.29, qwen at x≈0.78), beyond
-the range they were fit on; there the clamp turns a large, real change into
+at large ones (base-4b at x≈0.24, z-image at x≈0.29, qwen at x≈0.78,
+qwen-image-2512 at x≈0.68), beyond the range they were fit on; there the clamp turns a large, real change into
 a predicted change of zero, so the accumulator stops advancing. Without a
 guard, that would let the wrapper reuse the same cached residual for an
-unbounded number of steps. The calibrated range (above) now keeps those three
-variants' deltas inside the fitted range, where their polynomials are positive,
+unbounded number of steps. The calibrated range (above) now keeps the deltas of
+those variants inside the fitted range, where their polynomials are positive,
 so for them the guard is a backstop; it still matters for user-supplied
 coefficients. `MAX_CONSECUTIVE_SKIPS` in `src/mlx_teacache/_kernel/gate.py`
 forces a recompute after 8 consecutive skips regardless of the accumulated
@@ -109,6 +117,13 @@ same recipe) put the curve on record: 24 / 26 / 30 / 33 skips at 0.15 / 0.20 /
 0.25 / 0.30, SSIM 0.980 / 0.980 / 0.976 / 0.967, longest streaks 2 / 2 / 3 / 4,
 and 0.30 stays the default (see the variant page).
 
+`qwen-image-2512` has no bench yet, so it is not in the table. Its threshold
+sweep (red-apple prompt, seed 42, 768×768, 50 steps, guidance 4.0, 4-bit,
+mflux 0.23.0, M1 Max 32 GB) skipped 29 of 48 active steps at the 0.25 default
+with a longest run of 4, and a weight-free replay of the gate over its
+calibration traces gives the same 29 skips and run of 4. The longest run in
+that sweep was 6, at 0.40, still under the cap.
+
 ## Built-in coefficient sources
 
 | Variant | Source | Provenance |
@@ -118,6 +133,7 @@ and 0.30 stays the default (see the variant page).
 | `flux2-klein-4b` | Derived in-repo on 2026-05-15 from 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.65. | `COEFFICIENTS` in `variants/flux2_klein_4b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-4b`. Full report: `scripts/_calibration_flux2_klein_4b.json` (summary only; unlike the klein-9b and base-4b reports it omits the raw `x_values`/`y_values` arrays, so reproducing this tuple offline means re-running the ~196 s calibration). |
 | `flux2-klein-9b` | Derived in-repo on 2026-05-16 from 10 prompts × **8 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`) on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.4710. At the package default `rel_l1_thresh=0.20` these coefficients trigger **0 step-skips** on Klein 9B's 8-step schedule — empirical `y_min = 0.25` exceeds the threshold. Any wall-clock difference on Klein comes from `mx.compile`-path avoidance, and only on Macs where mflux compiles `_predict` (not base or Pro M1/M2), not from caching. | `COEFFICIENTS` in `variants/flux2_klein_9b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_9b.json`. |
 | `flux2-klein-base-4b` | Derived in-repo on 2026-05-17 from 10 prompts × **25 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`); R² = 0.106. Low R² for the polynomial form — FLUX.2-family polynomials are noisier than FLUX.1-family. To compensate, this variant ships a per-variant default `rel_l1_thresh=0.17` via `Provenance.default_thresh` (set automatically). At that threshold the gate skips only a few of the 25 steps. The committed multi-run bench for this variant is at the 50-step CFG recipe (`_artifacts/v0.12.0_bench_klein_base_4b.json`). At the package-wide default 0.20 the gate over-fires (19/25 skips, SSIM=0.76); the per-variant default is the recommended setting. Polynomial calibrated at `guidance=1.0`; v0.4.1 reuses it under CFG only because the g=4.0 / 50-step release bench passed the skip and SSIM gates. The encoder-independent `mod_in` invariant justifies one shared branch decision per step; coefficient transfer remains empirical. | `COEFFICIENTS` in `variants/flux2_klein_base_4b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_base_4b.json`. |
+| `qwen-image-2512` | Derived in-repo on 2026-10-20 from 10 prompts (7 fit / 3 held-out) × 50 steps × seed=42 on M1 Max 32 GB, 4-bit, 768×768, guidance=4.0 (CFG), mflux 0.23.0, checkpoint `Qwen/Qwen-Image-2512`. **Origin-constrained** degree-4 fit on Signal A, the modulated block-0 image input the original Qwen-Image variant also gates on; R² = 0.818, held-out 0.785, over input changes from 0.0809 to 0.4706. The original checkpoint's tuple was scored on the same pairs and rejected: R² = −0.35 on the fit prompts and −0.20 on the held-out ones, worse than a constant. The default 0.25 comes from the sweep on the variant page. | `COEFFICIENTS` and `CALIBRATED_RANGE` in `variants/qwen_image_2512/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_qwen.py --model Qwen/Qwen-Image-2512`. Full report: `scripts/_calibration_qwen_2512.json`. |
 
 ## Producing new coefficients
 

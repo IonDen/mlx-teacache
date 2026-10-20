@@ -15,6 +15,7 @@ _PUBLIC_DOCS = [
     "docs/variants/flux2-klein-base-9b.md",
     "docs/variants/z-image-base.md",
     "docs/variants/qwen-image.md",
+    "docs/variants/qwen-image-2512.md",
     "docs/comparison/flux1-dev.md",
     "docs/comparison/flux1-krea-dev.md",
     "docs/comparison/klein-base-4b.md",

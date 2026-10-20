@@ -7,6 +7,7 @@ negative, external CFG combine), so the forward threads a CfgBranchPairer.
 """
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, cast
 
 import mlx.core as mx
@@ -44,6 +45,29 @@ _PROVENANCE = Provenance(
     fit_metric_value=0.8490,
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_qwen.py",
     default_thresh=DEFAULT_THRESH,
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class QwenCalibration:
+    """Everything the shared Qwen apply reads per checkpoint: the fit, the range it covers,
+    the default operating point, where the fit came from and the checkpoint it was measured on."""
+
+    variant_id: str
+    coefficients: tuple[float, float, float, float, float]
+    calibrated_range: tuple[float, float]
+    default_thresh: float
+    provenance: Provenance
+    hf_model_id: str
+
+
+ORIGINAL_CALIBRATION = QwenCalibration(
+    variant_id="qwen-image",
+    coefficients=COEFFICIENTS,
+    calibrated_range=CALIBRATED_RANGE,
+    default_thresh=DEFAULT_THRESH,
+    provenance=_PROVENANCE,
+    hf_model_id=META["hf_model_id"],
 )
 
 
@@ -389,10 +413,31 @@ def apply(
     skip_last_n_steps: int = 1,
 ) -> TeaCacheHandle:
     """Qwen-Image apply. Proxies flux.transformer; lifecycle-callback driven."""
+    return apply_qwen(
+        flux,
+        ORIGINAL_CALIBRATION,
+        rel_l1_thresh=rel_l1_thresh,
+        coefficients=coefficients,
+        skip_first_n_steps=skip_first_n_steps,
+        skip_last_n_steps=skip_last_n_steps,
+    )
+
+
+def apply_qwen(
+    flux: Any,
+    calibration: QwenCalibration,
+    *,
+    rel_l1_thresh: float | None = None,
+    coefficients: tuple[float, float, float, float, float] | None = None,
+    skip_first_n_steps: int = 1,
+    skip_last_n_steps: int = 1,
+) -> TeaCacheHandle:
+    """Shared Qwen-Image apply: proxies flux.transformer and reads every per-checkpoint
+    value (fit, range, default threshold, provenance, checkpoint id) from `calibration`."""
     if rel_l1_thresh is not None:
         resolved_thresh: float = rel_l1_thresh
-    elif coefficients is None and DEFAULT_THRESH is not None:
-        resolved_thresh = DEFAULT_THRESH
+    elif coefficients is None:
+        resolved_thresh = calibration.default_thresh
     else:
         resolved_thresh = 0.20
 
@@ -400,9 +445,9 @@ def apply(
         resolved_coeffs: tuple[float, float, float, float, float] = coefficients
         resolved_provenance = Provenance.for_user_supplied()
     else:
-        resolved_coeffs = COEFFICIENTS
-        resolved_provenance = _PROVENANCE
-        # The built-in polynomial was fitted on META["hf_model_id"]. mflux 0.19
+        resolved_coeffs = calibration.coefficients
+        resolved_provenance = calibration.provenance
+        # The built-in polynomial was fitted on calibration.hf_model_id. mflux 0.19
         # resolves the `qwen-image` alias to Qwen/Qwen-Image-2512, a newer
         # checkpoint with the same aliases, so the detector still matches and
         # the user would otherwise get an unverified operating point silently.
@@ -411,18 +456,19 @@ def apply(
         # declared through --base-model counts as the calibrated checkpoint.
         model_config = getattr(flux, "model_config", None)
         loaded = getattr(model_config, "model_name", None)
-        calibrated = META["hf_model_id"]
+        calibrated = calibration.hf_model_id
         if not is_calibrated_checkpoint(model_config, calibrated):
+            # stacklevel 4: apply_qwen -> variant apply -> apply_teacache -> the caller.
             warnings.warn(
                 TeaCacheUncalibratedCheckpointWarning(
-                    f"variant 'qwen-image' loaded {loaded!r}, but its coefficients were "
+                    f"variant {calibration.variant_id!r} loaded {loaded!r}, but its coefficients were "
                     f"calibrated on {calibrated!r}; skip counts and image quality on this "
                     "checkpoint are not verified. If this is a mirror of the calibrated "
                     "checkpoint, load it with that base model declared or filter this "
                     "category; otherwise pass coefficients= from your own calibration "
                     "(scripts/calibrate_qwen.py)."
                 ),
-                stacklevel=3,
+                stacklevel=4,
             )
 
     import contextlib
@@ -431,7 +477,7 @@ def apply(
         rel_l1_thresh=resolved_thresh,
         coefficients=resolved_coeffs,
         # The clamp belongs to this variant's fit, never to caller-supplied coefficients.
-        calibrated_range=CALIBRATED_RANGE if coefficients is None else None,
+        calibrated_range=calibration.calibrated_range if coefficients is None else None,
         skip_first_n_steps=skip_first_n_steps,
         skip_last_n_steps=skip_last_n_steps,
     )

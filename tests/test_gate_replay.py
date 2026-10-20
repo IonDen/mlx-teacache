@@ -25,6 +25,7 @@ from mlx_teacache.variants.qwen_image.config import COEFFICIENTS, DEFAULT_THRESH
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _QWEN_TRACE = _REPO_ROOT / "scripts" / "_calibration_qwen.json"
+_QWEN_2512_TRACE = _REPO_ROOT / "scripts" / "_calibration_qwen_2512.json"
 _NUM_STEPS = 50
 _NUM_FIT_PROMPTS = 7
 
@@ -33,8 +34,8 @@ _NUM_FIT_PROMPTS = 7
 _BENCH_PATTERN = "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC"
 
 
-def _prompt_traces() -> list[list[float]]:
-    xs = json.loads(_QWEN_TRACE.read_text())["signals"]["A"]["x_values"]
+def _prompt_traces(trace_file: Path = _QWEN_TRACE) -> list[list[float]]:
+    xs = json.loads(trace_file.read_text())["signals"]["A"]["x_values"]
     per = len(xs) // _NUM_FIT_PROMPTS
     return [xs[i * per : (i + 1) * per] for i in range(_NUM_FIT_PROMPTS)]
 
@@ -88,6 +89,44 @@ def test_qwen_replay_streak_stays_under_the_cap_at_default():
     from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS
 
     worst = max(streak for _, streak in (_replay(t, DEFAULT_THRESH) for t in _prompt_traces()))
+    assert worst < MAX_CONSECUTIVE_SKIPS, f"replayed streak {worst} reached the cap"
+
+
+# --- Qwen-Image-2512: the replay of its own calibration traces at its swept default ------------------------------
+
+
+def _replay_2512_at_default() -> list[tuple[str, int]]:
+    """(pattern, longest skip run) per fit prompt: the shipped gate, 2512's own coefficients and calibrated range,
+    its DEFAULT_THRESH. Read from the config so the test follows the shipped default; the literals below do not."""
+    from mlx_teacache.variants.qwen_image_2512.config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
+
+    results = []
+    for trace in _prompt_traces(_QWEN_2512_TRACE):
+        pattern = _replay_with(trace, COEFFICIENTS, DEFAULT_THRESH, CALIBRATED_RANGE)[0]
+        longest = max(len(run) for run in pattern.split("C"))
+        results.append((pattern, longest))
+    return results
+
+
+def test_qwen_2512_replay_at_default_stays_in_its_band():
+    """RED if 2512's default threshold, coefficients or range move off the point the sweep measured: 29 of 48
+    active steps skipped with a longest run of 4 (scripts/sweep_threshold_qwen.py --model Qwen/Qwen-Image-2512
+    --plain-q4, 2026-10-20: 0.20 -> 27 / 4, 0.25 -> 29 / 4, 0.30 -> 32 / 5). The seven fit prompts replay to the
+    same pattern, so the band is a single point."""
+    results = _replay_2512_at_default()
+    assert len(results) == _NUM_FIT_PROMPTS
+    for pattern, streak in results:
+        skips = pattern.count("S")
+        assert skips == 29, f"skips {skips} off the swept 29: {pattern}"
+        assert streak == 4, f"longest skip run {streak} off the swept 4: {pattern}"
+
+
+def test_qwen_2512_replay_streak_stays_under_the_cap():
+    """RED if a threshold or coefficient change pushes 2512's default onto the runaway cap, which the docs say
+    never engages at a default."""
+    from mlx_teacache._kernel.gate import MAX_CONSECUTIVE_SKIPS
+
+    worst = max(streak for _, streak in _replay_2512_at_default())
     assert worst < MAX_CONSECUTIVE_SKIPS, f"replayed streak {worst} reached the cap"
 
 

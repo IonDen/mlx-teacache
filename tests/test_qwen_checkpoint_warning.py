@@ -47,6 +47,17 @@ def test_apply_is_silent_on_the_calibrated_checkpoint():
     apply(_fake_flux("Qwen/Qwen-Image"), rel_l1_thresh=0.25).restore()
 
 
+def test_a_differently_cased_repo_id_of_the_calibrated_checkpoint_is_silent():
+    """bug caught: comparing repo ids case-sensitively. Hugging Face resolves `qwen/qwen-image` to the same repo,
+    so loading it must not warn that the checkpoint is uncalibrated."""
+    apply(_fake_flux("qwen/qwen-image"), rel_l1_thresh=0.25).restore()
+
+
+def test_a_mirror_whose_base_is_a_differently_cased_repo_id_is_silent():
+    """bug caught: the case-insensitive match covers model_name but not base_model."""
+    apply(_fake_flux("/models/qwen-image-q4", base_model="QWEN/Qwen-Image"), rel_l1_thresh=0.25).restore()
+
+
 def test_user_coefficients_silence_the_warning():
     """bug caught: warning on every mismatch, even when the caller calibrated
     the checkpoint themselves and passed the result."""

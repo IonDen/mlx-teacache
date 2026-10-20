@@ -25,6 +25,7 @@ _SUBPACKAGES = [
     "flux2_klein_base_4b",
     "flux2_klein_base_9b",
     "qwen_image",
+    "qwen_image_2512",
     "z_image_base",
 ]
 

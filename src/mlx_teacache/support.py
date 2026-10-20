@@ -20,12 +20,15 @@ class VariantInfo:
         few-step models where the gate skips nothing (apply_teacache falls back to 0.20 and warns).
     model_names: the mflux model aliases this variant is detected by. mflux accepts more
         aliases for some models (for example klein-base-4b); they resolve to the same config.
-    calibrated: False when the config names a checkpoint other than the one the variant's
-        coefficients were fitted on (today only Qwen-Image checks this: on mflux 0.19 and
-        later the qwen-image alias loads Qwen-Image-2512). apply_teacache still patches such
-        a model and warns, unless the caller passes `coefficients=`. On mflux 0.19 and later a
-        pre-quantized mirror resolves against the qwen-image alias config, so it reports False
-        even when it re-quantizes the original Qwen-Image. True for every other match.
+    calibrated: whether the config names the checkpoint the variant's coefficients were fitted
+        on or declares it as its base model. Only the two Qwen-Image variants check this; every
+        other match is True. mflux records the base model in every config it resolves (a local
+        directory, a mirror, a finetune loaded under an alias), so calibrated is True for all of
+        them: it cannot tell a finetune or a mirror from the checkpoint itself. Only a config
+        that names neither the checkpoint nor its base reports False; apply_teacache still
+        patches such a model and warns, unless the caller passes `coefficients=`. On mflux 0.19
+        and later custom or mirrored Qwen weights resolve against the Qwen-Image-2512 config,
+        so they match the qwen-image-2512 variant whatever weights they hold.
     """
 
     variant_id: str

@@ -34,7 +34,7 @@ def _apply(variant_id: str, flux: Any, **kw: Any) -> Any:
         return apply_teacache(flux, **kw)
 
 
-def test_matrix_covers_all_nine_registered_variants() -> None:
+def test_matrix_covers_all_ten_registered_variants() -> None:
     """Bug: a variant added to the registry is silently left out of the lifecycle matrix."""
     assert _IDS == [
         "flux1-dev",
@@ -45,6 +45,7 @@ def test_matrix_covers_all_nine_registered_variants() -> None:
         "flux2-klein-base-4b",
         "flux2-klein-base-9b",
         "qwen-image",
+        "qwen-image-2512",
         "z-image-base",
     ]
 

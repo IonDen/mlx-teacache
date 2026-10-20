@@ -17,6 +17,7 @@ _FAMILY_CLASS = {
     "flux2_klein_base_4b": "Flux2Klein",
     "flux2_klein_base_9b": "Flux2Klein",
     "qwen_image": "QwenImage",
+    "qwen_image_2512": "QwenImage",
     "z_image_base": "ZImage",
 }
 
@@ -47,6 +48,7 @@ _ALIAS_LISTS = [
     ["flux2-klein-base-4b"],
     ["flux2-klein-base-9b"],
     ["qwen-image", "qwen"],
+    ["qwen-image", "qwen", "qwen-image-2512", "qwen-2512"],
     ["z-image", "zimage"],
     ["z-image-turbo", "zimage-turbo"],
     ["dev-kontext"],

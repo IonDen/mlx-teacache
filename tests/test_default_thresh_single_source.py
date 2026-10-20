@@ -35,6 +35,7 @@ def test_provenance_default_thresh_equals_registry_default(variant_id: str) -> N
         ("flux2-klein-base-9b", 0.17),
         ("z-image-base", 0.12),
         ("qwen-image", 0.30),
+        ("qwen-image-2512", 0.25),
         ("flux2-klein-4b", None),
         ("flux2-klein-9b", None),
     ],

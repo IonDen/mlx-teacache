@@ -1,21 +1,22 @@
 """The Qwen-Image ModelConfig every Qwen script loads through.
 
-On mflux 0.19+ ``ModelConfig.qwen_image()`` and the ``qwen-image`` alias resolve to Qwen-Image-2512, which has no
-calibration and is ~58 GB. The calibrated checkpoint is the original ``Qwen/Qwen-Image``, so it is named explicitly
-(``from_name`` resolves it on mflux 0.17.5 through 0.21 alike). Only mflux is imported, and only inside the function.
+On mflux 0.19+ ``ModelConfig.qwen_image()`` and the ``qwen-image`` alias resolve to Qwen-Image-2512 (~58 GB). Both
+checkpoints are calibrated: the original ``Qwen/Qwen-Image`` and Qwen-Image-2512 each have their own variant and
+calibration. A script that must stay on the original names it explicitly (``from_name`` resolves it on mflux 0.17.5
+through 0.21 alike). Only mflux is imported, and only inside the function.
 """
 
 from typing import Any
 
 QWEN_ORIGINAL = "Qwen/Qwen-Image"
+QWEN_2512 = "Qwen/Qwen-Image-2512"
 
 
 def qwen_config(name: str = QWEN_ORIGINAL) -> Any:
     """Resolve ``name`` to a Qwen-Image family config.
 
     The original checkpoint gets the strict identity check (its name, plus the ``qwen-image`` alias the variant
-    detector relies on). Any other name (say Qwen-Image-2512 for a user's own calibration) only has to be a
-    Qwen-Image family config."""
+    detector relies on). Any other name only has to be a Qwen-Image family config."""
     from mflux.models.common.config.model_config import ModelConfig
 
     config = ModelConfig.from_name(name)

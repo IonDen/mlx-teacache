@@ -103,17 +103,43 @@ def test_model_flag_defaults_to_the_original_checkpoint_and_default_paths() -> N
 
 
 def test_other_checkpoint_never_targets_the_committed_calibration(tmp_path: Path) -> None:
-    """Bug: calibrating Qwen-Image-2512 writes scripts/_calibration_qwen.json (pinned by the artifact tests)
-    or reuses the original's chunk dir and mixes two checkpoints' captures."""
-    chunk_dir, out_name = cq.calibration_paths("Qwen/Qwen-Image-2512")
+    """Bug: calibrating an unknown checkpoint writes scripts/_calibration_qwen.json (pinned by the artifact
+    tests) or reuses the original's chunk dir and mixes two checkpoints' captures."""
+    chunk_dir, out_name = cq.calibration_paths("someone/qwen-finetune")
     assert chunk_dir != cq.CHUNK_DIR_DEFAULT
-    assert chunk_dir == cq.CHUNK_DIR_DEFAULT / "qwen-qwen-image-2512"
+    assert chunk_dir == cq.CHUNK_DIR_DEFAULT / "someone-qwen-finetune"
     assert out_name != cq.OUTPUT_JSON
-    assert "qwen-image-2512" in out_name and "/" not in out_name
-    # Even an explicit default chunk dir must not route a non-default model to the committed file.
+    assert "someone-qwen-finetune" in out_name and "/" not in out_name
+    # Even an explicit default chunk dir must not route an unknown model to the committed file.
     for d in (cq.CHUNK_DIR_DEFAULT, tmp_path):
-        p = cq._aggregate_path(d, dry_run=False, model="Qwen/Qwen-Image-2512")
+        p = cq._aggregate_path(d, dry_run=False, model="someone/qwen-finetune")
         assert p.name != cq.OUTPUT_JSON and p.parent == d
+
+
+def test_calibration_paths_gives_2512_a_committed_output_name() -> None:
+    """Bug: the 2512 fit keeps landing inside the gitignored chunk folder under its slug name, so the variant
+    config has no committed JSON to be pinned against; or an unknown checkpoint is promoted to a committed name."""
+    assert cq.calibration_paths("Qwen/Qwen-Image-2512") == (
+        cq.CHUNK_DIR_DEFAULT / "qwen-qwen-image-2512",
+        "_calibration_qwen_2512.json",
+    )
+    assert cq.calibration_paths("someone/qwen-finetune") == (
+        cq.CHUNK_DIR_DEFAULT / "someone-qwen-finetune",
+        "_calibration_qwen_someone-qwen-finetune.json",
+    )
+
+
+def test_aggregate_path_2512_real_run_writes_the_committed_json_but_dry_run_and_custom_dirs_do_not(
+    tmp_path: Path,
+) -> None:
+    """Bug: a real 2512 run leaves its fit in the gitignored chunk folder (never committed), or a dry-run or
+    custom --chunk-dir run overwrites the committed 2512 calibration."""
+    model = "Qwen/Qwen-Image-2512"
+    chunk_dir, out_name = cq.calibration_paths(model)
+    scripts_dir = Path(cq.__file__).parent
+    assert cq._aggregate_path(chunk_dir, dry_run=False, model=model) == scripts_dir / out_name
+    assert cq._aggregate_path(chunk_dir, dry_run=True, model=model) == chunk_dir / out_name
+    assert cq._aggregate_path(tmp_path, dry_run=False, model=model) == tmp_path / out_name
 
 
 def test_other_checkpoint_chunks_live_inside_the_gitignored_default_chunk_dir() -> None:
@@ -384,3 +410,94 @@ def test_worker_chunk_records_the_peak_memory() -> None:
     )
     assert len(chunk["signal_A"]["xs"]) == 2 and len(chunk["signal_B"]["ys"]) == 2
     assert isinstance(chunk["peak_memory_gb"], float) and chunk["peak_memory_gb"] > 0.0
+
+
+# --- aggregate report: variant label and elapsed time ----------------------------------------------------------
+
+
+def _aggregate_from_existing_chunks(
+    tmp_path: Path, model: str, *, generation_seconds: list[float] | None = None
+) -> dict[str, Any]:
+    """Write every prompt's dry-run chunk first, so the orchestrator only resumes and aggregates (no worker runs),
+    the way a re-aggregation of a finished calibration does."""
+    import json
+
+    n_prompts = 5
+    for idx in range(n_prompts):
+        cq._run_worker(idx, steps=6, chunk_dir=tmp_path, dry_run=True, model=model)
+        if generation_seconds is not None:
+            path = tmp_path / cq._chunk_filename(idx)
+            chunk = json.loads(path.read_text())
+            chunk["generation_seconds"] = generation_seconds[idx]
+            path.write_text(json.dumps(chunk))
+    cq._run_orchestrator(
+        steps=6, n_prompts=n_prompts, chunk_dir=tmp_path, fit_mode="origin", dry_run=True, model=model
+    )
+    _, out_name = cq.calibration_paths(model)
+    report: dict[str, Any] = json.loads((tmp_path / out_name).read_text())
+    return report
+
+
+@pytest.mark.parametrize(
+    ("model", "variant"),
+    [
+        ("Qwen/Qwen-Image", "qwen-image"),
+        ("Qwen/Qwen-Image-2512", "qwen-image-2512"),
+        ("someone/qwen-finetune", "qwen-image"),
+    ],
+)
+def test_aggregate_names_the_variant_of_the_calibrated_checkpoint(
+    tmp_path: Path, model: str, variant: str
+) -> None:
+    """Bug: the report says variant "qwen-image" for a Qwen-Image-2512 fit, so the committed 2512 calibration claims
+    to belong to the original checkpoint's variant."""
+    assert _aggregate_from_existing_chunks(tmp_path, model)["variant"] == variant
+
+
+def test_resume_only_aggregate_records_no_elapsed_time_without_chunk_timings(tmp_path: Path) -> None:
+    """Bug: a re-aggregation over finished chunks records its own near-zero wall time as the calibration's elapsed
+    time (the committed 2512 JSON said 9.5e-07 s)."""
+    assert _aggregate_from_existing_chunks(tmp_path, "Qwen/Qwen-Image-2512")["elapsed_seconds"] is None
+
+
+def test_aggregate_elapsed_time_is_the_sum_of_the_chunks_generation_seconds(tmp_path: Path) -> None:
+    """Bug: the aggregate ignores the per-chunk generation times and reports the orchestrator's own wall time."""
+    report = _aggregate_from_existing_chunks(
+        tmp_path, "Qwen/Qwen-Image-2512", generation_seconds=[100.0, 200.5, 300.0, 400.0, 500.25]
+    )
+    assert report["elapsed_seconds"] == 1500.75
+
+
+def test_aggregate_records_no_elapsed_time_when_one_chunk_lacks_its_timing(tmp_path: Path) -> None:
+    """Bug: a partial sum (chunks from an older run carry no timing) is reported as the whole calibration's time."""
+    import json
+
+    _aggregate_from_existing_chunks(
+        tmp_path, "Qwen/Qwen-Image-2512", generation_seconds=[1.0, 2.0, 3.0, 4.0, 5.0]
+    )
+    path = tmp_path / cq._chunk_filename(2)
+    chunk = json.loads(path.read_text())
+    del chunk["generation_seconds"]
+    path.write_text(json.dumps(chunk))
+    cq._run_orchestrator(
+        steps=6,
+        n_prompts=5,
+        chunk_dir=tmp_path,
+        fit_mode="origin",
+        dry_run=True,
+        model="Qwen/Qwen-Image-2512",
+    )
+    _, out_name = cq.calibration_paths("Qwen/Qwen-Image-2512")
+    assert json.loads((tmp_path / out_name).read_text())["elapsed_seconds"] is None
+
+
+def test_worker_chunk_records_its_generation_seconds() -> None:
+    """Bug: the worker drops its own generation time, so no aggregate can ever report how long a calibration took."""
+    reducer = cq._QwenPairReducer()
+    for i in range(3):
+        reducer.positive(signal_A=_normal(i), signal_B=_normal(100 + i), body_out=_normal(200 + i))
+        reducer.negative(body_out=_normal(300 + i))
+    chunk = cq._chunk_from_reducer(
+        reducer, prompt_idx=1, prompt="p", steps=3, model="Qwen/Qwen-Image", generation_seconds=612.5
+    )
+    assert chunk["generation_seconds"] == 612.5

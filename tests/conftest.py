@@ -36,7 +36,7 @@ from pathlib import Path
 import pytest
 
 from tests._lanes import is_mflux_file
-from tests._memory_guard import apply_mlx_memory_caps, arm_parity_guard
+from tests._memory_guard import apply_mlx_memory_caps, arm_parity_guard, one_model_per_process_conflict
 
 
 def _install_mlx_memory_caps() -> None:
@@ -62,7 +62,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
-    """Arm the parity watchdog and wall backstop from the final (post -m) item list."""
+    """Refuse a session that selects two checkpoints of a one-model-per-process parity file, then arm the parity
+    watchdog and wall backstop from the final (post -m, -k) item list. Exit code 2 (interrupted), not 4, which
+    already means a watchdog abort or a pytest usage error in this repo's lanes. A --collect-only session (IDE test
+    discovery) loads nothing, so it is never refused."""
+    conflict = one_model_per_process_conflict([item.nodeid for item in session.items])
+    if conflict is not None and not session.config.option.collectonly:
+        pytest.exit(conflict, returncode=2)
     arm_parity_guard(session.items, capture=session.config.pluginmanager.getplugin("capturemanager"))
 
 

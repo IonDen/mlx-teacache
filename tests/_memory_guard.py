@@ -101,6 +101,35 @@ def parity_selected(items: Sequence[Any]) -> bool:
     return any(item.get_closest_marker("parity") is not None for item in items)
 
 
+# Parity files that hold one 20B checkpoint at a time: file -> the param ids that each load a different model.
+# A session may select at most one id per file (repo rule: one model per process).
+_ONE_MODEL_PER_PROCESS: dict[str, tuple[str, ...]] = {
+    "tests/test_parity_qwen.py": ("original", "2512"),
+}
+
+
+def one_model_per_process_conflict(nodeids: Sequence[str]) -> str | None:
+    """A refusal message when ``nodeids`` select more than one checkpoint of a parity file that must load one
+    model per process (today tests/test_parity_qwen.py: ``original`` and ``2512``), else None. The message names
+    the ``-k <id>`` command for each checkpoint so the user can run them as separate sessions."""
+    for path, param_ids in _ONE_MODEL_PER_PROCESS.items():
+        selected = {
+            pid
+            for nodeid in nodeids
+            if nodeid.startswith(f"{path}::")
+            for pid in param_ids
+            if nodeid.endswith(f"[{pid}]")
+        }
+        if len(selected) > 1:
+            commands = "; ".join(f"-k {pid}" for pid in param_ids)
+            return (
+                f"{path} selects {len(selected)} checkpoints ({', '.join(sorted(selected))}) in one pytest "
+                f"process. Two 20B checkpoints in one session are an out-of-memory trap: run each in its own "
+                f"process ({commands})."
+            )
+    return None
+
+
 def wall_seconds(environ: Mapping[str, str]) -> float:
     """Wall backstop in seconds: ``PYTEST_PARITY_WALL_S`` if a positive number, else 3 h."""
     try:
@@ -250,3 +279,35 @@ def arm_parity_guard(
     )
     PARITY_GUARD_ARMED = True
     return True
+
+
+_MODEL_PARTS = ("transformer", "vae", "text_encoder", "qwen_vl_encoder")
+_CALLBACK_HOOKS = ("before_loop", "in_loop", "after_loop", "interrupt")
+
+
+def release_model(model: Any, *, clear_cache: Callable[[], None] | None = None) -> None:
+    """Free a loaded mflux model's weights at a module-scoped fixture's teardown.
+
+    pytest keeps the yielded object as the fixture's cached result while the teardown runs, so deleting the
+    fixture's own names frees nothing. Instead empty the callback hook lists (mflux's MemorySaver holds the model,
+    a cycle), set every heavy part the model has to None (the VL encoder wraps the text encoder, so it goes too),
+    empty the prompt cache, then collect and return MLX's cached buffers to the system."""
+    import gc
+
+    callbacks = getattr(model, "callbacks", None)
+    for hook in _CALLBACK_HOOKS:
+        hooks = getattr(callbacks, hook, None)
+        if isinstance(hooks, list):
+            hooks.clear()
+    for part in _MODEL_PARTS:
+        if hasattr(model, part):
+            setattr(model, part, None)
+    prompt_cache = getattr(model, "prompt_cache", None)
+    if isinstance(prompt_cache, dict):
+        prompt_cache.clear()
+    gc.collect()
+    if clear_cache is None:
+        import mlx.core as mx
+
+        clear_cache = mx.clear_cache
+    clear_cache()

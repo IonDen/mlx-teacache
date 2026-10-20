@@ -17,12 +17,23 @@ Generated images are written under tests/_artifacts/parity_qwen/ (gitignored) fo
 manual inspection — they are NOT deleted.
 
 Real weights — pytest.mark.parity (deselected from the per-PR lanes). 20B near the
-32 GB ceiling: the fixture sets a device-derived wired cap and mx.clear_cache()
-runs between tests to keep the peak ~one generation.
+32 GB ceiling: the fixture sets a device-derived wired cap, registers mflux's
+MemorySaver (frees the text encoders once the prompt is encoded, the same way the
+bench and sweep workers do) and mx.clear_cache() runs between tests to keep the peak
+~one generation.
+
+Every gate runs once per checkpoint, ids ``original`` (Qwen/Qwen-Image) and ``2512``
+(Qwen/Qwen-Image-2512), each against its own variant's DEFAULT_THRESH. Run ONE id per
+pytest process (``-k original`` or ``-k 2512``): the repo rule for parity files is one
+model per process, and two 20B checkpoints in one session are an OOM trap (the session hook in
+conftest.py refuses one that selects both). The fixture releases its model's weights at teardown,
+but the allocator pool and the process footprint are not something to rely on.
 """
 
 import sys
 import warnings
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +43,9 @@ import pytest
 
 from mlx_teacache import apply_teacache
 from mlx_teacache.errors import TeaCacheDisabledWarning
+from mlx_teacache.variants.qwen_image import config as _original_config
+from mlx_teacache.variants.qwen_image_2512 import config as _config_2512
+from tests._memory_guard import release_model
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -56,6 +70,12 @@ _SSIM_GATE = 0.95
 # unnoticed, so this one is centred on the measured value and would go red on either the
 # 0.9.x count or a dormant cache.
 _MIN_SKIP, _MAX_SKIP = 28, 38
+# Expected skip band for 2512 at its DEFAULT_THRESH 0.25: the threshold sweep on this checkpoint
+# (scripts/sweep_threshold_qwen.py --model Qwen/Qwen-Image-2512 --plain-q4, 2026-10-20, same recipe) skipped
+# 29 of 48 active steps. The band is 29 +/- 5, the same convention as the original's 28-38 around its
+# measured 33: it goes red on a dormant cache or on a threshold moved far enough to change the count by more
+# than five steps.
+_MIN_SKIP_2512, _MAX_SKIP_2512 = 24, 34
 PROMPT = "a red apple on a wooden table"
 SEED = 42
 HEIGHT = WIDTH = 768
@@ -108,16 +128,62 @@ def _gen_image_array(flux: Any, *, save_path: Path, steps: int) -> np.ndarray:
     return np.array(Image.open(save_path).convert("RGB"), dtype=np.uint8)
 
 
-@pytest.fixture(scope="module")
-def qwen_image() -> Any:
-    from _qwen_config import qwen_original_config
+@dataclass(frozen=True)
+class _Checkpoint:
+    """One parametrization of the file: the model plus what its gates expect."""
+
+    flux: Any
+    variant_id: str
+    default_thresh: float
+    min_skip: int
+    max_skip: int
+
+
+# id -> (HF model, variant id, DEFAULT_THRESH read from that variant's own config, skip band)
+_CHECKPOINTS = {
+    "original": (
+        "Qwen/Qwen-Image",
+        "qwen-image",
+        _original_config.DEFAULT_THRESH,
+        (_MIN_SKIP, _MAX_SKIP),
+    ),
+    "2512": (
+        "Qwen/Qwen-Image-2512",
+        "qwen-image-2512",
+        _config_2512.DEFAULT_THRESH,
+        (_MIN_SKIP_2512, _MAX_SKIP_2512),
+    ),
+}
+
+
+@pytest.fixture(scope="module", params=list(_CHECKPOINTS), ids=list(_CHECKPOINTS))
+def qwen_case(request: pytest.FixtureRequest) -> Iterator[_Checkpoint]:
+    """Load one checkpoint (module-scoped per param: pytest tears the first down before the
+    second is built) with the text encoders freed after prompt encoding."""
+    from _memory_saver import make_memory_saver
+    from _qwen_config import qwen_config
+    from mflux.callbacks.instances.memory_saver import MemorySaver
     from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 
+    model, variant_id, default_thresh, (min_skip, max_skip) = _CHECKPOINTS[request.param]
     _max_set = mx.device_info()["max_recommended_working_set_size"]
     mx.set_wired_limit(int(_max_set * 0.85))  # device-derived; 20B near the 32 GB edge
-    flux = QwenImage(quantize=4, model_config=qwen_original_config())
+    flux = QwenImage(quantize=4, model_config=qwen_config(model))
     flux.freeze()
-    return flux
+    # Same registration as scripts/sweep_threshold_qwen.py: keep_transformer=True frees only
+    # the text encoders, cache_limit_bytes=None leaves our caps and the untiled VAE decode alone.
+    flux.callbacks.register(make_memory_saver(flux, MemorySaver))
+    case = _Checkpoint(
+        flux=flux,
+        variant_id=variant_id,
+        default_thresh=default_thresh,
+        min_skip=min_skip,
+        max_skip=max_skip,
+    )
+    yield case
+    # pytest still holds `case` as this fixture's cached result while the teardown runs, so deleting names here would
+    # free nothing: release the weights through the model object itself.
+    release_model(flux)
 
 
 @pytest.fixture(autouse=True)
@@ -126,11 +192,11 @@ def _clear_cache_between_tests():  # noqa: ANN202
     mx.clear_cache()  # keep the peak ~one generation across the module (memory edge)
 
 
-def test_cfg_parity_at_threshold_zero(qwen_image: Any) -> None:
+def test_cfg_parity_at_threshold_zero(qwen_case: _Checkpoint) -> None:
     """At rel_l1_thresh=0 the gated CFG path (re-walk of QwenTransformer.__call__
     per branch + mflux's external combine) must match real generation within Metal
     noise, and never skip. Short 8-step schedule = compute-path correctness."""
-    flux = qwen_image
+    flux = qwen_case.flux
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)
 
     vanilla_before = _capture_latent(flux, **kw)
@@ -153,32 +219,41 @@ def test_cfg_parity_at_threshold_zero(qwen_image: Any) -> None:
     )
 
 
-def test_image_quality_ssim_at_default_threshold(qwen_image: Any) -> None:
+def test_image_quality_ssim_at_default_threshold(qwen_case: _Checkpoint) -> None:
     """User-facing quality gate at the calibrated 50-step recipe + the shipped
     DEFAULT_THRESH: caching MUST engage (skipped > 0 — the dormant-cache
     guard) and SSIM vs vanilla MUST hold the PR-gate floor. Images saved for
-    manual inspection."""
-    flux = qwen_image
-    van = _gen_image_array(flux, save_path=_ARTIFACTS / "vanilla.png", steps=50)
-    ctx = apply_teacache(flux)  # builtin DEFAULT_THRESH
+    manual inspection. Each checkpoint is gated at its own variant's DEFAULT_THRESH."""
+    flux = qwen_case.flux
+    out_dir = _ARTIFACTS / qwen_case.variant_id
+    van = _gen_image_array(flux, save_path=out_dir / "vanilla.png", steps=50)
+    ctx = apply_teacache(flux)  # builtin DEFAULT_THRESH of the matched variant
     with ctx as h:
-        wrap = _gen_image_array(flux, save_path=_ARTIFACTS / "wrapper_default_thresh.png", steps=50)
+        assert h.variant_id == qwen_case.variant_id, (
+            f"matched variant {h.variant_id!r}, expected {qwen_case.variant_id!r}"
+        )
+        assert h.rel_l1_thresh == qwen_case.default_thresh, (
+            f"applied thresh {h.rel_l1_thresh} != {qwen_case.variant_id} DEFAULT_THRESH {qwen_case.default_thresh}"
+        )
+        wrap = _gen_image_array(flux, save_path=out_dir / "wrapper_default_thresh.png", steps=50)
         skipped, computed = h.stats.skipped_count, h.stats.computed_count
     score = float(ssim(van, wrap, channel_axis=-1, data_range=255))
-    assert _MIN_SKIP <= skipped <= _MAX_SKIP, (
-        f"skip count {skipped} outside the expected ~33 band [{_MIN_SKIP}, {_MAX_SKIP}] at "
-        f"DEFAULT_THRESH (computed={computed}) — a dormant or runaway cache"
+    assert qwen_case.min_skip <= skipped <= qwen_case.max_skip, (
+        f"skip count {skipped} outside the expected band [{qwen_case.min_skip}, {qwen_case.max_skip}] at "
+        f"DEFAULT_THRESH {qwen_case.default_thresh} (computed={computed}) — a dormant or runaway cache"
     )
-    assert score >= _SSIM_GATE, f"SSIM {score:.4f} < {_SSIM_GATE} at DEFAULT_THRESH (skipped={skipped})"
+    assert score >= _SSIM_GATE, (
+        f"SSIM {score:.4f} < {_SSIM_GATE} at DEFAULT_THRESH {qwen_case.default_thresh} (skipped={skipped})"
+    )
 
 
-def test_skip_path_engages_and_produces_finite_latent(qwen_image: Any) -> None:
+def test_skip_path_engages_and_produces_finite_latent(qwen_case: _Checkpoint) -> None:
     """Mechanical skip-path correctness: a high threshold forces skips and the
     reconstructed latent (img_in + cached_residual per CFG branch) stays finite —
     no NaN/inf from a shape/broadcast bug. No quality bound on the short schedule
     (8-step over-skips the 50-step-calibrated coefficients); skip QUALITY is gated
     by the SSIM test above at the pinned recipe."""
-    flux = qwen_image
+    flux = qwen_case.flux
     kw = dict(prompt=PROMPT, seed=SEED, num_inference_steps=8, height=HEIGHT, width=WIDTH, guidance=GUIDANCE)
     ctx = apply_teacache(flux, rel_l1_thresh=0.5)
     with ctx as h:

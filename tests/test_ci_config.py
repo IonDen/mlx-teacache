@@ -179,6 +179,40 @@ def test_parity_job_raises_the_wall_backstop_to_twelve_hours() -> None:
     assert env_values == ['PYTEST_PARITY_WALL_S: "43200"']
 
 
+_QWEN_PARITY_FILE = "tests/test_parity_qwen.py"
+
+
+def _parity_pytest_commands() -> list[str]:
+    block = [ln.strip() for ln in _job_block(_CI_WORKFLOW.read_text(), "test-parity")]
+    return [ln.removeprefix("run:").strip() for ln in block if ln.startswith("run:") and "pytest" in ln]
+
+
+def test_parity_job_never_selects_both_qwen_checkpoints_in_one_pytest_process() -> None:
+    """Bug: the dispatch-only parity job runs `pytest -m parity` over the whole tree, which selects both Qwen
+    checkpoints; the collection guard (one model per process) then exits 2 before a single test runs, or, without
+    it, two 20B models share one process. Every command must either leave the Qwen file out or pick one id."""
+    commands = _parity_pytest_commands()
+    qwen_ids: list[str] = []
+    for command in commands:
+        if f"--ignore={_QWEN_PARITY_FILE}" in command:
+            continue
+        ids = re.findall(r"-k (original|2512)(?:\s|$)", command)
+        assert _QWEN_PARITY_FILE in command and len(ids) == 1, command
+        qwen_ids.extend(ids)
+    assert sorted(qwen_ids) == ["2512", "original"], commands
+    assert any(f"--ignore={_QWEN_PARITY_FILE}" in command for command in commands), commands
+
+
+def test_parity_job_runs_every_split_step_and_still_fails_on_any_failure() -> None:
+    """Bug: splitting the parity run into steps lets a red first step skip the Qwen checkpoints (default step
+    gating), or `continue-on-error` turns a red step green, so the job hides a parity failure."""
+    block = [ln.strip() for ln in _job_block(_CI_WORKFLOW.read_text(), "test-parity")]
+    commands = _parity_pytest_commands()
+    assert len(commands) == 3
+    assert not any(ln.startswith("continue-on-error") for ln in block)
+    assert block.count("if: ${{ !cancelled() }}") == len(commands) - 1
+
+
 def test_coverage_job_gates_both_lanes_at_a_floor_of_at_least_ninety() -> None:
     """Bug: the combined-coverage FLOOR set back to 58 (or the exit-on-floor line removed, or one
     test job dropped from `needs`), so a real loss of stub-testable coverage passes CI."""

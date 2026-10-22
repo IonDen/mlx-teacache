@@ -557,3 +557,61 @@ def test_ci_runs_a_non_blocking_fast_lane_against_mflux_main() -> None:
     failure_at = block.index("if: failure()")
     assert pytest_at < failure_at
     assert block[failure_at + 1] == 'run: echo "::warning::mflux main broke the fast lane"'
+
+
+# ---- Audit: pillow 12.x is skipped (and announced) while the lock cannot move to pillow 13 ----
+
+
+def _audit_pillow_filter() -> list[str]:
+    """The audit step's `if ... fi` filter block, dedented, as shell lines."""
+    block = [ln.strip() for ln in _job_block(_CI_WORKFLOW.read_text(), "audit")]
+    start = next(i for i, ln in enumerate(block) if ln.startswith("if "))
+    return block[start : block.index("fi", start) + 1]
+
+
+def _run_audit_filter(tmp_path: Path, req: str) -> tuple[str, str]:
+    """Run the filter on a req.txt body; return (resulting req.txt, stdout)."""
+    (tmp_path / "req.txt").write_text(req)
+    script = "\n".join(_audit_pillow_filter())
+    proc = subprocess.run(
+        ["bash", "-ec", script],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return (tmp_path / "req.txt").read_text(), proc.stdout
+
+
+_SAMPLE_REQ = "mlx==0.32.2\npillow=={pil} ; python_full_version >= '3.10'\npillow-heif==1.0\nnumpy==2.0.0\n"
+
+
+def test_audit_drops_pillow_and_announces_it_while_the_lock_pins_pillow_12(tmp_path: Path) -> None:
+    """Bug: the audit stays red on pillow 12.3.0 advisories that only 13.0.0 fixes (the lock cannot move: mflux
+    0.23.0 breaks under pillow 13), or the skip happens silently and nobody knows pillow is unaudited. Also catches
+    a filter that is too broad: pillow-heif and every other package must stay in the audited set."""
+    req, out = _run_audit_filter(tmp_path, _SAMPLE_REQ.format(pil="12.3.0"))
+    assert req == "mlx==0.32.2\npillow-heif==1.0\nnumpy==2.0.0\n"
+    assert out.startswith("::notice::")
+    assert "pillow 12" in out
+
+
+def test_audit_keeps_pillow_without_a_notice_once_the_lock_moves_to_pillow_13(tmp_path: Path) -> None:
+    """Bug: the skip is unconditional, so pillow 13+ would stay unaudited forever after the lock moves."""
+    body = _SAMPLE_REQ.format(pil="13.0.0")
+    req, out = _run_audit_filter(tmp_path, body)
+    assert req == body
+    assert out == ""
+
+
+def test_audit_pillow_skip_is_gated_on_pillow_12_and_explained_in_the_workflow() -> None:
+    """Bug: the skip condition matches any pillow version (e.g. `^pillow==`), the notice loses its reason, or the
+    removal condition is not written next to the code."""
+    text = _CI_WORKFLOW.read_text()
+    block = _audit_pillow_filter()
+    assert r"^pillow==12\." in block[0]
+    assert "::notice::" in "\n".join(block)
+    audit = text[text.index("  audit:") : text.index("  coverage:")]
+    assert "pull/890" in audit
+    assert "13.0.0" in audit
+    assert "ends by itself" in audit

@@ -296,12 +296,15 @@ KNOWN: dict[str, dict[str, str]] = {
 
 
 # A git install of mflux main keeps reporting the last release's version, so it cannot be judged by
-# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-08,
-# 52295bc, which is the 0.22.0 release commit plus a contributor-docs change (mflux PR 837), so it equals
-# KNOWN["0.22.0"]. Bump it, commit and digests together, after reviewing a newer main. Applies to git+URL installs
-# only: an editable checkout writes `dir_info`, not `vcs_info`, and is judged by its version string like a wheel.
+# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-22,
+# 0fea52b. Against 0.23.0 only two targets moved, both outside the copied path: Flux2Klein.generate_image refuses
+# pid_decode together with the new small_decoder option before the loop and writes more generation_parameters
+# metadata (mflux PRs 896, 897, 910), and ZImage.generate_image adds a vae_full_precision metadata key (PR 910). The
+# denoising loops, _predict and the callbacks are unchanged. Bump it, commit and digests together, after reviewing a
+# newer main. Applies to git+URL installs only: an editable checkout writes `dir_info`, not `vcs_info`, and is judged
+# by its version string like a wheel.
 REVIEWED_MAIN: dict[str, Any] = {
-    "commit": "52295bc4d6309917639c885e2d0218d89b49525d",
+    "commit": "0fea52bada4ade619f1cdb7ae26087b32d87dd89",
     "fingerprints": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
@@ -312,9 +315,9 @@ REVIEWED_MAIN: dict[str, Any] = {
         "qwen.QwenTransformerBlock.__call__": "57a729e7440e6e76",
         "qwen.QwenTransformerBlock._modulate": "112f10214c4791bf",
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
-        "flux2.Flux2Klein.generate_image": "9a8e2c4041f54e75",
+        "flux2.Flux2Klein.generate_image": "e9e087f0c835ada7",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
-        "z_image.ZImage.generate_image": "a0e64be2aa3d8bc9",
+        "z_image.ZImage.generate_image": "88204535dc85b78e",
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },

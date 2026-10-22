@@ -128,16 +128,16 @@ The table below is generated from the variant registry — see `docs/_generate_s
 <!-- SUPPORTED_MODELS_START -->
 | Variant id | Display name | Distilled? | Default recipe | License |
 |---|---|---|---|---|
+| `qwen-image-2512` | Qwen-Image-2512 | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Qwen/Qwen-Image-2512) |
+| `qwen-image` | Qwen-Image | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Qwen/Qwen-Image) |
+| `flux2-klein-base-9b` | FLUX.2 Klein base 9B | no | 50 steps, g=4.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) |
+| `flux2-klein-base-4b` | FLUX.2 Klein base 4B | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) |
+| `flux2-klein-4b` | FLUX.2 Klein 4B | yes | 8 steps, g=1.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) |
+| `flux2-klein-9b` | FLUX.2 Klein 9B | yes | 8 steps, g=1.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
+| `z-image-base` | Z-Image base | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Tongyi-MAI/Z-Image) |
 | `flux1-dev` | FLUX.1 dev | no | 25 steps, g=3.5 | [FLUX.1-dev Non-Commercial License](https://huggingface.co/black-forest-labs/FLUX.1-dev) |
 | `flux1-krea-dev` | FLUX.1 Krea [dev] | no | 28 steps, g=4.5 | [FLUX.1-dev Non-Commercial License](https://huggingface.co/black-forest-labs/FLUX.1-Krea-dev) |
 | `flux1-schnell` | FLUX.1 schnell | yes | 4 steps, g=1.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.1-schnell) |
-| `flux2-klein-4b` | FLUX.2 Klein 4B | yes | 8 steps, g=1.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) |
-| `flux2-klein-9b` | FLUX.2 Klein 9B | yes | 8 steps, g=1.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
-| `flux2-klein-base-4b` | FLUX.2 Klein base 4B | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) |
-| `flux2-klein-base-9b` | FLUX.2 Klein base 9B | no | 50 steps, g=4.0 | [FLUX Non-Commercial](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) |
-| `qwen-image` | Qwen-Image | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Qwen/Qwen-Image) |
-| `qwen-image-2512` | Qwen-Image-2512 | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Qwen/Qwen-Image-2512) |
-| `z-image-base` | Z-Image base | no | 50 steps, g=4.0 | [Apache-2.0](https://huggingface.co/Tongyi-MAI/Z-Image) |
 <!-- SUPPORTED_MODELS_END -->
 
 ### Per-variant notes

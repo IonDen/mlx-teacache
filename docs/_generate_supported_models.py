@@ -22,6 +22,39 @@ from mlx_teacache.variants import _REGISTRY  # noqa: E402
 START_MARKER = "<!-- SUPPORTED_MODELS_START -->"
 END_MARKER = "<!-- SUPPORTED_MODELS_END -->"
 
+# README order, by model family: families most used on Macs first (Hugging Face
+# 30-day downloads of the MLX and mflux copies of the variants TeaCache speeds
+# up, plus Google search interest over 90 days; checked 2026-10-22), the legacy
+# FLUX.1 family last even though
+# its official checkpoint still leads overall downloads. Inside a family, the
+# variants TeaCache speeds up come before the distilled ones, each group by
+# MLX-copy downloads. A new variant must be added here, or the generator
+# refuses to run.
+README_ORDER = (
+    "qwen-image-2512",
+    "qwen-image",
+    "flux2-klein-base-9b",
+    "flux2-klein-base-4b",
+    "flux2-klein-4b",
+    "flux2-klein-9b",
+    "z-image-base",
+    "flux1-dev",
+    "flux1-krea-dev",
+    "flux1-schnell",
+)
+
+
+def _ordered_ids(registry_ids: set[str], order: tuple[str, ...] = README_ORDER) -> list[str]:
+    duplicates = sorted({v for v in order if order.count(v) > 1})
+    missing = sorted(registry_ids - set(order))
+    unknown = sorted(set(order) - registry_ids)
+    if duplicates or missing or unknown:
+        raise RuntimeError(
+            "README_ORDER must list every registered variant exactly once: "
+            f"duplicates={duplicates}, missing={missing}, unknown={unknown}"
+        )
+    return list(order)
+
 
 def _recipe_summary(recipes: dict[str, dict[str, object]]) -> str:
     default = recipes.get("default", {})
@@ -33,7 +66,7 @@ def _recipe_summary(recipes: dict[str, dict[str, object]]) -> str:
 def _build_table() -> str:
     header = "| Variant id | Display name | Distilled? | Default recipe | License |\n|---|---|---|---|---|"
     rows = []
-    for variant_id in sorted(_REGISTRY):
+    for variant_id in _ordered_ids(set(_REGISTRY)):
         meta = _REGISTRY[variant_id]["META"]
         distilled = "no" if meta["non_distilled"] else "yes"
         recipe = _recipe_summary(meta["recipes"])

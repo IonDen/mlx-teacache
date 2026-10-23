@@ -48,6 +48,39 @@ class IncompatibleModelError(TeaCacheError):
         )
 
 
+class _StepCacheConflictError(IncompatibleModelError):
+    """A patched model's generate_image call also turned on mflux's own step cache. Private: callers catch
+    IncompatibleModelError. The model is supported, so `supported` holds the one variant TeaCache patched on it
+    (empty if that id is unknown), and `requested` the arguments that turned the step cache on."""
+
+    def __init__(
+        self, *, actual_type: str, actual_model_name: str | None, supported: list[str], requested: str
+    ) -> None:
+        super().__init__(actual_type=actual_type, actual_model_name=actual_model_name, supported=supported)
+        self.args = (
+            f"This call turns on mflux's step cache ({requested}). mflux's step cache "
+            "(step_cache_ratio / teacache_ratio / use_step_cache) and TeaCache both skip steps, so use one: "
+            "call handle.restore() to use mflux's step cache, or turn it off to keep TeaCache: drop the argument, "
+            "or pass None for the ratio and False for use_step_cache.",
+        )
+        self.requested = requested
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (
+                type(self),
+                {
+                    "actual_type": self.actual_type,
+                    "actual_model_name": self.actual_model_name,
+                    "supported": self.supported,
+                    "requested": self.requested,
+                },
+            ),
+            self.__dict__,
+        )
+
+
 class AlreadyPatchedError(TeaCacheError):
     def __init__(self, *, variant_id: str, rel_l1_thresh: float) -> None:
         super().__init__(

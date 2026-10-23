@@ -30,7 +30,7 @@
     39,
     39
   ],
-  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/klein-base-4b",
+  "bench_images_dir": "tests/_artifacts/bench_images/klein-base-4b",
   "nogate_seconds": [
     244.24693841603585,
     233.52801391697722,

@@ -4,6 +4,7 @@ A non-binding sketch of where the library is headed beyond the current release. 
 
 ## Released
 
+- **v0.14.1** — A guard, two corrections and dependency bumps. A patched model's `generate_image` now raises `IncompatibleModelError` when the call turns on mflux's own step cache (`step_cache_ratio`, `teacache_ratio` or `use_step_cache`), because the two features would both skip steps. On mflux 0.23.0 only Qwen-Image 2.1 has that step cache and TeaCache does not patch it, so the guard is preventive. The docs now say that mflux's command line accepts `--model Qwen/Qwen-Image` and loads it against the Qwen-Image-2512 config; only `--base-model Qwen/Qwen-Image` is refused. The README covers the `mflux-teacache` plugin for the mflux command line. No change to the gate, the defaults or the coefficients, and nothing was measured.
 - **v0.14.0** — Qwen-Image-2512 support. The checkpoint that mflux 0.19 and later load under the `qwen-image` alias gets its own variant, `qwen-image-2512`, with its own calibration (R² 0.818, where the original Qwen-Image's coefficients score −0.35 on its data) and a default threshold of 0.25: 29 of 48 active steps skipped at SSIM 0.969 against plain mflux on the red-apple prompt (768×768, 50 steps, 4-bit, mflux 0.23.0, M1 Max). `apply_teacache` no longer warns on it. On mflux 0.19 and later the original Qwen-Image keeps its own variant only when built in Python from its repo id; the command line, local paths and mirrors resolve to 2512. No change to the gate or to any other variant, and no speed benchmark in this release.
 - **v0.13.3** — FLUX.1 and Qwen-Image now free their transformer when mflux's memory saver drops it (`--low-ram` or `--pid-decode`, for a single seed), so the decode runs without the transformer's weights in memory: about 6.2 GiB for 4-bit FLUX.1-dev, measured once on mflux 0.23.0 on an M1 Max. `restore()` leaves the slot empty in that case. mflux 0.23 support: the range widens to `>=0.17.5,<0.26` and 0.23.0 no longer warns. No change to the gate, the defaults or the coefficients.
 - **v0.13.2** — mflux 0.22 support. The mflux range widens to `>=0.17.5,<0.25` and 0.22.0 no longer warns. TeaCache's Qwen-Image forward still matches plain mflux on text-to-image (checked bit for bit on a two-block test transformer with random weights), and `apply_teacache` refuses a Qwen transformer built for Qwen-Image-Edit-2511's `zero_cond_t` path. mflux 0.22 now loads the output norm's bias for FLUX.1 and Qwen-Image when the checkpoint has one, which earlier releases left out; TeaCache uses mflux's norm, so its images change the same way plain mflux's do. Neither that difference nor the skip counts on 0.22 were measured. No change to the gate, the defaults or the coefficients. On real weights, only FLUX.1-dev was re-checked: bit-identical to plain mflux at threshold 0.
@@ -44,10 +45,6 @@ Concrete improvement ideas with a clear failure mode they address. Each is a can
 
 FLUX.2 calibration produces consistently lower R² than FLUX.1 (klein-9b origin fit: R² = 0.471; klein-4b free fit: R² = 0.653). The polynomial form may be a bad fit for the FLUX.2 mod_in → body_out mapping. Worth investigating: (a) higher polynomial degree, (b) piecewise fit by step-index range, (c) different signal entirely (first-block residual delta — see "Alternative gate signals" below). If the fit improves, default-threshold engagement on FLUX.2 may become more reliable.
 
-### SSIM-vs-threshold sweep tooling
-
-A `scripts/sweep_threshold.py` that captures (threshold, skip_count, SSIM) triplets at calibration time for a given variant. Produces an evidence-backed threshold recommendation per variant. ~3 hours of additional bench cost on top of calibration. Held for a future release where threshold characterization matters more than time-to-ship.
-
 ### Alternative gate signals (non-distilled only)
 
 FBCache (first-block residual delta), DiCache (shallow-layer probe), TaylorSeer (fixed-interval extrapolation). These were considered as v0.4 directions for distilled Klein and dropped (the distilled regime is fundamentally hostile to any caching mechanism — see "Out of scope" below). On *non-distilled* schedules where the polynomial gate works but has low R² (i.e. FLUX.2 family), they may give better engagement / quality than the polynomial. Worth a research spike if v0.4.0's polynomial-on-base-4b engagement is unsatisfying.
@@ -78,21 +75,20 @@ Pick A or C after measuring vanilla compile-loss on representative M3/M4/M5 hard
 
 ## Future model coverage (no fixed release)
 
-Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipeline lands. Ranked by value-per-effort. `FLUX.2-klein-base-4B` shipped in v0.4.0, `FLUX.2-klein-base-9B` in v0.5.0, and `Z-Image base` in v0.7.0 (all under "Released"). Don't pick from this table while Active items are in flight.
+What mlx-teacache does not cover yet among mflux's own models, in order of how often each model's MLX copies were downloaded on Hugging Face over the 30 days to 2026-10-22, most-downloaded first. Supported today: Qwen-Image, Qwen-Image-2512, FLUX.2 Klein, Z-Image base, FLUX.1 dev, schnell and FLUX.1 Krea [dev]. A model is picked on community demand, license and benchmark cost; none of these is scheduled.
 
-| # | Model | Effort | License | Why it matters | Risks |
-|---|---|---|---|---|---|
-| 1 | **Chroma1-HD** (lodestones community FLUX-schnell fine-tune) | Week | Apache-2.0 | Popular community model; FLUX-architecture-compatible in spirit. | **Not in mflux 0.17.5** — exposed upstream as `ChromaPipeline` in Diffusers. Requires either a mflux integration request or a custom weight-loading path that maps Chroma's safetensors onto mflux's `Flux1` mapping. Prove loadability first; if mflux's `Flux1` accepts Chroma weights with no custom mapping, drops to 1–2 days. |
-| 2 | **SD3.5 medium** (Stability AI, 2.5B DiT) | Week+ | Stability AI Community License | DiT-family, runs on `mlx-stable-diffusion` rather than mflux. Different upstream. | Less actively maintained upstream; may require upstream patches. |
-| 3 | **SDXL** | Week+ | OpenRAIL-M | Largest installed base on Apple Silicon, but standard step counts (30–40) are lower than FLUX — speedup ceiling is lower. | Same upstream issue as SD3.5. |
-| 4 | **AuraFlow** (~6B DiT) | 1–2 weeks | Apache-2.0 | Open license, FLUX-like, room for community uptake. | Not in mflux — needs a new mflux variant first. |
-| 5 | **HunyuanVideo / Mochi / CogVideoX** | — | varies (see below) | Video diffusion: TeaCache concept is even more valuable (30+ steps, very expensive per step). | Doesn't fit 32 GB unified memory on this machine — needs a 64 GB+ M-series chip to develop and test. License notes: Mochi 1 preview Apache-2.0 (42 GB VRAM Diffusers / 60 GB reference); CogVideoX-2B Apache-2.0; CogVideoX-5B "other"; HunyuanVideo / HunyuanVideo 1.5 "other". |
+1. Qwen-Image 2.1. A different architecture from Qwen-Image, so it needs its own variant and calibration. It ships under the Qwen Research License (non-commercial). It is also the one model where mflux 0.23.0 offers its own step cache.
+2. Qwen-Image-Edit 2511. An edit pipeline. `apply_teacache` refuses it today.
+3. ERNIE-Image base.
+4. Krea 2 Raw.
+5. Ideogram 4.
+6. FIBO, then mflux's edit, ControlNet, fill and Kontext pipelines. `apply_teacache` refuses these pipelines today, and each would need its own check that skipping steps keeps the picture close to plain mflux.
+
+Later, and only with a runner other than mflux: Chroma1-HD, SD3.5 medium, SDXL, AuraFlow and the video models (HunyuanVideo, Mochi, CogVideoX). The mflux integration does not reach them, and the video models do not fit in 32 GB of unified memory.
 
 ### Process / infra items
 
-- **`workflow_dispatch` nightly slow suite** — one-click GH Actions run of `pytest -m "slow and parity"` with HF_TOKEN
 - **Community benchmark table** — accept PR-submitted measurements and embed in README, with the protocol from `docs/m3-plus-tradeoff.md` (env-print, warmup, ≥3 timed reps, report median + min + computed/skipped)
-- **Benchmark protocol formalization** — bake warmup + repeat-run + env-print conventions into `docs/m3-plus-tradeoff.md` so community submissions are comparable
 
 ## Out of scope (deliberate)
 
@@ -105,7 +101,7 @@ Other Apple-Silicon-friendly models worth covering after the current FLUX.2 pipe
 When picking up new work:
 1. **Active items first.** Items under `## Active` are committed. Finish the current Active item before pulling the next one in.
 2. **Future improvements next.** Items under `## Future improvements` are pre-vetted improvement ideas with documented failure modes they address. Each can be lifted into an Active release when its time comes.
-3. **Future model coverage after that.** The model-coverage table is a menu, not a queue; pick from it based on community demand + license posture + bench cost.
+3. **Future model coverage after that.** The model-coverage list is a menu, not a queue; pick from it based on community demand + license posture + bench cost.
 4. **Out of scope is durable.** Items under `## Out of scope (deliberate)` represent intentional non-goals, not deferred work. Re-opening one requires evidence that the original reasoning no longer holds.
 
 When closing a release, move its Active entry to Released with a one-line summary and pull the next Active item into the top slot.

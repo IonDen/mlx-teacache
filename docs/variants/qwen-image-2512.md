@@ -27,10 +27,10 @@ The rule that separates the two Qwen variants: a Qwen-Image config whose aliases
 
 ### Original Qwen-Image weights on mflux 0.19 and later
 
-On mflux 0.19 and later the original checkpoint keeps its own variant in one case only: you build the model in Python and pass `ModelConfig.from_name("Qwen/Qwen-Image")` as its `model_config`, with no `model_path`. Every other route resolves against the `qwen-image` config, which is Qwen-Image-2512:
+On mflux 0.19 and later the original checkpoint keeps its own variant in one case only: you build the model in Python and pass `ModelConfig.from_name("Qwen/Qwen-Image")` as its `model_config`. Every other route resolves against the `qwen-image` config, which is Qwen-Image-2512. The `mflux-generate-qwen` command never runs TeaCache, so the routes below matter for a Python `apply_teacache` call on a model loaded that way:
 
-- `mflux-generate-qwen` refuses `--model Qwen/Qwen-Image` (the command accepts only the config's aliases) and `--base-model Qwen/Qwen-Image`.
-- Any `--model-path` (in Python, `model_path`), whether a local directory or a downloaded mirror, resolves to the 2512 config, with or without `--base-model qwen-image`.
+- `mflux-generate-qwen --model Qwen/Qwen-Image` is accepted: the command treats a `--model` value it does not know as a path or repo id, loads the original weights, and resolves them on the 2512 config. On that command, `--base-model` accepts `qwen-image`, `qwen`, `qwen-image-2512`, `qwen-2512` and `Qwen/Qwen-Image-2512`, and refuses `Qwen/Qwen-Image` and the names of other model families.
+- A local directory or a mirror, passed as `--model PATH` on the command line or as `model_path` in Python, resolves to the 2512 config with or without a base model of `qwen-image`. The command has no `--model-path` flag. In Python this holds with the default `model_config`; passing `model_config=ModelConfig.from_name("Qwen/Qwen-Image")` keeps the original variant (per mflux 0.23.0's config resolution).
 - In Python, `ModelConfig.from_name()` on a mirror such as `mlx-community/Qwen-Image-4bit` with no base model also infers a 2512 copy.
 
 Nothing in the resolved config records that the weights came from the original checkpoint, so TeaCache detects them as 2512, uses this variant's coefficients and 0.25 default, and does not warn. To run original weights loaded that way on the original calibration, pass both its coefficients and its threshold:

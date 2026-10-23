@@ -42,7 +42,7 @@
     17,
     17
   ],
-  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/flux1-dev",
+  "bench_images_dir": "tests/_artifacts/bench_images/flux1-dev",
   "vanilla_peak_memory_gb": [
     10.828796565532684,
     10.828966986387968,

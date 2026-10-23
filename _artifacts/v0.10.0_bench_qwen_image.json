@@ -52,7 +52,7 @@
     4,
     4
   ],
-  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/qwen",
+  "bench_images_dir": "tests/_artifacts/bench_images/qwen",
   "vanilla_peak_memory_gb": [
     26.160133339464664,
     26.160082794725895,

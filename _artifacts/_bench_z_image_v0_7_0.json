@@ -42,7 +42,7 @@
     33,
     33
   ],
-  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/z-image",
+  "bench_images_dir": "tests/_artifacts/bench_images/z-image",
   "vanilla_peak_memory_gb": [
     17.178534120321274,
     17.178534120321274,

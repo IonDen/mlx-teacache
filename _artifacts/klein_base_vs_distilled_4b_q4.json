@@ -73,5 +73,5 @@
     "base_teacache_vs_distilled": 0.3844848319323087,
     "base_teacache_vs_base": 0.9330728366858212
   },
-  "images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/_artifacts/klein_base_vs_distilled/4b_q4"
+  "images_dir": "_artifacts/klein_base_vs_distilled/4b_q4"
 }

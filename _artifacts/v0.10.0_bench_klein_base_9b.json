@@ -52,7 +52,7 @@
     1,
     1
   ],
-  "bench_images_dir": "/Users/ionden/Documents/Work/mac/mlx-teacache/tests/_artifacts/bench_images/klein-base-9b",
+  "bench_images_dir": "tests/_artifacts/bench_images/klein-base-9b",
   "vanilla_peak_memory_gb": [
     21.851928742602468,
     21.996978010982275,

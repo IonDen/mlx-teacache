@@ -11,6 +11,9 @@ from mlx_teacache import errors as E
 CASES = [
     E.TeaCacheError("x"),
     E.IncompatibleModelError(actual_type="X", actual_model_name=None, supported=["a", "b"]),
+    E._StepCacheConflictError(
+        actual_type="X", actual_model_name=None, supported=[], requested="step_cache_ratio=0.5"
+    ),
     E.AlreadyPatchedError(variant_id="flux1-dev", rel_l1_thresh=0.2),
     E.CalibrationError(variant_id="v", reason="r"),
     E.TransformerShapeError(3, (1, 2), (1, 3)),

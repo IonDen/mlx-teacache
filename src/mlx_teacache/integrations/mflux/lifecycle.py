@@ -14,7 +14,9 @@ accepted for forward-compat with future mflux releases that add new keyword
 arguments (e.g., kontext_image).
 """
 
+import inspect
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -192,8 +194,15 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
         handle._original_generate_image = None
 
     original = flux.generate_image  # bound regardless of source
+    requested_step_cache = _step_cache_check(original)
 
     def wrapped(*args: Any, **kwargs: Any) -> Any:
+        # Refuse mflux's own step reuse before anything runs: nothing is staged,
+        # so the handle stays usable for the next call.
+        requested = requested_step_cache(args, kwargs)
+        if requested is not None:
+            raise _step_cache_conflict(flux, requested)
+
         # Verify our lifecycle callback is still registered
         # BEFORE the generation runs. If the user replaced or cleared
         # flux.callbacks after apply_teacache(), we must fail loudly rather than
@@ -255,6 +264,83 @@ def wrap_generate_image(flux: Any, handle: Any) -> None:
             handle._pending_finalize = None
 
     flux.generate_image = wrapped
+
+
+_STEP_CACHE_RATIOS = ("step_cache_ratio", "teacache_ratio")
+_STEP_CACHE_NAMES = (*_STEP_CACHE_RATIOS, "use_step_cache")
+
+_StepCacheCheck = Callable[[tuple[Any, ...], dict[str, Any]], str | None]
+
+
+def _step_cache_check(original: Callable[..., Any]) -> _StepCacheCheck:
+    """Build the per-call check for the generate_image arguments that turn on mflux's own step cache. The check
+    returns a description of them, or None when the call leaves the step cache off.
+
+    mflux's step cache and TeaCache both skip denoising steps; run together, TeaCache's step count falls behind the
+    schedule. On mflux 0.23.0 the step cache is wired only into Qwen-Image 2.1 (`step_cache_ratio`, its alias
+    `teacache_ratio`, and the edit model's `use_step_cache`), which mlx-teacache does not patch: no patched
+    generate_image accepts these arguments, so the check is dormant there and mflux raises its own TypeError for
+    them. It guards models that gain the step cache in a later mflux release. A ratio of None and
+    use_step_cache=False leave it off.
+
+    The original's signature is read once, here:
+    - it names any of the arguments: the call is bound to it with defaults applied, so a positional value or a
+      step cache that is on by default is caught too;
+    - it has no such parameter but takes **kwargs: the keyword names are checked;
+    - neither: nothing is checked, and the original raises its own TypeError for an unknown keyword.
+    A signature that cannot be read falls back to the keyword names."""
+    try:
+        signature = inspect.signature(original)
+    except (TypeError, ValueError):
+        return lambda _args, kwargs: _describe_step_cache(kwargs, defaulted=frozenset())
+    parameters = signature.parameters
+    if any(name in parameters for name in _STEP_CACHE_NAMES):
+
+        def bound_check(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
+            try:
+                bound = signature.bind_partial(*args, **kwargs)
+            except TypeError:
+                return None  # the original rejects this call itself, before running anything
+            passed = frozenset(bound.arguments)
+            bound.apply_defaults()
+            values = dict(bound.arguments)
+            for name, parameter in parameters.items():
+                if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+                    values.update(values.pop(name, {}))
+            defaulted = frozenset(
+                name for name in _STEP_CACHE_NAMES if name in parameters and name not in passed
+            )
+            return _describe_step_cache(values, defaulted=defaulted)
+
+        return bound_check
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+        return lambda _args, kwargs: _describe_step_cache(kwargs, defaulted=frozenset())
+    return lambda _args, _kwargs: None
+
+
+def _describe_step_cache(values: dict[str, Any], *, defaulted: frozenset[str]) -> str | None:
+    """`name=value` for each argument in `values` that turns the step cache on, joined; a value that came from the
+    signature's default is marked so. None when none does."""
+    on = [name for name in _STEP_CACHE_RATIOS if values.get(name) is not None]
+    if values.get("use_step_cache"):
+        on.append("use_step_cache")
+    parts = [f"{name}={values[name]!r}" + (" by default" if name in defaulted else "") for name in on]
+    return ", ".join(parts) if parts else None
+
+
+def _step_cache_conflict(flux: Any, requested: str) -> Exception:
+    """The IncompatibleModelError (private subclass) for a call that also asks for mflux's step cache; its message
+    names the argument and the two ways out. `supported` holds the variant id apply_teacache attached to the public
+    handle on `flux`, read now because the wrapper is built before that id is set."""
+    from mlx_teacache.errors import _StepCacheConflictError
+
+    variant_id = getattr(getattr(flux, "_teacache_handle", None), "variant_id", None)
+    return _StepCacheConflictError(
+        actual_type=type(flux).__name__,
+        actual_model_name=getattr(getattr(flux, "model_config", None), "model_name", None),
+        supported=[variant_id] if isinstance(variant_id, str) else [],
+        requested=requested,
+    )
 
 
 def _remove_callback_by_identity(registry: Any, target: Any) -> bool:

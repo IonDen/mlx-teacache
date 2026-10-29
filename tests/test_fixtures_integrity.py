@@ -1,15 +1,10 @@
 """Pin reference fixtures by SHA-256. Catches accidental fixture drift."""
 
 import hashlib
-import sys
+import tomllib
 from pathlib import Path
 
 import pytest
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 pytestmark = pytest.mark.parity
 

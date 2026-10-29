@@ -29,7 +29,7 @@ import sys
 import threading
 import traceback
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 GIB = 1024**3
@@ -128,7 +128,7 @@ def abort_handler(label: str, artifact_dir: Path | None = None) -> Callable[[dic
         target = artifact_dir if artifact_dir is not None else DEFAULT_ABORT_DIR
         target.mkdir(parents=True, exist_ok=True)
         (target / f"{label}.aborted.json").write_text(
-            json.dumps({"label": label, "at": datetime.now(timezone.utc).isoformat(), **payload}, indent=2)
+            json.dumps({"label": label, "at": datetime.now(UTC).isoformat(), **payload}, indent=2)
         )
 
     return _handler

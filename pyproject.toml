@@ -9,7 +9,7 @@ description = "TeaCache step-skipping for FLUX, Qwen-Image & Z-Image diffusion o
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Denis Ineshin", email = "denis.ineshin@gmail.com" }]
 keywords = [
     "mlx", "apple-silicon", "diffusion", "flux", "flux1", "flux2",
@@ -22,7 +22,6 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -31,7 +30,7 @@ classifiers = [
 dependencies = ["mlx>=0.31"]
 
 [project.optional-dependencies]
-mflux = ["mflux>=0.17.5,<0.26"]
+mflux = ["mflux>=0.24"]
 
 [project.urls]
 Homepage = "https://github.com/IonDen/mlx-teacache"
@@ -47,12 +46,11 @@ test-core = [
     "pytest-cov",
     "hypothesis>=6",
     "numpy",
-    'tomli>=2.0; python_version < "3.11"',
 ]
 test-mflux = [
     { include-group = "test-core" },
-    "mflux>=0.17.5,<0.26",
-    "mlx-taef>=0.1.1",
+    "mflux>=0.24",
+    "mlx-taef[mflux]>=0.9.0",
     "scikit-image",
 ]
 lint = ["ruff>=0.5"]
@@ -82,7 +80,7 @@ packages = ["src/mlx_teacache"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "TID"]
@@ -94,7 +92,7 @@ exclude = ["*.md"]  # ruff 0.16+ formats Markdown code blocks; docs/papers keeps
 [tool.mypy]
 strict = true
 files = ["src/mlx_teacache"]
-python_version = "3.10"
+python_version = "3.11"
 
 [[tool.mypy.overrides]]
 module = ["mflux.*", "mlx.*", "mlx_taef.*", "skimage.*", "lpips.*"]
@@ -127,7 +125,7 @@ filterwarnings = [
     "ignore::DeprecationWarning:huggingface_hub",
     "ignore::DeprecationWarning:hf_xet",
     # On an mflux newer than the newest verified release, apply_teacache warns once per process
-    # (TeaCacheUntestedMfluxWarning). The newest-in-range and mflux-main CI jobs run exactly that
+    # (TeaCacheUntestedMfluxWarning). The newest-mflux and mflux-main CI jobs run exactly that
     # setup, where the drift guard is the signal, so the warning is ignored here and asserted in
     # its own tests. Matched by message: a class path would import mlx_teacache while pytest reads
     # its config, before coverage starts.

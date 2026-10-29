@@ -1,9 +1,9 @@
 """A TeaCache-patched pipeline refuses a generate_image call that also turns on mflux's own step cache.
 
 Both skip denoising steps. Run together, TeaCache's step count falls behind the schedule, its last-step guard never
-fires and the run's stats are dropped. On mflux 0.23.0 the step cache exists only on Qwen-Image 2.1, which
-mlx-teacache does not patch, so these tests use FLUX.1 fakes whose generate_image takes the step-cache arguments
-(as named parameters, or through **kwargs) or does not take them at all.
+fires and the run's stats are dropped. On mflux 0.23.0 and 0.24.0 the step cache exists only on models mlx-teacache
+does not patch (Qwen-Image 2.1, and on 0.24.0 also FIBO 2 and MOSS-Image), so these tests use FLUX.1 fakes whose
+generate_image takes the step-cache arguments (as named parameters, or through **kwargs) or does not take them at all.
 """
 
 import importlib
@@ -62,7 +62,7 @@ def _named_params_fake(default_ratio: float | None = None) -> tuple[Any, list[di
 
 def _no_step_cache_fake() -> Any:
     """A FLUX.1 fake whose generate_image takes neither the step-cache parameters nor **kwargs, the shape of every
-    generate_image mlx-teacache patches on mflux 0.23.0."""
+    generate_image mlx-teacache patches on mflux 0.23.0 and 0.24.0."""
     flux = make_flux1_fake()
     inner = flux.generate_image
 
@@ -233,7 +233,7 @@ def test_a_step_cache_that_is_on_by_default_is_refused_with_how_to_turn_it_off()
 def test_a_model_without_the_step_cache_parameters_raises_its_own_type_error() -> None:
     """Bug caught: the guard refuses a keyword the patched generate_image does not take, replacing mflux's
     TypeError with advice to restore() for a step cache that model does not have (every patched model on mflux
-    0.23.0)."""
+    0.23.0 and 0.24.0)."""
     flux = _no_step_cache_fake()
     apply_teacache(flux, rel_l1_thresh=0.2)
     with pytest.raises(TypeError, match="unexpected keyword argument 'step_cache_ratio'"):

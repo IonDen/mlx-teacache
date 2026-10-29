@@ -5,7 +5,7 @@ import importlib.metadata
 import importlib.util
 import inspect
 import re
-import sys
+import tomllib
 import warnings
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
@@ -18,13 +18,8 @@ import mlx_teacache._mflux_versions as versions
 from mlx_teacache import IncompatibleModelError, TeaCacheUntestedMfluxWarning, apply_teacache
 from tests._fakes import FaithfulCallbackRegistry
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
-
-
-# The next minor release after the newest verified one: newer than verified, still inside the [mflux] range.
+# The next minor release after the newest verified one: newer than verified, and allowed by the [mflux] extra,
+# which has no upper bound.
 _VERIFIED = versions.release_tuple(versions.NEWEST_VERIFIED_MFLUX)
 assert _VERIFIED is not None
 _MAJOR, _MINOR, *_ = _VERIFIED
@@ -116,7 +111,7 @@ def test_warning_points_at_the_callers_line(installed_mflux) -> None:
 
 
 def test_every_other_test_starts_with_the_warning_already_shown() -> None:
-    """Bug: the autouse conftest fixture is dropped, so on a newer mflux (the newest-in-range and mflux-main CI jobs)
+    """Bug: the autouse conftest fixture is dropped, so on a newer mflux (the newest-mflux and mflux-main CI jobs)
     the once-per-process warning fires inside whichever unrelated test applies first and breaks its warning
     assertions depending on test order."""
     assert versions._warned is True

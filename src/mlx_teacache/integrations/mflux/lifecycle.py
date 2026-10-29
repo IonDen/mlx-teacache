@@ -277,11 +277,11 @@ def _step_cache_check(original: Callable[..., Any]) -> _StepCacheCheck:
     returns a description of them, or None when the call leaves the step cache off.
 
     mflux's step cache and TeaCache both skip denoising steps; run together, TeaCache's step count falls behind the
-    schedule. On mflux 0.23.0 the step cache is wired only into Qwen-Image 2.1 (`step_cache_ratio`, its alias
-    `teacache_ratio`, and the edit model's `use_step_cache`), which mlx-teacache does not patch: no patched
-    generate_image accepts these arguments, so the check is dormant there and mflux raises its own TypeError for
-    them. It guards models that gain the step cache in a later mflux release. A ratio of None and
-    use_step_cache=False leave it off.
+    schedule. On mflux 0.23.0 and 0.24.0 the step cache is wired only into models mlx-teacache does not patch
+    (Qwen-Image 2.1 with `step_cache_ratio`, its alias `teacache_ratio`, and the edit model's `use_step_cache`;
+    on 0.24.0 also FIBO 2 and MOSS-Image): no patched generate_image accepts these arguments, so the check is
+    dormant there and mflux raises its own TypeError for them. It guards models that gain the step cache in a later
+    mflux release. A ratio of None and use_step_cache=False leave it off.
 
     The original's signature is read once, here:
     - it names any of the arguments: the call is bound to it with defaults applied, so a positional value or a

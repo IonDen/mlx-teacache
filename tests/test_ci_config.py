@@ -2,15 +2,10 @@ import json
 import os
 import re
 import subprocess
-import sys
+import tomllib
 from pathlib import Path
 
 import pytest
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 _REPO_ROOT = Path(__file__).parent.parent
 _CI_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -20,7 +15,7 @@ _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 # The single source of truth for "which Pythons do we claim to support".
 # Every surface below must agree with it, so a widened floor can never ship
 # untested (the CI matrix entry IS the test for a version).
-SUPPORTED_PYTHONS = ("3.10", "3.11", "3.12", "3.13")
+SUPPORTED_PYTHONS = ("3.11", "3.12", "3.13")
 
 
 def _pyproject() -> dict:
@@ -106,12 +101,13 @@ def test_readme_requires_line_states_the_floor() -> None:
     assert f"Requires Python ≥ {SUPPORTED_PYTHONS[0]}" in readme
 
 
-# The mflux range lives in five places. pyproject's [mflux] extra is the source of truth;
-# the test-mflux group, the CI job that installs the newest in-range mflux, and the README
-# must quote the same range. A partial bump is the failure this catches: a CI line left at
-# the old upper bound keeps the "newest in range" job testing the previous minor, so a new
-# mflux never reaches the drift guard. CHANGELOG / ROADMAP ranges are history and exempt.
-_MFLUX_RANGE = re.compile(r">=\d+(?:\.\d+)*,<\d+(?:\.\d+)*")
+# The mflux requirement lives in five places. pyproject's [mflux] extra is the source of truth;
+# the test-mflux group, the CI job that installs the newest mflux, and the README must quote the
+# same spec. The extra has a floor and no upper bound: a newer mflux installs, runs and warns once.
+# The spec pattern also matches a `,<` bound so a leftover ceiling on any surface shows up as a
+# mismatch instead of being skipped. CHANGELOG / ROADMAP ranges are history and exempt.
+_MFLUX_SPEC = r">=\d+(?:\.\d+)*(?:,<\d+(?:\.\d+)*)?"
+_FLOOR_ONLY = re.compile(r">=(\d+(?:\.\d+)*)")
 
 
 def _mflux_extra_range() -> str:
@@ -120,22 +116,35 @@ def _mflux_extra_range() -> str:
     return spec.removeprefix("mflux")
 
 
-def test_test_mflux_group_pins_the_same_mflux_range_as_the_extra() -> None:
+def _group_mflux_specs() -> set[str]:
     group = _pyproject()["dependency-groups"]["test-mflux"]
-    mflux_specs = [s for s in group if isinstance(s, str) and s.startswith("mflux")]
-    assert mflux_specs == [f"mflux{_mflux_extra_range()}"]
+    return {s.removeprefix("mflux") for s in group if isinstance(s, str) and s.startswith("mflux")}
 
 
-def test_ci_newest_in_range_job_installs_the_extra_range() -> None:
+def _ci_mflux_specs() -> set[str]:
     live = "\n".join(line.split("#", 1)[0] for line in _CI_WORKFLOW.read_text().splitlines())
-    ci_ranges = {
-        m.group(0) for m in _MFLUX_RANGE.finditer(live) if "mflux" in live[max(0, m.start() - 6) : m.start()]
+    return {
+        m.group(0)
+        for m in re.finditer(_MFLUX_SPEC, live)
+        if "mflux" in live[max(0, m.start() - 6) : m.start()]
     }
-    assert ci_ranges == {_mflux_extra_range()}
+
+
+def _readme_mflux_specs() -> set[str]:
+    readme = (_REPO_ROOT / "README.md").read_text()
+    return set(re.findall(rf"`(?:mflux)?({_MFLUX_SPEC})`", readme))
+
+
+def test_test_mflux_group_pins_the_same_mflux_range_as_the_extra() -> None:
+    assert _group_mflux_specs() == {_mflux_extra_range()}
+
+
+def test_ci_newest_mflux_job_installs_the_extra_range() -> None:
+    assert _ci_mflux_specs() == {_mflux_extra_range()}
 
 
 def test_ci_runs_daily_on_a_schedule() -> None:
-    """Bug: the schedule trigger is dropped, so the newest-in-range and mflux-main jobs only run on a push or a
+    """Bug: the schedule trigger is dropped, so the newest-mflux and mflux-main jobs only run on a push or a
     pull request and a new mflux release goes unnoticed until someone happens to push."""
     live = [line.split("#", 1)[0].rstrip() for line in _CI_WORKFLOW.read_text().splitlines()]
     on_block = live[live.index("on:") + 1 : live.index("permissions:")]
@@ -144,19 +153,86 @@ def test_ci_runs_daily_on_a_schedule() -> None:
 
 
 def test_readme_quotes_only_the_extra_mflux_range() -> None:
-    readme = (_REPO_ROOT / "README.md").read_text()
-    quoted = set(re.findall(r"`(?:mflux)?(>=\d+(?:\.\d+)*,<\d+(?:\.\d+)*)`", readme))
-    assert quoted == {_mflux_extra_range()}
+    assert _readme_mflux_specs() == {_mflux_extra_range()}
 
 
-def test_mflux_upper_bound_sits_two_minors_past_the_newest_verified_release() -> None:
-    """Bug: NEWEST_VERIFIED_MFLUX moves to a new release while the extra keeps the old upper bound (or the bound
-    widens with no newly verified release), so 'two minor versions past the verified one' (0.21 -> <0.24) drifts."""
-    from mlx_teacache._mflux_versions import NEWEST_VERIFIED_MFLUX
+def test_mflux_requirement_is_a_verified_floor_with_no_upper_bound() -> None:
+    """Bug: a `,<0.26` ceiling is left on (or comes back to) one surface, the [mflux] extra, the test-mflux group,
+    the CI newest-mflux install or the README, so pip refuses the next mflux release and the daily newest-mflux job
+    never tests it. Also catches a floor raised past NEWEST_VERIFIED_MFLUX (`mflux>=0.25` while 0.24.0 is the newest
+    verified), which would admit only releases this version was never verified on."""
+    from mlx_teacache._mflux_versions import NEWEST_VERIFIED_MFLUX, release_tuple
 
-    major, minor = (int(part) for part in NEWEST_VERIFIED_MFLUX.split(".")[:2])
-    upper = _mflux_extra_range().split(",<", 1)[1]
-    assert upper == f"{major}.{minor + 3}"
+    surfaces = {
+        "[mflux] extra": {_mflux_extra_range()},
+        "test-mflux group": _group_mflux_specs(),
+        "ci.yml": _ci_mflux_specs(),
+        "README": _readme_mflux_specs(),
+    }
+    for surface, specs in surfaces.items():
+        assert specs, f"{surface} quotes no mflux requirement"
+        for spec in specs:
+            assert _FLOOR_ONLY.fullmatch(spec), f"{surface}: {spec!r} is not a bare >= floor"
+    match = _FLOOR_ONLY.fullmatch(_mflux_extra_range())
+    assert match is not None
+    floor, verified = release_tuple(match.group(1)), release_tuple(NEWEST_VERIFIED_MFLUX)
+    assert floor is not None and verified is not None
+    assert floor <= verified
+
+
+# `[mflux]` is the extra's name on another requirement (`mlx-teacache[mflux]<0.15`), so its bound is not on mflux;
+# `mflux-teacache` and `mflux_x` are other names. A ceiling is `<` or `<=`, with or without a space before the digit.
+_MFLUX_CEILING = re.compile(r"(?<!\[)mflux(?![\]\w-])[^\n]{0,20}<=?\s*\d")
+
+
+def _mflux_ceiling_lines(lines: list[str]) -> list[str]:
+    """Lines that put an upper bound on mflux, skipping `[mflux]` used as an extra's name."""
+    return [line for line in lines if _MFLUX_CEILING.search(line)]
+
+
+@pytest.mark.parametrize(
+    ("line", "flagged"),
+    [
+        ('uv pip install "mflux<0.26"', True),
+        ('uv pip install "mflux>=0.24" "mflux<0.26"', True),
+        ("mflux 0.24 up to <0.26", True),
+        ("mflux" + "." * 20 + "<0.26", True),
+        ("mflux" + "." * 21 + "<0.26", False),
+        ('stay on the 0.14 line: `pip install "mlx-teacache[mflux]<0.15"`', False),
+        ('uv pip install "mflux>=0.24"', False),
+        ("mflux >= 0.24, < 0.26", True),
+        ("mflux < 0.26", True),
+        ("mflux<=0.25", True),
+        ("mflux-teacache<0.2", False),
+    ],
+)
+def test_ceiling_scan_flags_mflux_bounds_not_the_extra_name(line: str, flagged: bool) -> None:
+    """Bug: the ceiling scan skips a separate `mflux<X` constraint (so a ceiling hides beside the bare floor), or it
+    flags `mlx-teacache[mflux]<0.15`, where the bound is on mlx-teacache and `mflux` is only the extra's name."""
+    assert _mflux_ceiling_lines([line]) == ([line] if flagged else [])
+
+
+def test_no_live_ci_line_or_readme_line_states_an_mflux_ceiling() -> None:
+    """Bug: a ceiling comes back as its own constraint (`"mflux<0.26"` next to `"mflux>=0.24"` in ci.yml) or as
+    README prose (`mflux 0.24 up to <0.26`), which the spec-shaped surface check above does not read."""
+    ci_live = [line.split("#", 1)[0] for line in _CI_WORKFLOW.read_text().splitlines()]
+    readme = (_REPO_ROOT / "README.md").read_text().splitlines()
+    assert _mflux_ceiling_lines(ci_live) == []
+    assert _mflux_ceiling_lines(readme) == []
+
+
+def test_ci_floor_job_installs_and_asserts_the_extra_floor() -> None:
+    """Bug: the extra's floor moves while test-mflux-floor still pins and asserts the old one (`mflux==0.17.5`
+    under `mflux>=0.24`), so the advertised floor is never tested."""
+    from mlx_teacache._mflux_versions import release_tuple
+
+    block = [ln.strip() for ln in _job_block(_CI_WORKFLOW.read_text(), "test-mflux-floor")]
+    pins = [m.group(1) for ln in block for m in re.finditer(r'"mflux==(\d+(?:\.\d+)*)"', ln)]
+    asserted = [m.group(1) for ln in block for m in re.finditer(r"v\.startswith\('(\d+(?:\.\d+)*)'\)", ln)]
+    floor = _FLOOR_ONLY.fullmatch(_mflux_extra_range())
+    assert floor is not None
+    assert len(pins) == 1 and asserted == pins
+    assert release_tuple(pins[0]) == release_tuple(floor.group(1))
 
 
 def _job_block(workflow: str, job: str) -> list[str]:
@@ -177,6 +253,31 @@ def test_parity_job_raises_the_wall_backstop_to_twelve_hours() -> None:
     block = _job_block(_CI_WORKFLOW.read_text(), "test-parity")
     env_values = [line.strip() for line in block if line.strip().startswith("PYTEST_PARITY_WALL_S:")]
     assert env_values == ['PYTEST_PARITY_WALL_S: "43200"']
+
+
+def _jobs_installing_outside_the_lock(workflow: str) -> list[str]:
+    """Top-level job ids whose comment-stripped block runs `uv pip install`."""
+    lines = [line.split("#", 1)[0].rstrip() for line in workflow.splitlines()]
+    jobs = lines[lines.index("jobs:") + 1 :]
+    ids = [m.group(1) for line in jobs if (m := re.fullmatch(r"  ([\w-]+):", line))]
+    return [job for job in ids if any("uv pip install" in line for line in _job_block(workflow, job))]
+
+
+def test_unlocked_mflux_jobs_carry_a_timeout_below_the_six_hour_default() -> None:
+    """Bug: a job that installs mflux outside the lock (`uv pip install`) has no job-level timeout-minutes, so a
+    broken or hostile wheel that hangs keeps the runner busy for GitHub's 360-minute default. The job list is read
+    from the workflow, so a new unlocked job (or test-mflux-floor losing its timeout) cannot slip past a fixed list;
+    the non-empty check catches the parser silently finding no job at all."""
+    workflow = _CI_WORKFLOW.read_text()
+    unlocked = _jobs_installing_outside_the_lock(workflow)
+    assert unlocked, "no job runs `uv pip install`; the job parser found nothing"
+    for job in unlocked:
+        block = _job_block(workflow, job)
+        values = [
+            int(m.group(1)) for line in block if (m := re.fullmatch(r"    timeout-minutes: (\d+)", line))
+        ]
+        assert len(values) == 1, f"{job} job-level timeout-minutes: {values}"
+        assert 0 < values[0] < 360, f"{job} timeout-minutes: {values[0]}"
 
 
 _QWEN_PARITY_FILE = "tests/test_parity_qwen.py"
@@ -559,59 +660,12 @@ def test_ci_runs_a_non_blocking_fast_lane_against_mflux_main() -> None:
     assert block[failure_at + 1] == 'run: echo "::warning::mflux main broke the fast lane"'
 
 
-# ---- Audit: pillow 12.x is skipped (and announced) while the lock cannot move to pillow 13 ----
-
-
-def _audit_pillow_filter() -> list[str]:
-    """The audit step's `if ... fi` filter block, dedented, as shell lines."""
+def test_audit_checks_every_locked_package() -> None:
+    """Bug: a package exclusion stays in the audit step after its reason is gone (the pillow 12 skip,
+    `grep -v '^pillow=='` on the exported requirements), so that package's advisories are never reported."""
     block = [ln.strip() for ln in _job_block(_CI_WORKFLOW.read_text(), "audit")]
-    start = next(i for i, ln in enumerate(block) if ln.startswith("if "))
-    return block[start : block.index("fi", start) + 1]
-
-
-def _run_audit_filter(tmp_path: Path, req: str) -> tuple[str, str]:
-    """Run the filter on a req.txt body; return (resulting req.txt, stdout)."""
-    (tmp_path / "req.txt").write_text(req)
-    script = "\n".join(_audit_pillow_filter())
-    proc = subprocess.run(
-        ["bash", "-ec", script],
-        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return (tmp_path / "req.txt").read_text(), proc.stdout
-
-
-_SAMPLE_REQ = "mlx==0.32.2\npillow=={pil} ; python_full_version >= '3.10'\npillow-heif==1.0\nnumpy==2.0.0\n"
-
-
-def test_audit_drops_pillow_and_announces_it_while_the_lock_pins_pillow_12(tmp_path: Path) -> None:
-    """Bug: the audit stays red on pillow 12.3.0 advisories that only 13.0.0 fixes (the lock cannot move: mflux
-    0.23.0 breaks under pillow 13), or the skip happens silently and nobody knows pillow is unaudited. Also catches
-    a filter that is too broad: pillow-heif and every other package must stay in the audited set."""
-    req, out = _run_audit_filter(tmp_path, _SAMPLE_REQ.format(pil="12.3.0"))
-    assert req == "mlx==0.32.2\npillow-heif==1.0\nnumpy==2.0.0\n"
-    assert out.startswith("::notice::")
-    assert "pillow 12" in out
-
-
-def test_audit_keeps_pillow_without_a_notice_once_the_lock_moves_to_pillow_13(tmp_path: Path) -> None:
-    """Bug: the skip is unconditional, so pillow 13+ would stay unaudited forever after the lock moves."""
-    body = _SAMPLE_REQ.format(pil="13.0.0")
-    req, out = _run_audit_filter(tmp_path, body)
-    assert req == body
-    assert out == ""
-
-
-def test_audit_pillow_skip_is_gated_on_pillow_12_and_explained_in_the_workflow() -> None:
-    """Bug: the skip condition matches any pillow version (e.g. `^pillow==`), the notice loses its reason, or the
-    removal condition is not written next to the code."""
-    text = _CI_WORKFLOW.read_text()
-    block = _audit_pillow_filter()
-    assert r"^pillow==12\." in block[0]
-    assert "::notice::" in "\n".join(block)
-    audit = text[text.index("  audit:") : text.index("  coverage:")]
-    assert "pull/890" in audit
-    assert "13.0.0" in audit
-    assert "ends by itself" in audit
+    touching_req = [ln for ln in block if "req" in ln]
+    assert touching_req == [
+        'uv export --frozen --all-groups --all-extras --no-hashes > "$RUNNER_TEMP/req.txt"',
+        'uvx pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --disable-pip --desc off',
+    ]

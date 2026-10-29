@@ -5,7 +5,7 @@
 </p>
 
 [![PyPI version](https://img.shields.io/pypi/v/mlx-teacache.svg)](https://pypi.org/project/mlx-teacache/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://pypi.org/project/mlx-teacache/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://pypi.org/project/mlx-teacache/)
 [![License: Apache 2.0](https://img.shields.io/pypi/l/mlx-teacache.svg)](https://github.com/IonDen/mlx-teacache/blob/main/LICENSE)
 [![CI](https://github.com/IonDen/mlx-teacache/actions/workflows/ci.yml/badge.svg)](https://github.com/IonDen/mlx-teacache/actions/workflows/ci.yml)
 
@@ -53,14 +53,15 @@ uv add "mlx-teacache[mflux]"
 ```
 
 ```bash
-pip install "mlx-teacache[mflux]==0.14.1"  # pin for reproducibility
+pip install "mlx-teacache[mflux]==0.15.0"  # pin for reproducibility
 ```
 
-Requires Python ≥ 3.10 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.17.5,<0.26`. Version notes:
+Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.24`. Version notes:
 
-- With pillow 13.0.0 on Python 3.11 to 3.14, every mflux release up to 0.23.0 fails when you import its model classes or run its commands, because mflux reads a private pillow module that pillow 13 broke. The fix is merged in mflux ([PR 890](https://github.com/mflux-community/mflux/pull/890)) but not yet released; until then, install `pillow<13` alongside.
-- mflux 0.19 and newer need MLX 0.32 and torch 2.13 or newer (torch and opencv have been mflux dependencies since before 0.18).
-- For mlx-taef's live preview on mflux 0.19 or newer, use mlx-taef 0.8.1 or later. mlx-taef 0.8.3's own `[mflux]` extra still pins `mflux<0.21`, so installing `mlx-teacache[mflux]` and `mlx-taef[mflux]` together resolves to mflux 0.20. To use the live preview with mflux 0.21 or newer, install `mlx-taef` without its `[mflux]` extra next to `mlx-teacache[mflux]`; mlx-taef's mflux integration imports on 0.21 through 0.23, and only the extra's version bound blocks the resolver.
+- mlx-teacache 0.15.0 needs Python 3.11 or newer and mflux 0.24 or newer; there is no upper bound on mflux. A newer mflux installs and is patched, but has not been tested; `apply_teacache` warns until it is. mflux 0.24.0 itself needs Python 3.11 and Pillow 13, which fixes a critical Pillow security advisory ([GHSA-5x8w-8jj5-q52h](https://github.com/advisories/GHSA-5x8w-8jj5-q52h); Pillow 12.3 and older are affected), so an install with the `[mflux]` extra gets the fixed Pillow through mflux. The base install pulls in neither mflux nor Pillow.
+- Python 3.10 and mflux 0.17.5 through 0.23.x are no longer supported. If you need either, stay on the 0.14 line: `pip install "mlx-teacache[mflux]<0.15"`. Its last release, 0.14.1, still runs on mflux 0.24 but prints the untested-version warning there.
+- mflux 0.24 needs MLX 0.32 (below 0.33), torch 2.13 or newer, opencv-python, Pillow 13 or newer and Python 3.11 or newer.
+- For mlx-taef's live preview, use mlx-taef 0.9.0 or later. Its `[mflux]` extra supports mflux 0.24, so `mlx-teacache[mflux]` and `mlx-taef[mflux]>=0.9.0` install together.
 - From mflux 0.19 on, the `qwen-image` alias loads `Qwen/Qwen-Image-2512`. Since mlx-teacache 0.14.0 that checkpoint has its own variant and calibration, so `apply_teacache` no longer warns about it. The original `Qwen/Qwen-Image` keeps its own variant only when you build it in Python with `ModelConfig.from_name("Qwen/Qwen-Image")` (see the Qwen-Image notes under [Supported models](#supported-models)). The separate Qwen-Image-2.1 model (mflux 0.20 and later, Qwen Research License, non-commercial) is not a supported variant.
 
 ## From the mflux command line
@@ -334,7 +335,7 @@ The PR-gate prompt is the red-apple one; SSIM ≥ 0.90 on FLUX.1-dev and ≥ 0.8
 
 ## Performance by chip
 
-mflux wraps `_predict` in `mx.compile` on every Apple Silicon chip *except* base + Pro M1/M2 (the behaviour is unchanged from mflux 0.17.5 through 0.23). The `is_m1_or_m2()` predicate returns true (eager path) when the chip brand contains "Apple M1" or "Apple M2" *and* does not contain "Max" or "Ultra" — so M1 Pro and M2 Pro are eager too, while M1/M2 Max + Ultra and every M3/M4/M5 chip get the compiled path. mlx-teacache replaces `_predict` with an eager closure so per-step gating stays live, trading the compile gain for the skip gain on compiled chips. That compile-avoidance effect applies to FLUX.2 Klein and Z-Image (mflux compiles Z-Image's `_predict` behind the same chip check); FLUX.1, FLUX.1 Krea, and Qwen-Image have no `mx.compile` path, so their step-skipping speedup is the same on every chip. See `docs/m3-plus-tradeoff.md` for a benchmark recipe.
+mflux wraps `_predict` in `mx.compile` on every Apple Silicon chip *except* base + Pro M1/M2 (the behaviour is unchanged from mflux 0.17.5 through 0.24). The `is_m1_or_m2()` predicate returns true (eager path) when the chip brand contains "Apple M1" or "Apple M2" *and* does not contain "Max" or "Ultra" — so M1 Pro and M2 Pro are eager too, while M1/M2 Max + Ultra and every M3/M4/M5 chip get the compiled path. mlx-teacache replaces `_predict` with an eager closure so per-step gating stays live, trading the compile gain for the skip gain on compiled chips. That compile-avoidance effect applies to FLUX.2 Klein and Z-Image (mflux compiles Z-Image's `_predict` behind the same chip check); FLUX.1, FLUX.1 Krea, and Qwen-Image have no `mx.compile` path, so their step-skipping speedup is the same on every chip. See `docs/m3-plus-tradeoff.md` for a benchmark recipe.
 
 | Chip | Vanilla `_predict` in mflux | Expected speedup |
 |---|---|---|
@@ -361,7 +362,7 @@ The wrapper runs eager, which gives up mflux's `mx.compile` of `_predict` in exc
 
 FLUX.2 parity is numerical, not bit-exact. Replacing a function that mflux wraps in `mx.compile` produces about 1 ULP per element of divergence from Metal kernel-dispatch noise, which compounds across steps but keeps cosine similarity ≥ 0.97 on Klein 4B, Klein 9B, and base-4b under CFG at threshold 0. The user-facing guarantee is end-to-end image quality (SSIM ≥ 0.85 on all supported FLUX.2 variants at the package default threshold).
 
-Fingerprints are recorded for mflux 0.17.5, 0.18.0, 0.18.1, 0.19.1, 0.19.2, 0.20.0, 0.21.0, 0.22.0 and 0.23.0, and the `[mflux]` range spans them; 0.21.0 was also checked on real weights for Z-Image. For 0.22.0 the checks are the fingerprints, a weight-free Qwen-Image test and a real-weights check of FLUX.1-dev, which is bit-identical to plain mflux at threshold 0. 0.23.0 changed none of the functions TeaCache copies; on it, FLUX.1-dev and Qwen-Image-2512 were run on real weights to check that the transformer is freed under mflux's memory saver, and Qwen-Image-2512's own calibration and threshold sweep also ran on 0.23.0. The range also allows the next two minor versions, so mflux 0.24 and 0.25 install without waiting for a release here. On an mflux newer than 0.23.0 (0.23.1 included), `apply_teacache` emits a `TeaCacheUntestedMfluxWarning` once per process and still patches the model; if a generation fails or looks wrong there, please open an issue with both version numbers.
+Fingerprints are recorded for mflux 0.17.5, 0.18.0, 0.18.1, 0.19.1, 0.19.2, 0.20.0, 0.21.0, 0.22.0, 0.23.0 and 0.24.0; 0.21.0 was also checked on real weights for Z-Image. For 0.22.0 the checks are the fingerprints, a weight-free Qwen-Image test and a real-weights check of FLUX.1-dev, which is bit-identical to plain mflux at threshold 0. 0.23.0 changed none of the functions TeaCache copies; on it, FLUX.1-dev and Qwen-Image-2512 were run on real weights to check that the transformer is freed under mflux's memory saver, and Qwen-Image-2512's own calibration and threshold sweep also ran on 0.23.0. On 0.24.0 the offline test suite (the parity, slow, benchmark and network tests deselected) passed with no model weights loaded, and the functions TeaCache copies or wraps match 0.23.0 in the denoising steps and transformer forwards. In FLUX.2 Klein's and Z-Image's `generate_image`, only code outside the denoising loop changed. Klein gained a check that refuses `pid_decode` together with `small_decoder`, plus extra image metadata; Z-Image gained only extra image metadata. Image-level checks on real weights were not re-run on 0.24.0. The `[mflux]` extra has no upper bound, so a newer mflux installs without waiting for a release here. On an mflux newer than 0.24.0 (0.24.1 included), `apply_teacache` emits a `TeaCacheUntestedMfluxWarning` once per process and still patches the model; if a generation fails or looks wrong there, please open an issue with both version numbers.
 
 On FLUX.1 and Qwen-Image the wrapper replaces `flux.transformer` with a proxy that the parent model's parameter tree does not reach. Calling `flux.parameters()`, `nn.quantize(flux)` or `flux.update(...)` at the parent level can therefore miss the transformer while the wrapper is active. Use `flux.transformer.parameters()` directly, or call `handle.restore()` first. Calls on the transformer itself work: `flux.transformer.load_weights(...)`, `set_dtype`, `eval()` and `nn.quantize(flux.transformer)`. When mflux's memory saver drops the transformer after the denoising loop (`model.transformer = None`), TeaCache keeps no copy of it, and a later `handle.restore()` leaves `flux.transformer` as `None` while undoing the rest of the patch, the same state plain mflux leaves.
 

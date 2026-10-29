@@ -39,7 +39,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -434,7 +434,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
 
     arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=args.headroom_gib)
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
     save_path = Path(args.save_to) if args.save_to else None
 
     flux = _load_klein(recipe.model_config_name, quantize)
@@ -497,7 +497,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         "cache_memory_gb": int(mx.get_cache_memory()) / 1024**3,
         "stats_summary": stats_summary,
         "started_at": started_at,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
         "provenance": _provenance(),
     }
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
@@ -528,7 +528,7 @@ def _mlx_teacache_version() -> str:
 
 def _provenance() -> dict[str, str]:
     return {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
         "mlx_teacache_version": _mlx_teacache_version(),
         "mflux_version": _mflux_version(),
     }
@@ -723,7 +723,7 @@ def _build_report(
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
         "size": size,
         "quantize": quantize_label(quantize),
         "prompt": PROMPT,

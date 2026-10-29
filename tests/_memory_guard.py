@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -256,7 +256,7 @@ def arm_parity_guard(
 
     def _write(payload: dict[str, Any]) -> None:
         target.mkdir(parents=True, exist_ok=True)
-        record = {"label": PARITY_LABEL, "at": datetime.now(timezone.utc).isoformat(), **payload}
+        record = {"label": PARITY_LABEL, "at": datetime.now(UTC).isoformat(), **payload}
         (target / f"{PARITY_LABEL}.aborted.json").write_text(json.dumps(record, indent=2))
 
     def _on_memory_abort(payload: dict[str, int]) -> None:

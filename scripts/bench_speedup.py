@@ -93,7 +93,7 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -303,7 +303,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         print(f"{WORKER_RESULT_SENTINEL}{json.dumps({**abort, **payload})}", flush=True)
 
     arm_mlx_watchdog(on_abort=_on_abort, headroom_gib=args.headroom_gib)
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
     recipe = _VARIANT_RECIPE[variant]
     num_inference_steps: int = (
         args.num_inference_steps if args.num_inference_steps is not None else recipe["num_inference_steps"]
@@ -393,7 +393,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         "elapsed_s": elapsed,
         "memory_saver": _memory_saver_for(variant),
         "started_at": started_at,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
         **_memory_fields(
             load_peak_bytes=load_peak, loop_peak_bytes=loop_peak, cache_bytes=int(mx.get_cache_memory())
         ),

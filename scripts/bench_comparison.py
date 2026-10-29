@@ -27,7 +27,7 @@ import sys
 import time
 import warnings
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -954,7 +954,7 @@ def _finalize(slug: str, *, export_jpg: bool = False) -> None:
         )
     if export_jpg:
         export_jpgs(raw, REPO / "_artifacts" / "comparison" / slug)
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
     provenance = {
         "generated_at": generated_at,
         "git_sha_a": a["git_sha"],

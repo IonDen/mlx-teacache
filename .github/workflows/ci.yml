@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "23 5 * * *"  # daily, so the newest-in-range and mflux-main jobs notice a new mflux release without a push
+    - cron: "23 5 * * *"  # daily, so the newest-mflux and mflux-main jobs notice a new mflux release without a push
   workflow_dispatch:  # allows the parity job to be triggered manually
 
 permissions:
@@ -48,7 +48,8 @@ jobs:
     # core" job runs on macOS. The "pure" qualifier here means the [mflux]
     # extra is NOT installed — we still need MLX itself as a hard dependency.
     # Runs on the floor interpreter so the mflux-free import contract is
-    # proven at 3.10 (the test-mflux matrix covers 3.11-3.13 on its side).
+    # proven at 3.11, the lowest supported Python (the test-mflux matrix
+    # covers 3.11-3.13 with mflux installed).
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,7 +57,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.10"
+          python-version: "3.11"
       - name: Install uv
         run: pip install uv
       - name: Install test-core (NO mflux extra)
@@ -72,7 +73,7 @@ jobs:
     runs-on: macos-15
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,6 +94,7 @@ jobs:
 
   test-mflux-floor:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,17 +106,18 @@ jobs:
         run: pip install uv
       # Sync from uv.lock, then reinstall mflux. `uv pip install` re-resolves mflux's own dependencies,
       # so mlx and others can move off the lock too.
-      - name: Install test-mflux, then pin mflux to the floor (0.17.5)
+      - name: Install test-mflux, then pin mflux to the floor (0.24.0)
         run: |
           uv sync --locked --group test-mflux
-          uv pip install "mflux==0.17.5"
+          uv pip install "mflux==0.24.0"
       - name: Verify floor version + run fast mflux lane (no re-sync, no coverage)
         run: |
-          uv run --no-sync python -c "import importlib.metadata as m; v=m.version('mflux'); print('mflux', v); assert v.startswith('0.17.5'), v"
+          uv run --no-sync python -c "import importlib.metadata as m; v=m.version('mflux'); print('mflux', v); assert v.startswith('0.24.0'), v"
           uv run --no-sync pytest -m "not parity and not slow and not benchmark and not network"
 
   test-mflux-latest:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,19 +127,17 @@ jobs:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
-      # The fast lane, drift guard included, against the newest mflux the [mflux] extra allows.
-      # A release newer than the newest verified one passes the drift guard while none of the
+      # The fast lane, drift guard included, against the newest mflux release (the [mflux] extra has
+      # no upper bound). Runs on the daily schedule, so each new release is tested offline within a
+      # day. A release newer than the newest verified one passes the drift guard while none of the
       # fingerprinted functions moved, and turns this job red when one did; record its row
       # after a real-weights parity run.
       # Sync from uv.lock, then reinstall mflux. `uv pip install` re-resolves mflux's own dependencies,
       # so mlx and others can move off the lock too.
-      # pillow<13: every mflux release up to 0.23.0 imports PIL._typing, which fails to import under pillow 13.0.0
-      # on Python < 3.15. Fixed in mflux by https://github.com/mflux-community/mflux/pull/890; drop the
-      # constraint once a release containing it is the newest in range.
-      - name: Install test-mflux, then upgrade mflux to the newest in-range
+      - name: Install test-mflux, then upgrade mflux to the newest release
         run: |
           uv sync --locked --group test-mflux
-          uv pip install --upgrade "mflux>=0.17.5,<0.26" "pillow<13"
+          uv pip install --upgrade "mflux>=0.24"
       - name: Show resolved mflux and run the fast lane without re-syncing
         run: |
           uv run --no-sync python -c "import importlib.metadata as m; print('mflux', m.version('mflux'))"
@@ -147,6 +148,7 @@ jobs:
     # mflux's main branch. Upstream main can move at any time, so this job never blocks a
     # merge; read its log when it goes red.
     runs-on: macos-15
+    timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -205,18 +207,9 @@ jobs:
           python-version: "3.13"
       - name: Install uv
         run: pip install uv
-      # pillow 12.x is left out while the lock pins it: every pillow 12.3.0 advisory is fixed only in
-      # 13.0.0, and mflux 0.23.0 (the newest release) cannot run under pillow 13 (it imports PIL._typing;
-      # fixed on mflux main in https://github.com/mflux-community/mflux/pull/890, unreleased). The skip
-      # ends by itself once the lock moves to pillow 13; every other package stays audited.
       - name: Audit the locked dependency set
         run: |
           uv export --frozen --all-groups --all-extras --no-hashes > "$RUNNER_TEMP/req.txt"
-          if grep -q '^pillow==12\.' "$RUNNER_TEMP/req.txt"; then
-            grep -v '^pillow==' "$RUNNER_TEMP/req.txt" > "$RUNNER_TEMP/req.filtered.txt"
-            mv "$RUNNER_TEMP/req.filtered.txt" "$RUNNER_TEMP/req.txt"
-            echo "::notice::pillow 12.x is not audited: mflux 0.23.0 and older break under pillow 13 (mflux PR 890), and every pillow 12.3.0 advisory is fixed only in 13.0.0. The skip ends when the lock moves to pillow 13."
-          fi
           uvx pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --disable-pip --desc off
 
   coverage:

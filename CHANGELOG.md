@@ -7,6 +7,24 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-29
+
+This release supports mflux 0.24 and now requires it, together with Python 3.11. It drops Python 3.10 and mflux 0.17.5 through 0.23.x. The gate, the default thresholds, the coefficients and the variants are unchanged, and this release has no speed or quality measurements.
+
+mflux 0.24.0 itself needs Python 3.11 or newer and Pillow 13 or newer. Pillow 13 fixes the critical advisory GHSA-5x8w-8jj5-q52h, which affects Pillow 12.3 and older, so an install with the `[mflux]` extra gets the fixed Pillow through mflux. The base install pulls in neither mflux nor Pillow.
+
+To check mflux 0.24.0, the offline test suite (the parity, slow, benchmark and network tests deselected) passed on it, with no model weights loaded. The mflux functions that mlx-teacache copies or wraps were compared by code fingerprint: the denoising steps and transformer forwards are unchanged. In FLUX.2 Klein's and Z-Image's `generate_image`, only code outside the denoising loop changed. Klein gained a check that refuses `pid_decode` together with `small_decoder`, plus extra image metadata; Z-Image gained only extra image metadata. Image-level checks on real weights were not re-run, so this entry does not claim identical images.
+
+### Removed
+- Python 3.10. The package now requires Python 3.11 or newer, because mflux 0.24.0 does.
+- mflux 0.17.5 through 0.23.x. The `[mflux]` extra is now `mflux>=0.24`.
+- If you need Python 3.10 or an older mflux, stay on 0.14.1: `pip install "mlx-teacache[mflux]==0.14.1"`. It still runs on mflux 0.24 but prints the untested-version warning there.
+
+### Changed
+- The `[mflux]` extra has no upper bound. A newer mflux than 0.24.0 installs and is patched, but has not been tested; `apply_teacache` prints a one-time `TeaCacheUntestedMfluxWarning` until it is.
+- mlx-taef 0.9.0 supports mflux 0.24 in its `[mflux]` extra, so for the live preview you can install `mlx-taef[mflux]>=0.9.0` next to `mlx-teacache[mflux]`; both resolve to mflux 0.24.
+- For contributors: CI now tests the 0.24 floor and, every day, the newest mflux release, and the dependency audit checks Pillow. The development lock moves filelock to 4.2.4 and setuptools to 84.2.1, past their published advisories.
+
 ## [0.14.1] — 2026-10-23
 
 A guard against mflux's step cache, two documentation corrections and dependency bumps for development and CI. The gate, the default thresholds, the coefficients and every generated image are unchanged, and this release has no speed or quality measurements.

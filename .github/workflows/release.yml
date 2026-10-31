@@ -82,5 +82,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           flags=""
-          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+          # Release tags use the canonical PEP 440 forms aN, bN, rcN and .devN.
+          case "$GITHUB_REF_NAME" in *-*|*a[0-9]*|*b[0-9]*|*rc[0-9]*|*.dev*) flags="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag $flags

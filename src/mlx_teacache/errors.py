@@ -2,6 +2,7 @@
 """Typed exception hierarchy for mlx-teacache. Every error names the parameter
 and actual value; messages include remediation pointers where applicable."""
 
+import warnings
 from typing import Any
 
 
@@ -9,7 +10,14 @@ def _rebuild(cls: type, kwargs: dict[str, Any]) -> Any:
     """Unpickle helper for exceptions whose constructors are keyword-only.
 
     Each ``__reduce__`` below also returns the instance ``__dict__`` as state, so
-    ``add_note`` notes and attributes set after construction survive the round trip."""
+    ``add_note`` notes and attributes set after construction survive the round trip.
+    An InvalidStepWindowError pickled by 0.15 stores ``num_steps``; it is read as
+    ``active_num_steps`` when that is missing, so the load does not warn."""
+    if issubclass(cls, InvalidStepWindowError) and "num_steps" in kwargs:
+        kwargs = dict(kwargs)
+        legacy = kwargs.pop("num_steps")
+        if kwargs.get("active_num_steps") is None:
+            kwargs["active_num_steps"] = legacy
     return cls(**kwargs)
 
 
@@ -131,14 +139,24 @@ class InvalidStepWindowError(TeaCacheError):
         *,
         skip_first: int,
         skip_last: int,
-        num_steps: int,  # accepted alias of active_num_steps; the built-in callers pass this
+        num_steps: int | None = None,
         nominal_num_inference_steps: int | None = None,
         active_num_steps: int | None = None,
     ) -> None:
-        # active_num_steps is the preferred keyword for the active denoising step
-        # count; num_steps is accepted as an alias and is what the built-in callers
-        # pass today.
-        active = num_steps if active_num_steps is None else active_num_steps
+        # active_num_steps is the keyword for the active denoising step count. num_steps is a
+        # deprecated alias: it warns, and active_num_steps wins when both are passed.
+        if num_steps is not None:
+            warnings.warn(
+                "num_steps= is deprecated; pass active_num_steps=. It will be removed in 2.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if active_num_steps is not None:
+            active = active_num_steps
+        elif num_steps is not None:
+            active = num_steps
+        else:
+            raise TypeError("InvalidStepWindowError needs active_num_steps=")
 
         if nominal_num_inference_steps is not None and nominal_num_inference_steps != active:
             tail = (
@@ -155,16 +173,17 @@ class InvalidStepWindowError(TeaCacheError):
         super().__init__("skip_first_n_steps + skip_last_n_steps must be < active denoising steps" + tail)
         self.skip_first = skip_first
         self.skip_last = skip_last
-        self.num_steps = num_steps  # the value passed as num_steps
+        # The value passed as num_steps, or the active count when only active_num_steps was given.
+        self.num_steps = num_steps if num_steps is not None else active
         self.nominal_num_inference_steps = nominal_num_inference_steps
         self.active_num_steps = active
-        # Raw constructor inputs, so a round trip re-derives the same message and attributes.
+        # Constructor inputs that re-derive the same message on a round trip. num_steps is left out
+        # so unpickling never warns; the restored __dict__ brings back its value.
         self._ctor = {
             "skip_first": skip_first,
             "skip_last": skip_last,
-            "num_steps": num_steps,
             "nominal_num_inference_steps": nominal_num_inference_steps,
-            "active_num_steps": active_num_steps,
+            "active_num_steps": active,
         }
 
     def __reduce__(self) -> tuple[Any, ...]:
@@ -193,7 +212,17 @@ class InternalStateError(TeaCacheError):
     from TransformerShapeError (which is about shape drift in real tensors)."""
 
 
-class TeaCacheNoBenefitWarning(UserWarning):
+class TeaCacheWarning(UserWarning):
+    """The base class of mlx-teacache's run-time warnings; deprecation notices use
+    DeprecationWarning and are not part of this family.
+
+    Filtering it silences the whole family at once:
+        warnings.filterwarnings("ignore", category=TeaCacheWarning)
+    Each subclass can still be filtered on its own.
+    """
+
+
+class TeaCacheNoBenefitWarning(TeaCacheWarning):
     """Emitted when the gate cannot deliver step-skipping. Two triggers:
 
     At `apply_teacache()` time, on a distilled variant whose few-step
@@ -212,7 +241,7 @@ class TeaCacheNoBenefitWarning(UserWarning):
     """
 
 
-class TeaCacheUncalibratedCheckpointWarning(UserWarning):
+class TeaCacheUncalibratedCheckpointWarning(TeaCacheWarning):
     """Emitted once at apply time when the model was loaded from a checkpoint
     other than the one the variant's built-in coefficients were calibrated on,
     and the caller supplied no coefficients of their own.
@@ -230,7 +259,7 @@ class TeaCacheUncalibratedCheckpointWarning(UserWarning):
     """
 
 
-class TeaCacheDisabledWarning(UserWarning):
+class TeaCacheDisabledWarning(TeaCacheWarning):
     """Emitted once at apply time when rel_l1_thresh=0.0 — caching is disabled
     (every step computes; no speedup). Higher threshold = MORE skips; 0.0 disables.
 
@@ -239,12 +268,12 @@ class TeaCacheDisabledWarning(UserWarning):
     """
 
 
-class TeaCacheUntestedMfluxWarning(UserWarning):
+class TeaCacheUntestedMfluxWarning(TeaCacheWarning):
     """Emitted once per process by `apply_teacache` when the installed mflux is a later
     release than the newest one this version of mlx-teacache was verified on.
 
-    TeaCache still applies. The `[mflux]` extra allows two minor versions past the verified
-    release because most mflux releases change nothing TeaCache relies on. If a generation
+    TeaCache still applies. The `[mflux]` extra sets no upper bound on mflux, because most
+    mflux releases change nothing TeaCache relies on. If a generation
     fails or looks wrong on that mflux, please report it with both version numbers at
     https://github.com/IonDen/mlx-teacache/issues.
 

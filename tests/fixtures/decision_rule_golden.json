@@ -1,0 +1,53 @@
+{
+  "decision_rule_revision": 1,
+  "rule": {
+    "default_thresh": {
+      "flux1-dev": 0.2,
+      "flux1-krea-dev": 0.3,
+      "flux1-schnell": 0.2,
+      "flux2-klein-4b": null,
+      "flux2-klein-9b": null,
+      "flux2-klein-base-4b": 0.17,
+      "flux2-klein-base-9b": 0.17,
+      "qwen-image": 0.3,
+      "qwen-image-2512": 0.25,
+      "z-image-base": 0.12
+    },
+    "default_thresh_none_resolves_to": {
+      "flux2-klein-4b": 0.2,
+      "flux2-klein-9b": 0.2
+    },
+    "max_consecutive_skips": 8,
+    "window_defaults": [
+      1,
+      1
+    ]
+  },
+  "sequences": {
+    "flux2-klein-base-4b/bench-512/thresh=0.17": "FCCSCSCSCCCCSCSCSCCCCCCSCCCCCCCCCCCCCCCCCCCCCCCSCF",
+    "flux2-klein-base-4b/real-864x1152/thresh=0.17": "FCSCSCSCSCSCCCCSCCSCSCCCCCCCCCCCCCCCCCCCCCCCCCSCSF",
+    "qwen-image-2512/prompt0/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image-2512/prompt1/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image-2512/prompt2/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image-2512/prompt3/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image-2512/prompt4/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image-2512/prompt5/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image-2512/prompt6/thresh=0.25": "FCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCF",
+    "qwen-image/prompt0-nonfinite-step16/thresh=0.30": "FCCSCSSCSSCSSSCSNCSSSSCSSSCSSSCSSSSCSSCSSCSSCSCSCF",
+    "qwen-image/prompt0/thresh=0.30": "FCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSSCSSSCSSCSSCSSCSCF",
+    "qwen-image/prompt0/thresh=0.60": "FCSCSSSSCSSSSSSSCSSSSSSSSCSSSSSSSCSSSSSSCSSSSCSSCF",
+    "qwen-image/prompt1/thresh=0.30": "FCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSF",
+    "qwen-image/prompt2/thresh=0.30": "FCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSF",
+    "qwen-image/prompt3/thresh=0.30": "FCCSCSSCSSCSSSCSSSCSSSCSSSCSSSCSSSCSSSCSSCSSCSCSCF",
+    "qwen-image/prompt4/thresh=0.30": "FCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSF",
+    "qwen-image/prompt5/thresh=0.30": "FCCSCSSCSSCSSSCSSSCSSSSCSSSCSSSSCSSSSCSSCSSCSSCSCF",
+    "qwen-image/prompt6/thresh=0.30": "FCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSSCSSSCSSCSSCSSCSCF",
+    "z-image-base/prompt0/thresh=0.12": "FCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCF",
+    "z-image-base/prompt1/thresh=0.12": "FCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCCCF",
+    "z-image-base/prompt2/thresh=0.12": "FCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCCCCCF",
+    "z-image-base/prompt3/thresh=0.12": "FCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCCCCCCCF",
+    "z-image-base/prompt4/thresh=0.12": "FCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCSCCCCCCCCF",
+    "z-image-base/prompt5/thresh=0.12": "FCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCF",
+    "z-image-base/prompt6/thresh=0.12": "FCCCCCCCCCSCSCSCSCSCSCSCSCSCSCSCSCSCSCSCCCCCCCCCCF"
+  }
+}

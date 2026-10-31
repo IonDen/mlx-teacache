@@ -7,6 +7,30 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-31
+
+A stability preview. This release writes down what mlx-teacache will promise from 1.0 ([docs/stability.md](docs/stability.md)), adds the pieces that policy needs, and deprecates what it leaves out. Everything deprecated here still works. All of it warns except the `"cfg-fallback"` decision string, which gets this notice and no runtime warning. The gate, the default thresholds, the coefficients, the variants and every generated image are unchanged, and this release has no speed or quality measurements.
+
+### Added
+- `TeaCacheHandle` records how it was built, in six properties: `variant_id`, `coefficients`, `skip_first_n_steps`, `skip_last_n_steps`, `decision_rule_revision` and `mflux_version` (`None` when mflux's package metadata is missing). They stay readable after `restore()`. Treat them as read-only: `skip_first_n_steps`, `skip_last_n_steps`, `decision_rule_revision` and `mflux_version` cannot be set; setting `coefficients` is deprecated (below), and setting `variant_id` still works without a warning in this release. `decision_rule_revision` starts at 1 and changes only when the gate's decision rule changes: how the gate decides, how the default threshold is picked, the cap on skips in a row, or which steps are never skipped.
+- `mlx_teacache.testing`, with `fake_handle()` to build a handle without a model and `reset_untested_mflux_warning()` to re-arm the once-per-process `TeaCacheUntestedMfluxWarning`. `import mlx_teacache` does not import it, and it needs neither mflux nor pytest.
+- `TeaCacheWarning`, the base class of `TeaCacheNoBenefitWarning`, `TeaCacheUncalibratedCheckpointWarning`, `TeaCacheDisabledWarning` and `TeaCacheUntestedMfluxWarning`. It is still a `UserWarning`, and `warnings.filterwarnings("ignore", category=TeaCacheWarning)` silences all four. Deprecation notices keep Python's own `DeprecationWarning`.
+- [docs/stability.md](docs/stability.md): what stays stable through 1.x, what does not, and how deprecations work.
+
+### Deprecated
+- `TeaCacheStats.cfg_fallback_steps`, both reading it and passing `cfg_fallback_steps=` to the constructor, which still works and warns. It has been 0 since 0.4.1. Use `GenerationStats.cfg_was_active`. Removed in 1.0.
+- `TeaCacheStats.total_steps_seen`. Use `total_active_steps`, which is the same number now that CFG fallback no longer exists. Removed in 1.0.
+- The `"cfg-fallback"` decision string. No release since 0.4.1 produces it. This notice is all the warning there is: nothing warns at run time. It leaves the decision vocabulary in 1.0.
+- The root modules `mlx_teacache.gate`, `.cache`, `.stats` and `.coefficients`. Reading an attribute from one warns; a plain `import` of the module stays silent. `TeaCacheStats`, `GenerationStats`, `StepDecision`, `StatsFrozenError` and `Provenance` are importable from `mlx_teacache`. Everything else in these modules (`gate_step`, `GateDecision`, `GateKind`, `mean_abs_rel_l1`, `poly_eval`, `TeaCacheState`, `Decision`, `validate_custom`) has no public replacement. They fall outside the 1.0 promise and are removed in 2.0.
+- Setting `handle.rel_l1_thresh`, `handle.stats`, `handle.provenance` or `handle.coefficients`. In 0.15 `coefficients` was a plain attribute you could write; 0.16 makes it a property, and writing it warns and still stores the value. Neither `rel_l1_thresh` nor `coefficients` ever changed what the gate uses; pass the values to `apply_teacache` instead. These become errors in 1.0, when the handle is read-only.
+- `InvalidStepWindowError(num_steps=...)`. Use `active_num_steps=`. Removed in 2.0.
+
+### Changed
+- `repr(TeaCacheStats)` no longer shows the deprecated `cfg_fallback_steps` counter.
+- `dataclasses.asdict()`, `dataclasses.fields()` and `__match_args__` of `TeaCacheStats` now show the private `_cfg_fallback_steps` in place of `cfg_fallback_steps`. Code that reads `asdict(stats)["cfg_fallback_steps"]` needs to change. The attribute and the constructor keyword still work and warn.
+- The `TeaCacheUntestedMfluxWarning` docstring no longer mentions a two-minor-release allowance. The `[mflux]` extra has had no upper bound since 0.15.0.
+- For contributors: the release workflow marks PEP 440 pre-release tags such as `1.0.0rc1` as GitHub pre-releases.
+
 ## [0.15.0] — 2026-10-29
 
 This release supports mflux 0.24 and now requires it, together with Python 3.11. It drops Python 3.10 and mflux 0.17.5 through 0.23.x. The gate, the default thresholds, the coefficients and the variants are unchanged, and this release has no speed or quality measurements.

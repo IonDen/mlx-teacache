@@ -22,7 +22,7 @@ For each calibration prompt:
     y_t = mean|body_out_t - body_out_{t-1}| / mean|body_out_{t-1}|
 - Aggregate (x_t, y_t) pairs across all prompts and fit a degree-4 polynomial
   with `numpy.polyfit` (returns coefficients high-to-low, matching the
-  `poly_eval` convention used at runtime in `mlx_teacache.gate`).
+  `poly_eval` convention used at runtime in `mlx_teacache._kernel.gate`).
 
 Output: a JSON report at `scripts/_calibration_flux2_<variant>.json`.
 
@@ -147,7 +147,7 @@ _VARIANTS: dict[str, dict[str, Any]] = {
         "variant_id": "flux2-klein-base-9b",
         "model_config_factory": _model_config_klein_base_9b,
         # v0.5.0 ships klein-base-9b reusing klein-base-4b's polynomial verbatim
-        # (see src/mlx_teacache/coefficients.py). Running this script is only
+        # (see src/mlx_teacache/variants/flux2_klein_base_9b/config.py). Running this script is only
         # needed if you want to override the reused coefficients with a fresh
         # fit — see docs/calibration.md for when that's warranted.
         "num_inference_steps": 25,

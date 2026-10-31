@@ -32,7 +32,9 @@ Every model is a three-file subpackage under `src/mlx_teacache/variants/<id>/`:
 
 ## `_kernel/` is canonical; the top-level modules are shims
 
-The pure-math primitives — `gate_step`, `TeaCacheState`, `Provenance`, `TeaCacheStats` — live in `src/mlx_teacache/_kernel/` and import only `mlx.core`, never mflux. The top-level `gate.py`, `cache.py`, `coefficients.py`, and `stats.py` are thin compatibility re-exports (they were extracted into `_kernel/` in v0.6.0); the re-exports stay at least until 1.0. Edit the `_kernel/` copy; the shims just forward.
+The pure-math primitives — `gate_step`, `TeaCacheState`, `Provenance`, `TeaCacheStats` — live in `src/mlx_teacache/_kernel/` and import only `mlx.core`, never mflux. The top-level `gate.py`, `cache.py`, `coefficients.py`, and `stats.py` are thin compatibility re-exports (they were extracted into `_kernel/` in v0.6.0). Since 0.16 they are deprecated: they sit outside the [1.0 promise](stability.md) and are removed in 2.0. Each one imports nothing from `_kernel/` at run time. Its own module-level `__getattr__` calls `shim_getattr` in `_deprecation.py`, which warns on attribute access and then returns the object from `_kernel/`, so a plain `import` stays silent. Edit the `_kernel/` copy; the shims just forward.
+
+The handle's recorded facts (`variant_id`, `coefficients`, `skip_first_n_steps`, `skip_last_n_steps`, `decision_rule_revision`, `mflux_version`) are properties over private attributes. Four of them have no setter, `coefficients` has a deprecated setter that warns and still stores, and `variant_id` has a setter that does not warn yet. `api.py` sets the variant id, the skip window and the mflux version after the variant's `apply()` returns the handle, each integration sets the coefficients, and the decision-rule revision comes from the constructor.
 
 ## The gate
 

@@ -16,8 +16,8 @@ from typing import Any
 import mlx.core as mx
 import pytest
 
-from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.variants.flux1_dev.config import COEFFICIENTS as _FLUX1_DEV_COEFFICIENTS
 from mlx_teacache.variants.flux1_dev.integration import flux1_forward_with_gate
 

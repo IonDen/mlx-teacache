@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 
+import pytest
+
 EXPECTED_ALL = {
     "__version__",
     "apply_teacache",
@@ -20,6 +22,7 @@ EXPECTED_ALL = {
     "Provenance",
     "TeaCacheError",
     "TeaCacheValueError",
+    "TeaCacheWarning",
     "TeaCacheDisabledWarning",
     "TeaCacheNoBenefitWarning",
     "TeaCacheUncalibratedCheckpointWarning",
@@ -44,12 +47,13 @@ def test_all_is_exactly_the_public_surface() -> None:
 
 
 def test_stats_submodule_paths() -> None:
-    from mlx_teacache.stats import (  # noqa: F401
-        GenerationStats,
-        StatsFrozenError,
-        StepDecision,
-        TeaCacheStats,
-    )
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.stats import (  # noqa: F401
+            GenerationStats,
+            StatsFrozenError,
+            StepDecision,
+            TeaCacheStats,
+        )
 
     s = TeaCacheStats()
     assert s.computed_count == 0
@@ -57,7 +61,8 @@ def test_stats_submodule_paths() -> None:
 
 
 def test_coefficients_provenance_path() -> None:
-    from mlx_teacache.coefficients import Provenance
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.coefficients import Provenance
 
     assert Provenance.for_user_supplied().source == "user"
 
@@ -65,7 +70,9 @@ def test_coefficients_provenance_path() -> None:
 def test_gate_module_path() -> None:
     from mlx_teacache._kernel.gate import GateDecision as _KernelGD
     from mlx_teacache._kernel.gate import gate_step as _kernel_gate_step
-    from mlx_teacache.gate import GateDecision, gate_step
+
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.gate import GateDecision, gate_step
 
     assert GateDecision is _KernelGD, "gate.GateDecision must be the _kernel original"
     assert gate_step is _kernel_gate_step, "gate.gate_step must be the _kernel original"
@@ -73,7 +80,9 @@ def test_gate_module_path() -> None:
 
 def test_cache_module_path() -> None:
     from mlx_teacache._kernel.cache import TeaCacheState as _KernelTCS
-    from mlx_teacache.cache import TeaCacheState
+
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.cache import TeaCacheState
 
     assert TeaCacheState is _KernelTCS, "cache.TeaCacheState must be the _kernel original"
 

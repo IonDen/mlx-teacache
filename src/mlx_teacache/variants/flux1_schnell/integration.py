@@ -124,6 +124,6 @@ def apply(
     )
     # Expose resolved coefficients and callback instance as dynamic attributes
     # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
-    handle.coefficients = resolved_coeffs  # type: ignore[attr-defined]
+    handle._coefficients = resolved_coeffs
     handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
     return handle

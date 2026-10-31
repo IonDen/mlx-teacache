@@ -31,6 +31,7 @@ def _mflux_free_sources() -> list:
     files.add(pkg / "__init__.py")
     files.add(pkg / "_mflux_versions.py")
     files.add(pkg / "support.py")
+    files.add(pkg / "testing.py")
     files.update(pkg.joinpath("variants").glob("*.py"))
     files.update(pkg.joinpath("variants").glob("*/config.py"))
     files.update(pkg.joinpath("variants").glob("*/detect.py"))
@@ -57,3 +58,14 @@ def test_mflux_free_modules_have_no_mflux_import_nodes_ast():
                     if alias.name.startswith("mflux"):
                         offenders.append(f"{py}:{node.lineno} import {alias.name}")
     assert not offenders, f"mflux imports in mflux-free modules: {offenders}"
+
+
+def test_testing_module_is_checked_for_mflux_imports():
+    """Bug caught: src/mlx_teacache/testing.py drops out of the mflux-free set above (or the file
+    moves), so an mflux import added to it, even inside a function, goes unseen by the AST check;
+    the helpers must work on an install without the [mflux] extra."""
+    sources = _mflux_free_sources()
+    testing = [p for p in sources if p.name == "testing.py"]
+    assert len(testing) == 1, testing
+    assert testing[0].parent.name == "mlx_teacache"
+    assert testing[0].is_file()

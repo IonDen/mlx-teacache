@@ -9,13 +9,13 @@ from types import SimpleNamespace
 import mlx.core as mx
 import pytest
 
-from mlx_teacache.cache import TeaCacheState
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.errors import (
     InvalidStepWindowError,
     MissingGenerationContextError,
 )
 from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
-from mlx_teacache.stats import TeaCacheStats
 from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_predict_factory
 
 # NOTE: this file runs in the pure-core (no-mflux) CI lane. The current tests

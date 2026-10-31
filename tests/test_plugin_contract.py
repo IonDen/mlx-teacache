@@ -4,7 +4,8 @@ The plugin is being built at https://github.com/mflux-community/mflux-plugins (f
 `mflux-teacache`). It will depend on `mlx-teacache[mflux]`, so a later mlx-teacache release can reach installed
 plugins through `pip install -U`. `tests/test_public_api.py` only pins that the names exist; this file pins what the
 plugin will read off them: parameter names, kinds and defaults, dataclass fields, the decision vocabulary and the
-warning base classes.
+warning base classes. The plugin builds handles in its own tests with `mlx_teacache.testing.fake_handle` and re-arms
+the untested-mflux warning with `mlx_teacache.testing.reset_untested_mflux_warning`; the last section pins both.
 
 A failure here means a change would break mflux-teacache users. Keep the old shape alongside the new one, or ship a
 matching plugin release first.
@@ -210,8 +211,9 @@ def test_handle_exposes_stats_threshold_and_accepts_the_plugins_constructor_keyw
     """Red if TeaCacheHandle loses `.stats` / `.rel_l1_thresh`, or its constructor keywords (`patch`, `stats`,
     `provenance`, `rel_l1_thresh`, keyword-only) change.
 
-    Breaks: the plugin reads `handle.stats` and `handle.rel_l1_thresh`, and its test fake builds a handle with
-    those keywords. The constructor and VariantPatch are non-public and pinned as test support only."""
+    Breaks: the plugin reads `handle.stats` and `handle.rel_l1_thresh`, and its older test fake builds a handle with
+    those keywords. The constructor and VariantPatch are non-public: they stay pinned here until the plugin's tests
+    build handles with `mlx_teacache.testing.fake_handle` instead, and become internal at 1.0."""
     assert _params(TeaCacheHandle.__init__) == [
         ("self", P.POSITIONAL_OR_KEYWORD, P.empty),
         ("patch", P.KEYWORD_ONLY, P.empty),
@@ -251,3 +253,46 @@ def test_version_is_a_string() -> None:
     Breaks: the plugin prints the mlx-teacache version in its report header."""
     assert isinstance(mlx_teacache.__version__, str)
     assert mlx_teacache.__version__ != ""
+
+
+# mlx_teacache.testing: what the plugin's own tests call.
+
+
+def test_testing_fake_handle_gives_what_the_plugin_reads() -> None:
+    """Red if `fake_handle` stops accepting `rel_l1_thresh=` / `variant_id=` by keyword, drops either value, or
+    hands back a handle whose stats cannot record and commit a generation or which cannot be restored.
+
+    Breaks: the plugin's tests build a handle with `fake_handle(rel_l1_thresh=..., variant_id=...)`, run its report
+    over `handle.stats` after one recorded step, and restore the handle at teardown."""
+    from mlx_teacache.testing import fake_handle
+
+    handle = fake_handle(rel_l1_thresh=0.25, variant_id="z-image-base")
+    assert handle.rel_l1_thresh == 0.25
+    assert handle.variant_id == "z-image-base"
+    assert isinstance(handle.stats, mlx_teacache.TeaCacheStats)
+    handle.stats.record(
+        mlx_teacache.StepDecision(
+            step_idx=0, timestep=1.0, rel_l1=None, accumulated_distance=0.0, decision="computed"
+        )
+    )
+    handle.stats.finalize_last_generation(num_inference_steps=1, cfg_was_active=False)
+    assert handle.stats.generations == 1
+    assert handle.stats.last_generation is not None
+    assert handle.stats.last_generation.decisions[0].decision == "computed"
+    handle.restore()
+    with pytest.raises(mlx_teacache.StatsFrozenError):
+        handle.stats.discard_current_generation()
+
+
+def test_reset_untested_mflux_warning_is_the_supported_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Red if `reset_untested_mflux_warning` is renamed, needs an argument, or stops clearing the once-per-process
+    flag.
+
+    Breaks: the plugin's tests that check the untested-mflux warning call it with no arguments, instead of writing
+    the private flag, so the next apply_teacache can warn again."""
+    import mlx_teacache._mflux_versions as versions
+    from mlx_teacache.testing import reset_untested_mflux_warning
+
+    monkeypatch.setattr(versions, "_warned", True)
+    reset_untested_mflux_warning()
+    assert versions._warned is False

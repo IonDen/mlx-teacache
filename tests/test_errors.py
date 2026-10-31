@@ -3,8 +3,12 @@
 and inherits from TeaCacheError so users can catch the whole family with one
 except clause. Tests are pure Python — no mflux, no MLX."""
 
+import warnings
+
 import pytest
 
+import mlx_teacache.errors as errors_module
+from mlx_teacache._kernel.stats import StatsFrozenError
 from mlx_teacache.errors import (
     AlreadyPatchedError,
     CalibrationError,
@@ -12,10 +16,13 @@ from mlx_teacache.errors import (
     InternalStateError,
     InvalidStepWindowError,
     MissingGenerationContextError,
+    TeaCacheDisabledWarning,
     TeaCacheError,
+    TeaCacheNoBenefitWarning,
+    TeaCacheUncalibratedCheckpointWarning,
+    TeaCacheUntestedMfluxWarning,
     TransformerShapeError,
 )
-from mlx_teacache.stats import StatsFrozenError
 
 
 def test_all_subclass_teacache_error():
@@ -63,27 +70,127 @@ def test_already_patched_includes_existing_handle_info():
 
 
 def test_invalid_step_window_names_values():
-    err = InvalidStepWindowError(skip_first=1, skip_last=1, num_steps=2)
+    with pytest.warns(DeprecationWarning, match="active_num_steps"):
+        err = InvalidStepWindowError(skip_first=1, skip_last=1, num_steps=2)
     msg = str(err)
     assert "skip_first=1" in msg
     assert "skip_last=1" in msg
     assert "active_num_steps=2" in msg
-    # The legacy num_steps kwarg still works for construction; the old wording
+    # The deprecated num_steps kwarg still works for construction; the old wording
     # "num_steps=2" is no longer in the message.
 
 
 def test_invalid_step_window_message_reports_both_counts_when_provided():
     """New img2img call sites pass both nominal and active counts."""
-    err = InvalidStepWindowError(
-        skip_first=2,
-        skip_last=2,
-        num_steps=4,
-        nominal_num_inference_steps=25,
-        active_num_steps=4,
-    )
+    with pytest.warns(DeprecationWarning, match="active_num_steps"):
+        err = InvalidStepWindowError(
+            skip_first=2,
+            skip_last=2,
+            num_steps=4,
+            nominal_num_inference_steps=25,
+            active_num_steps=4,
+        )
     msg = str(err)
     assert "active_num_steps=4" in msg
     assert "nominal_num_inference_steps=25" in msg
+
+
+def test_num_steps_alias_warns_at_the_caller():
+    with pytest.warns(DeprecationWarning, match="active_num_steps") as rec:
+        err = InvalidStepWindowError(skip_first=1, skip_last=2, num_steps=3)
+    assert len(rec) == 1
+    assert rec[0].filename == __file__
+    assert "num_steps= is deprecated" in str(rec[0].message)
+    assert "removed in 2.0" in str(rec[0].message)
+    assert str(err) == (
+        "skip_first_n_steps + skip_last_n_steps must be < active denoising steps. "
+        "Got skip_first=1, skip_last=2, active_num_steps=3 (sum 3 >= 3)."
+    )
+    assert (err.skip_first, err.skip_last, err.num_steps, err.active_num_steps) == (1, 2, 3, 3)
+    assert err.nominal_num_inference_steps is None
+
+
+def test_num_steps_alias_loses_to_active_num_steps():
+    with pytest.warns(DeprecationWarning, match="active_num_steps"):
+        err = InvalidStepWindowError(skip_first=2, skip_last=2, num_steps=3, active_num_steps=4)
+    assert (err.num_steps, err.active_num_steps) == (3, 4)
+    assert "active_num_steps=4 (sum 4 >= 4)" in str(err)
+
+
+def test_active_num_steps_does_not_warn():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        err = InvalidStepWindowError(skip_first=1, skip_last=1, active_num_steps=2)
+    assert (err.num_steps, err.active_num_steps) == (2, 2)
+    assert "active_num_steps=2 (sum 2 >= 2)" in str(err)
+
+
+def test_missing_step_count_raises_type_error():
+    with pytest.raises(TypeError, match=r"^InvalidStepWindowError needs active_num_steps=$"):
+        InvalidStepWindowError(skip_first=1, skip_last=1)
+
+
+def test_check_step_window_refusal_does_not_warn():
+    from mlx_teacache import check_step_window
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(InvalidStepWindowError) as info:
+            check_step_window(2)
+    assert (info.value.num_steps, info.value.active_num_steps) == (2, 2)
+
+
+_RUNTIME_WARNINGS = [
+    TeaCacheNoBenefitWarning,
+    TeaCacheUncalibratedCheckpointWarning,
+    TeaCacheDisabledWarning,
+    TeaCacheUntestedMfluxWarning,
+]
+
+
+@pytest.mark.parametrize("cls", _RUNTIME_WARNINGS, ids=lambda c: c.__name__)
+def test_every_runtime_warning_derives_from_teacache_warning(cls: type[Warning]) -> None:
+    assert issubclass(cls, errors_module.TeaCacheWarning)
+    assert issubclass(errors_module.TeaCacheWarning, UserWarning)
+    assert not issubclass(errors_module.TeaCacheWarning, DeprecationWarning)
+
+
+def test_filtering_teacache_warning_silences_all_four() -> None:
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("error")
+        warnings.filterwarnings("ignore", category=errors_module.TeaCacheWarning)
+        for cls in _RUNTIME_WARNINGS:
+            warnings.warn(cls("x"), stacklevel=1)
+    assert rec == []
+
+
+def test_untested_mflux_warning_docstring_states_the_open_upper_bound() -> None:
+    """Bug: help() tells users the extra caps mflux two minors past the verified release,
+    which stopped being true when the cap was dropped."""
+    doc = TeaCacheUntestedMfluxWarning.__doc__ or ""
+    assert "no upper bound" in doc
+    assert "two minor" not in doc
+
+
+_RUNTIME_WARNING_NAMES = [
+    "TeaCacheNoBenefitWarning",
+    "TeaCacheUncalibratedCheckpointWarning",
+    "TeaCacheDisabledWarning",
+    "TeaCacheUntestedMfluxWarning",
+]
+
+
+@pytest.mark.parametrize("name", _RUNTIME_WARNING_NAMES)
+def test_a_filter_naming_one_warning_still_matches_only_that_one(name: str) -> None:
+    """Bug: two warnings collapse into one class, so a filter meant for one silences the other."""
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        warnings.filterwarnings("ignore", category=getattr(errors_module, name))
+        for other in _RUNTIME_WARNING_NAMES:
+            warnings.warn(getattr(errors_module, other)("x"), stacklevel=1)
+    assert sorted(type(w.message).__name__ for w in rec) == sorted(
+        other for other in _RUNTIME_WARNING_NAMES if other != name
+    )
 
 
 def test_transformer_shape_error_names_step_and_shapes():

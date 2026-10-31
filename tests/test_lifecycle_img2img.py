@@ -10,14 +10,14 @@ from typing import Any
 
 import pytest
 
-from mlx_teacache.cache import TeaCacheState
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
 from mlx_teacache.integrations.mflux.lifecycle import (
     GenerationContext,
     GenerationContextCallback,
     PendingFinalize,
     _active_step_count,
 )
-from mlx_teacache.stats import StepDecision, TeaCacheStats
 
 
 def _make_config(num_inference_steps: int, *, image_strength: float | None = None) -> SimpleNamespace:

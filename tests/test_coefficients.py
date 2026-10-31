@@ -1,6 +1,6 @@
 import pytest
 
-from mlx_teacache.coefficients import (
+from mlx_teacache._kernel.coefficients import (
     Provenance,
     validate_custom,
 )

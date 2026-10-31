@@ -20,7 +20,9 @@ Public API:
         variant_id, display_name, default_thresh, model_names, calibrated (keyword-only).
 
     TeaCacheHandle
-        Context-manager-compatible return value with .stats, .provenance, .restore().
+        Context-manager-compatible return value with .restore() and properties describing
+        the run: .stats, .provenance, .rel_l1_thresh, .variant_id, .coefficients,
+        .skip_first_n_steps, .skip_last_n_steps, .decision_rule_revision, .mflux_version.
 
     TeaCacheStats, StepDecision, GenerationStats
         Stats reporting types.
@@ -30,6 +32,14 @@ Public API:
 
     TeaCacheError + subclasses
         Typed exception hierarchy. Catch TeaCacheError to handle anything.
+
+    TeaCacheWarning + subclasses
+        The base class of mlx-teacache's run-time warnings; deprecation notices use
+        DeprecationWarning and are not part of this family. Filter it to silence the family.
+
+    mlx_teacache.testing
+        Helpers for testing code that uses mlx-teacache. The package does not import it;
+        import it on demand.
 """
 
 from mlx_teacache._kernel.coefficients import Provenance
@@ -55,6 +65,7 @@ from mlx_teacache.errors import (
     TeaCacheUncalibratedCheckpointWarning,
     TeaCacheUntestedMfluxWarning,
     TeaCacheValueError,
+    TeaCacheWarning,
     TransformerShapeError,
 )
 from mlx_teacache.handle import TeaCacheHandle
@@ -74,6 +85,7 @@ __all__ = [
     "Provenance",
     "TeaCacheError",
     "TeaCacheValueError",
+    "TeaCacheWarning",
     "TeaCacheDisabledWarning",
     "TeaCacheNoBenefitWarning",
     "TeaCacheUncalibratedCheckpointWarning",

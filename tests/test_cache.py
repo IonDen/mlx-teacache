@@ -1,8 +1,8 @@
 # tests/test_cache.py
 import mlx.core as mx
 
-from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.gate import gate_step
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.gate import gate_step
 
 _COEFFS = (0.0, 0.0, 0.0, 1.0, 0.0)  # p(x) = x
 

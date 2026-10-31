@@ -16,8 +16,8 @@ from typing import Any
 
 import mlx.core as mx
 
-from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.stats import TeaCacheStats
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.variants.flux2_klein_4b.config import COEFFICIENTS as _FLUX2_KLEIN_4B_COEFFICIENTS
 from mlx_teacache.variants.flux2_klein_base_4b.integration import flux2_forward_with_gate
 

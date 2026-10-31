@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mlx_teacache.cache import TeaCacheState
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
 from mlx_teacache.integrations.mflux.lifecycle import (
     GenerationContext,
     GenerationContextCallback,
@@ -16,7 +17,6 @@ from mlx_teacache.integrations.mflux.lifecycle import (
     _remove_callback_by_identity,
     wrap_generate_image,
 )
-from mlx_teacache.stats import StepDecision, TeaCacheStats
 from tests._fakes import FaithfulCallbackRegistry
 
 

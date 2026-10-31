@@ -11,8 +11,8 @@ Per spec §5.3:
 import mlx.core as mx
 import pytest
 
-from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.gate import gate_step, mean_abs_rel_l1, poly_eval
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.gate import gate_step, mean_abs_rel_l1, poly_eval
 
 COEFFS = (1.0, -1.0, 0.5, 2.0, 0.0)  # x⁴ - x³ + 0.5x² + 2x
 

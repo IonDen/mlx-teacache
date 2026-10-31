@@ -616,6 +616,40 @@ def test_github_release_uses_gh_cli_with_the_only_write_scope() -> None:
     assert "GH_TOKEN: ${{ github.token }}" in [ln.strip() for ln in _release_job("github-release")]
 
 
+@pytest.mark.parametrize(
+    ("tag", "prerelease"),
+    [
+        ("v1.0.0rc1", True),
+        ("v1.0.0rc12", True),
+        ("v1.0.0a1", True),
+        ("v1.0.0b2", True),
+        ("v1.0.0.dev3", True),
+        ("v1.0.0-rc1", True),
+        ("v1.0.0", False),
+        ("v0.18.0", False),
+        ("v0.16.0", False),
+        ("v1.0.0.post1", False),
+        ("v10.0.0", False),
+    ],
+)
+def test_github_release_marks_pep440_prerelease_tags(tag: str, prerelease: bool) -> None:
+    """Bug: only hyphenated tags are flagged, so v1.0.0rc1 becomes the "Latest" GitHub Release."""
+    (case_line,) = [
+        ln.strip()
+        for ln in _release_job("github-release")
+        if ln.strip().startswith('case "$GITHUB_REF_NAME" in')
+    ]
+    assert case_line.endswith("esac")
+    result = subprocess.run(
+        ["bash", "-c", f'flags=""; {case_line}; printf %s "$flags"'],
+        env={"PATH": os.environ["PATH"], "GITHUB_REF_NAME": tag},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == ("--prerelease" if prerelease else "")
+
+
 def test_dependabot_updates_actions_and_uv_weekly() -> None:
     """Bug: pinned action SHAs and uv.lock going stale because nothing proposes updates."""
     text = (_REPO_ROOT / ".github" / "dependabot.yml").read_text()

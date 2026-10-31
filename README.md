@@ -53,12 +53,12 @@ uv add "mlx-teacache[mflux]"
 ```
 
 ```bash
-pip install "mlx-teacache[mflux]==0.15.0"  # pin for reproducibility
+pip install "mlx-teacache[mflux]==0.16.0"  # pin for reproducibility
 ```
 
 Requires Python ≥ 3.11 and Apple Silicon. The `[mflux]` extra pulls in `mflux>=0.24`. Version notes:
 
-- mlx-teacache 0.15.0 needs Python 3.11 or newer and mflux 0.24 or newer; there is no upper bound on mflux. A newer mflux installs and is patched, but has not been tested; `apply_teacache` warns until it is. mflux 0.24.0 itself needs Python 3.11 and Pillow 13, which fixes a critical Pillow security advisory ([GHSA-5x8w-8jj5-q52h](https://github.com/advisories/GHSA-5x8w-8jj5-q52h); Pillow 12.3 and older are affected), so an install with the `[mflux]` extra gets the fixed Pillow through mflux. The base install pulls in neither mflux nor Pillow.
+- mlx-teacache 0.16.0 needs Python 3.11 or newer and mflux 0.24 or newer; there is no upper bound on mflux. [docs/stability.md](docs/stability.md) describes what 1.0 will promise. A newer mflux installs and is patched, but has not been tested; `apply_teacache` warns until it is. mflux 0.24.0 itself needs Python 3.11 and Pillow 13, which fixes a critical Pillow security advisory ([GHSA-5x8w-8jj5-q52h](https://github.com/advisories/GHSA-5x8w-8jj5-q52h); Pillow 12.3 and older are affected), so an install with the `[mflux]` extra gets the fixed Pillow through mflux. The base install pulls in neither mflux nor Pillow.
 - Python 3.10 and mflux 0.17.5 through 0.23.x are no longer supported. If you need either, stay on the 0.14 line: `pip install "mlx-teacache[mflux]<0.15"`. Its last release, 0.14.1, still runs on mflux 0.24 but prints the untested-version warning there.
 - mflux 0.24 needs MLX 0.32 (below 0.33), torch 2.13 or newer, opencv-python, Pillow 13 or newer and Python 3.11 or newer.
 - For mlx-taef's live preview, use mlx-taef 0.9.0 or later. Its `[mflux]` extra supports mflux 0.24, so `mlx-teacache[mflux]` and `mlx-taef[mflux]>=0.9.0` install together.
@@ -241,7 +241,10 @@ handle = apply_teacache(flux)
 flux.generate_image(prompt="apple", seed=42, num_inference_steps=25)
 print(handle.stats.computed_count, handle.stats.skipped_count)
 print(handle.stats.last_generation.decisions[5])  # per-step record
+print(handle.decision_rule_revision, handle.mflux_version)
 ```
+
+The last line prints the revision of the gate's decision rule and the mflux version the patch was applied on. Skip counts can differ between minor releases or mflux versions, and these two values show which of them changed.
 
 ## Custom coefficients
 

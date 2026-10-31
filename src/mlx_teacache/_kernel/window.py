@@ -54,6 +54,6 @@ def check_step_window(
         raise InvalidStepWindowError(
             skip_first=first,
             skip_last=last,
-            num_steps=active,
+            active_num_steps=active,
             nominal_num_inference_steps=nominal_num_inference_steps,
         )

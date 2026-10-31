@@ -13,10 +13,10 @@ from unittest.mock import MagicMock
 import mlx.core as mx
 import pytest
 
-from mlx_teacache.cache import TeaCacheState
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.errors import InvalidStepWindowError
 from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
-from mlx_teacache.stats import TeaCacheStats
 from mlx_teacache.variants.flux1_dev.integration import flux1_forward_with_gate
 
 # --- Stubs ---

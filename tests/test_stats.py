@@ -1,6 +1,6 @@
 import pytest
 
-from mlx_teacache.stats import (
+from mlx_teacache._kernel.stats import (
     StatsFrozenError,
     StepDecision,
     TeaCacheStats,
@@ -25,10 +25,12 @@ def test_fresh_stats_zero():
     assert s.forced_count == 0
     assert s.skipped_count == 0
     assert s.numerical_miss_count == 0
-    assert s.cfg_fallback_steps == 0
+    with pytest.warns(DeprecationWarning, match="cfg_fallback_steps"):
+        assert s.cfg_fallback_steps == 0
     assert s.last_generation is None
     assert s.total_active_steps == 0
-    assert s.total_steps_seen == 0
+    with pytest.warns(DeprecationWarning, match="total_steps_seen"):
+        assert s.total_steps_seen == 0
 
 
 def test_record_mutates_staging_not_public():
@@ -98,8 +100,10 @@ def test_speedup_estimate_excludes_cfg_fallback():
     s.finalize_last_generation(num_inference_steps=10, cfg_was_active=True)
     # All cfg-fallback ⇒ active_steps == 0 ⇒ speedup is 1.0
     assert s.speedup_estimate == 1.0
-    assert s.cfg_fallback_steps == 10
-    assert s.total_steps_seen == 10
+    with pytest.warns(DeprecationWarning, match="cfg_fallback_steps"):
+        assert s.cfg_fallback_steps == 10
+    with pytest.warns(DeprecationWarning, match="total_steps_seen"):
+        assert s.total_steps_seen == 10
     assert s.total_active_steps == 0
 
 
@@ -111,8 +115,10 @@ def test_counter_sum_invariant():
         s.record(_make_decision(0, "cfg-fallback"))
     s.finalize_last_generation(num_inference_steps=8, cfg_was_active=True)
     assert s.total_active_steps == 5
-    assert s.cfg_fallback_steps == 3
-    assert s.total_steps_seen == 8
+    with pytest.warns(DeprecationWarning, match="cfg_fallback_steps"):
+        assert s.cfg_fallback_steps == 3
+    with pytest.warns(DeprecationWarning, match="total_steps_seen"):
+        assert s.total_steps_seen == 8
 
 
 def test_freeze_blocks_further_mutation():
@@ -174,4 +180,5 @@ def test_finalize_records_cfg_was_active_from_parameter():
     assert stats.last_generation is not None
     assert stats.last_generation.cfg_was_active is False
     # cfg_fallback_steps stays at 0 in v0.4.1+ — feature is gone.
-    assert stats.cfg_fallback_steps == 0
+    with pytest.warns(DeprecationWarning, match="cfg_fallback_steps"):
+        assert stats.cfg_fallback_steps == 0

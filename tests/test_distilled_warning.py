@@ -17,12 +17,12 @@ from types import SimpleNamespace
 import pytest
 
 from mlx_teacache import TeaCacheNoBenefitWarning
-from mlx_teacache.cache import TeaCacheState
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.integrations.mflux.lifecycle import (
     GenerationContext,
     GenerationContextCallback,
 )
-from mlx_teacache.stats import TeaCacheStats
 
 
 @dataclass

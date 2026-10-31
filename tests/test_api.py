@@ -156,7 +156,8 @@ def test_unsupported_model_raises_incompatible():
 def test_stats_initially_empty():
     flux = _make_fake_flux1()
     h = apply_teacache(flux)
-    assert h.stats.total_steps_seen == 0
+    with pytest.warns(DeprecationWarning, match="total_steps_seen"):
+        assert h.stats.total_steps_seen == 0
     assert h.stats.generations == 0
     assert h.stats.speedup_estimate == 1.0
     h.restore()

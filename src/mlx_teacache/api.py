@@ -11,6 +11,7 @@ import warnings
 from collections.abc import Sequence
 from typing import Any
 
+from mlx_teacache import _mflux_versions
 from mlx_teacache._kernel.coefficients import validate_custom
 from mlx_teacache._kernel.window import validate_step_count
 from mlx_teacache._mflux_versions import warn_if_untested_mflux
@@ -136,9 +137,13 @@ def apply_teacache(
                 skip_first_n_steps=skip_first_n_steps,
                 skip_last_n_steps=skip_last_n_steps,
             )
-            # Attach dispatcher-level metadata. TeaCacheHandle is a regular
-            # class, so dynamic attributes can be set without modifying handle.py.
-            handle.variant_id = variant_id  # type: ignore[attr-defined]
+            # Record dispatcher-level facts in the handle's private storage (the
+            # public properties are read-only or warn on write). The integration
+            # already recorded the coefficients it resolved.
+            handle._variant_id = variant_id
+            handle._skip_first_n_steps = skip_first_n_steps
+            handle._skip_last_n_steps = skip_last_n_steps
+            handle._mflux_version = _mflux_versions.installed_mflux_version()
 
             # Set the sentinel so AlreadyPatchedError fires on double-apply.
             # Clear it only after every teardown action succeeds, preventing a

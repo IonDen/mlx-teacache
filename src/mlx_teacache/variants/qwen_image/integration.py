@@ -534,6 +534,6 @@ def apply_qwen(
         provenance=resolved_provenance,
         rel_l1_thresh=resolved_thresh,
     )
-    handle.coefficients = resolved_coeffs  # type: ignore[attr-defined]
+    handle._coefficients = resolved_coeffs
     handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
     return handle

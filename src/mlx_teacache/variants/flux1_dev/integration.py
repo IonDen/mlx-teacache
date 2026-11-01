@@ -7,18 +7,17 @@ mflux is imported only inside this module. The package registry loads
 this lazily, after detect.matches() wins.
 """
 
-from dataclasses import dataclass, field
 from typing import Any, cast
 
 import mlx.core as mx
 import mlx.nn as nn
 
-from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
-from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.stats import StepDecision
 from mlx_teacache._kernel.window import check_step_window
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
+from mlx_teacache.integrations._session import InternalHandle
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 from mlx_teacache.variants._proxy_restore import make_restore_transformer
 
@@ -33,51 +32,8 @@ _PROVENANCE = Provenance(
 )
 
 
-# ----- Internal handle shape (mirrors v0.5.x TeaCacheHandle fields used by
-#       forward.py and lifecycle.py). Not part of the public API. -----
-
-
-@dataclass
-class _InternalHandleState:
-    cache: TeaCacheState = field(default_factory=TeaCacheState)
-    stats: TeaCacheStats = field(default_factory=TeaCacheStats)
-    no_benefit_warned: bool = False
-
-
-@dataclass
-class _GenerationContext:
-    token: int = 0
-    active_num_steps: int | None = None
-    consumed_at_token: int | None = None
-
-
-class _InternalHandle:
-    """Duck-type-compatible with the v0.5.x handle fields that forward.py and
-    lifecycle.py reference. Not returned to the user."""
-
-    def __init__(
-        self,
-        *,
-        rel_l1_thresh: float,
-        coefficients: tuple[float, float, float, float, float],
-        skip_first_n_steps: int,
-        skip_last_n_steps: int,
-        calibrated_range: tuple[float, float] | None = None,
-    ) -> None:
-        self._state = _InternalHandleState()
-        self._gen_ctx = _GenerationContext()
-        self.rel_l1_thresh = rel_l1_thresh
-        self.coefficients = coefficients
-        self.skip_first_n_steps = skip_first_n_steps
-        self.skip_last_n_steps = skip_last_n_steps
-        # (min, max) rel_l1 the coefficients were fitted on; None = evaluate the raw delta.
-        self.calibrated_range = calibrated_range
-        # Fields set by wrap_generate_image
-        self._generate_image_was_instance_attr: bool = False
-        self._original_generate_image: Any = None
-        self._pending_finalize: Any = None
-        # Field set by GenerationContextCallback registration
-        self._callback_instance: Any = None
+# The shared session type under the name the other FLUX integrations still import from here.
+_InternalHandle = InternalHandle
 
 
 # ----- Proxy transformer -----
@@ -525,5 +481,6 @@ def apply(
     # Expose resolved coefficients and callback instance as dynamic attributes
     # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
     handle._coefficients = resolved_coeffs
-    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    handle._session = internal
+    handle._callback_instance = internal._callback_instance
     return handle

@@ -76,7 +76,10 @@ def test_every_gate_step_call_site_passes_the_handles_range() -> None:
     import ast
 
     calls = []
-    for path in sorted((_SRC / "variants").glob("*/integration.py")):
+    paths = sorted((_SRC / "variants").glob("*/integration.py")) + sorted(
+        (_SRC / "integrations" / "mflux").glob("forward_*.py")
+    )
+    for path in paths:
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "gate_step":
                 kw = {k.arg: k.value for k in node.keywords}
@@ -87,6 +90,6 @@ def test_every_gate_step_call_site_passes_the_handles_range() -> None:
                     and isinstance(value.value, ast.Name)
                     and value.value.id == "handle"
                 )
-                calls.append((f"{path.parent.name}:{node.lineno}", wired))
+                calls.append((f"{path.parent.name}/{path.name}:{node.lineno}", wired))
     assert len(calls) == 6, calls
     assert all(wired for _, wired in calls), [site for site, wired in calls if not wired]

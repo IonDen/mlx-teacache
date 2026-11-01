@@ -43,6 +43,16 @@ def _active_step_count(config: Any) -> int:
     return max(0, nominal - init_step)
 
 
+def resolve_active_num_steps(handle: InternalHandle, config: Any) -> int:
+    """The active window a proxy forward gates over: the count the lifecycle captured for this
+    generation, else (defensively) the active window derived from the config, not the nominal
+    schedule, so an img2img run is measured against its real denoising count."""
+    active_num_steps = handle._gen_ctx.active_num_steps
+    if active_num_steps is None:
+        active_num_steps = _active_step_count(config)
+    return active_num_steps
+
+
 class GenerationContextCallback:
     """Single callback class for both variants.
 

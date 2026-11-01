@@ -20,23 +20,31 @@ tests/test_parity_z_image.py).
 """
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import mlx.core as mx
 
 from mlx_teacache._kernel.coefficients import Provenance
-from mlx_teacache._kernel.gate import GateDecision, gate_step
-from mlx_teacache._kernel.stats import StepDecision
-from mlx_teacache.errors import InternalStateError, TransformerShapeError
-from mlx_teacache.handle import TeaCacheHandle, VariantPatch
-from mlx_teacache.integrations._session import InternalHandle as _InternalHandle
-from mlx_teacache.integrations.mflux.lifecycle import (
-    GenerationContextCallback,
-    _remove_callback_by_identity,
-    wrap_generate_image,
+from mlx_teacache._kernel.gate import gate_step
+from mlx_teacache._kernel.resolve import BuiltinFit, resolve_rule
+from mlx_teacache._kernel.step import (
+    cache_residuals,
+    check_signal_shape,
+    fast_path_decision,
+    is_disabled,
+    reconstruct,
+    step_decision,
+    validate_window_once,
 )
+from mlx_teacache.handle import TeaCacheHandle
+from mlx_teacache.integrations._session import InternalHandle
+from mlx_teacache.integrations.mflux.patch import install_predict_patch
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
+
+# The shared session type under the name the tests still import from here.
+_InternalHandle = InternalHandle
+
 
 _PROVENANCE = Provenance(
     source="builtin",
@@ -53,16 +61,6 @@ _PROVENANCE = Provenance(
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_z_image.py",
     default_thresh=DEFAULT_THRESH,
 )
-
-
-def _step_decision_from_gate(decision: GateDecision, *, step_idx: int, timestep: float) -> StepDecision:
-    return StepDecision(
-        step_idx=step_idx,
-        timestep=timestep,
-        rel_l1=decision.rel_l1,
-        accumulated_distance=decision.accumulated_distance,
-        decision=decision.kind,
-    )
 
 
 # ---------- Re-walk of ZImageTransformer.__call__ (transformer.py:57-139). ----------
@@ -200,17 +198,9 @@ def zimage_forward_with_gate(
 
     # Fast path: threshold <= 0 ⇒ always compute, never cache. Run the full
     # 30-layer body in one loop (closest topology to vanilla __call__).
-    if handle.rel_l1_thresh <= 0.0:
+    if is_disabled(handle.rel_l1_thresh):
         main_out = _run_main_layers(transformer, pre.unified_in, pre, t_emb, start=0)
-        stats.record(
-            StepDecision(
-                step_idx=state.step_counter,
-                timestep=timestep_val,
-                rel_l1=None,
-                accumulated_distance=state.accumulated_distance,
-                decision="computed",
-            )
-        )
+        stats.record(fast_path_decision(state, timestep=timestep_val))
         state.last_timestep = timestep_val
         state.step_counter += 1
         return _zimage_tail(transformer, main_out, t_emb, pre)
@@ -220,12 +210,7 @@ def zimage_forward_with_gate(
         x=pre.unified_in, attn_mask=pre.attn_mask, freqs_cis=pre.freqs_cis, t_emb=t_emb
     )
     signal_b = h1 - pre.unified_in
-    if state.previous_mod_input is not None and signal_b.shape != state.previous_mod_input.shape:
-        raise TransformerShapeError(
-            step_idx=state.step_counter,
-            expected=state.previous_mod_input.shape,
-            actual=signal_b.shape,
-        )
+    check_signal_shape(state, signal_b)
 
     decision = gate_step(
         state,
@@ -238,19 +223,14 @@ def zimage_forward_with_gate(
         mod_in=signal_b,
         calibrated_range=handle.calibrated_range,
     )
-    stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
+    stats.record(step_decision(decision, step_idx=state.step_counter, timestep=timestep_val))
     state.last_timestep = timestep_val
 
     if decision.should_compute:
         main_out = _run_main_layers(transformer, h1, pre, t_emb, start=1)
-        if decision.should_update_cache:
-            state.store_residuals(pos=main_out - pre.unified_in)
+        cache_residuals(state, decision, pos=(main_out, pre.unified_in))
     else:
-        if state.cached_residual is None:
-            raise InternalStateError(
-                "cached_residual is None on a skipped step (Z-Image); gate.py logic bug."
-            )
-        main_out = pre.unified_in + state.cached_residual
+        main_out = reconstruct(pre.unified_in, state, decision)
 
     state.step_counter += 1
     return _zimage_tail(transformer, main_out, t_emb, pre)
@@ -278,18 +258,10 @@ def zimage_cfg_forward_with_gate(
     pre_neg = _zimage_prelude(transformer, latents, t_emb, cap_feats_neg)
 
     # Fast path: run both full bodies, no caching.
-    if handle.rel_l1_thresh <= 0.0:
+    if is_disabled(handle.rel_l1_thresh):
         main_out_pos = _run_main_layers(transformer, pre_pos.unified_in, pre_pos, t_emb, start=0)
         main_out_neg = _run_main_layers(transformer, pre_neg.unified_in, pre_neg, t_emb, start=0)
-        stats.record(
-            StepDecision(
-                step_idx=state.step_counter,
-                timestep=timestep_val,
-                rel_l1=None,
-                accumulated_distance=state.accumulated_distance,
-                decision="computed",
-            )
-        )
+        stats.record(fast_path_decision(state, timestep=timestep_val))
         state.last_timestep = timestep_val
         state.step_counter += 1
         noise_pos = _zimage_tail(transformer, main_out_pos, t_emb, pre_pos)
@@ -301,12 +273,7 @@ def zimage_cfg_forward_with_gate(
         x=pre_pos.unified_in, attn_mask=pre_pos.attn_mask, freqs_cis=pre_pos.freqs_cis, t_emb=t_emb
     )
     signal_b = h1_pos - pre_pos.unified_in
-    if state.previous_mod_input is not None and signal_b.shape != state.previous_mod_input.shape:
-        raise TransformerShapeError(
-            step_idx=state.step_counter,
-            expected=state.previous_mod_input.shape,
-            actual=signal_b.shape,
-        )
+    check_signal_shape(state, signal_b)
 
     decision = gate_step(
         state,
@@ -319,7 +286,7 @@ def zimage_cfg_forward_with_gate(
         mod_in=signal_b,
         calibrated_range=handle.calibrated_range,
     )
-    stats.record(_step_decision_from_gate(decision, step_idx=state.step_counter, timestep=timestep_val))
+    stats.record(step_decision(decision, step_idx=state.step_counter, timestep=timestep_val))
     state.last_timestep = timestep_val
 
     if decision.should_compute:
@@ -329,19 +296,15 @@ def zimage_cfg_forward_with_gate(
             x=pre_neg.unified_in, attn_mask=pre_neg.attn_mask, freqs_cis=pre_neg.freqs_cis, t_emb=t_emb
         )
         main_out_neg = _run_main_layers(transformer, h1_neg, pre_neg, t_emb, start=1)
-        if decision.should_update_cache:
-            state.store_residuals(
-                pos=main_out_pos - pre_pos.unified_in,
-                neg=main_out_neg - pre_neg.unified_in,
-            )
+        cache_residuals(
+            state,
+            decision,
+            pos=(main_out_pos, pre_pos.unified_in),
+            neg=(main_out_neg, pre_neg.unified_in),
+        )
     else:
-        if state.cached_residual is None or state.cached_residual_neg is None:
-            raise InternalStateError(
-                "cached_residual or cached_residual_neg is None on a skipped CFG step (Z-Image); "
-                "gate logic should guarantee seed-step caching before any skip."
-            )
-        main_out_pos = pre_pos.unified_in + state.cached_residual
-        main_out_neg = pre_neg.unified_in + state.cached_residual_neg
+        main_out_pos = reconstruct(pre_pos.unified_in, state, decision)
+        main_out_neg = reconstruct(pre_neg.unified_in, state, decision, branch="neg")
 
     state.step_counter += 1
     noise_pos = _zimage_tail(transformer, main_out_pos, t_emb, pre_pos)
@@ -359,7 +322,6 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
     """Return a callable assignable to `flux._predict`. mflux calls it as
     `predict = self._predict(self.transformer)` at the top of generate_image.
     Returns an EAGER closure (no mx.compile) so the per-step gate runs every step."""
-    from mlx_teacache._kernel.window import check_step_window
     from mlx_teacache.errors import MissingGenerationContextError
 
     def predict_factory(transformer: Any) -> PredictFn:
@@ -384,13 +346,12 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
                 context_consumed = True
 
             # 2. Lazy skip-window validation (first gated call).
-            if not handle._state.cache.skip_window_validated:
-                check_step_window(
-                    ctx.active_num_steps,
-                    skip_first_n_steps=handle.skip_first_n_steps,
-                    skip_last_n_steps=handle.skip_last_n_steps,
-                )
-                handle._state.cache.skip_window_validated = True
+            validate_window_once(
+                handle._state.cache,
+                active_num_steps=cast(int, handle._gen_ctx.active_num_steps),
+                skip_first_n_steps=handle.skip_first_n_steps,
+                skip_last_n_steps=handle.skip_last_n_steps,
+            )
 
             # 3. CFG branch.
             if negative_encodings is not None:
@@ -423,6 +384,13 @@ def make_teacache_predict_factory(handle: Any) -> PredictFactory:
 
 # ---------- apply() ----------
 
+_BUILTIN = BuiltinFit(
+    coefficients=COEFFICIENTS,
+    provenance=_PROVENANCE,
+    default_thresh=DEFAULT_THRESH,
+    calibrated_range=CALIBRATED_RANGE,
+)
+
 
 def apply(
     flux: Any,
@@ -435,92 +403,18 @@ def apply(
     """Z-Image base apply. Wraps flux._predict (instance-attribute replacement);
     rollback deletes it so the class staticmethod is exposed again. Finalizer
     unsubscribes the lifecycle callback."""
-    # 1. Resolve threshold (explicit > per-variant default for builtin coeffs > 0.20).
-    if rel_l1_thresh is not None:
-        resolved_thresh: float = rel_l1_thresh
-    elif coefficients is None and DEFAULT_THRESH is not None:
-        resolved_thresh = DEFAULT_THRESH
-    else:
-        resolved_thresh = 0.20
-
-    # 2. Resolve coefficients + provenance.
-    if coefficients is not None:
-        resolved_coeffs: tuple[float, float, float, float, float] = coefficients
-        resolved_provenance = Provenance.for_user_supplied()
-    else:
-        resolved_coeffs = COEFFICIENTS
-        resolved_provenance = _PROVENANCE
-
-    import contextlib
-
-    internal = _InternalHandle(
-        rel_l1_thresh=resolved_thresh,
-        coefficients=resolved_coeffs,
-        # The clamp belongs to this variant's fit, never to caller-supplied coefficients.
-        calibrated_range=CALIBRATED_RANGE if coefficients is None else None,
+    # Caller > the variant default with the built-in coefficients > the package fallback 0.20. A custom polynomial
+    # gets the fallback because the default was tuned for the bundled one.
+    rule = resolve_rule(
+        rel_l1_thresh=rel_l1_thresh,
+        coefficients=coefficients,
+        builtin=_BUILTIN,
+        policy="fallback-for-caller-coefficients",
+    )
+    return install_predict_patch(
+        flux,
+        make_factory=make_teacache_predict_factory,
+        rule=rule,
         skip_first_n_steps=skip_first_n_steps,
         skip_last_n_steps=skip_last_n_steps,
     )
-
-    # 3. Register lifecycle callback.
-    callback = GenerationContextCallback(internal)
-    internal._callback_instance = callback
-
-    # Eager rollback list for the transactional patch:
-    # if any mutation after callback registration raises, preceding mutations
-    # are reversed. Start with the callback unregister.
-    _rollbacks_so_far: list[Any] = [lambda: _remove_callback_by_identity(flux.callbacks, callback)]
-
-    # Wrap generate_image (records _generate_image_was_instance_attr, sets
-    # internal._original_generate_image).
-    try:
-        flux.callbacks.register(callback)
-        wrap_generate_image(flux, internal)
-    except BaseException:
-        for _undo in reversed(_rollbacks_so_far):
-            with contextlib.suppress(Exception):
-                _undo()
-        raise
-
-    # wrap_generate_image succeeded — add its rollback before the next mutation.
-    def _restore_generate_image() -> None:
-        if internal._generate_image_was_instance_attr:
-            flux.generate_image = internal._original_generate_image
-        elif "generate_image" in vars(flux):
-            del flux.generate_image
-
-    _rollbacks_so_far.append(_restore_generate_image)
-
-    # 4. Patch flux._predict (called as self._predict(self.transformer) in generate_image).
-    _predict_was_instance_attr = "_predict" in vars(flux)
-    _original_predict = flux.__dict__.get("_predict")
-    flux._predict = make_teacache_predict_factory(internal)
-    # No try needed: _predict assignment is the last mutation; fall through.
-
-    # 5. VariantPatch: rollback deletes _predict + restores generate_image; finalizer
-    #    unsubscribes the callback.
-    def _restore_predict() -> None:
-        if _predict_was_instance_attr:
-            flux._predict = _original_predict
-        else:
-            if "_predict" in vars(flux):
-                del flux._predict
-
-    def _unsubscribe_callback() -> None:
-        _remove_callback_by_identity(flux.callbacks, callback)
-
-    patch = VariantPatch(
-        rollbacks=[_restore_predict, _restore_generate_image],
-        finalizers=[_unsubscribe_callback],
-    )
-
-    handle = TeaCacheHandle(
-        patch=patch,
-        stats=internal._state.stats,
-        provenance=resolved_provenance,
-        rel_l1_thresh=resolved_thresh,
-    )
-    handle._coefficients = resolved_coeffs
-    handle._session = internal
-    handle._callback_instance = internal._callback_instance
-    return handle

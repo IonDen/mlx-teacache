@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import mlx.core as mx
 import pytest
 
-import mlx_teacache.variants.qwen_image.integration as integ
+import mlx_teacache.integrations.mflux.forward_qwen as integ
 from mlx_teacache.variants.qwen_image.integration import _InternalHandle, qwen_forward_with_gate
 from mlx_teacache.variants.qwen_image.pairing import CfgBranchPairer
 

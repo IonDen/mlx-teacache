@@ -11,6 +11,8 @@ module imports cleanly in the pure-core lane.
 """
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -291,15 +293,32 @@ def test_parse_worker_line_finds_the_sentinel_payload() -> None:
     assert bs._parse_worker_line("no sentinel here") is None
 
 
-def test_git_revision_reports_commit_and_dirty_flag(tmp_path: Path) -> None:
-    import subprocess
+_REPO_LOCATION_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
 
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+def _isolated_git_env() -> dict[str, str]:
+    """The process environment without the variables that point git at another repository."""
+    return {k: v for k, v in os.environ.items() if k not in _REPO_LOCATION_VARS}
+
+
+def test_isolated_git_env_drops_the_four_repo_location_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    # bug caught: a name missing from the removal list lets an exported work tree, index or
+    # object store redirect the temp repo's git calls
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY"):
+        monkeypatch.setenv(name, "/decoy")
+    env = _isolated_git_env()
+    assert {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY"} & env.keys() == set()
+    assert env["PATH"] == os.environ["PATH"]
+
+
+def _init_repo_with_commit(path: Path) -> None:
+    env = _isolated_git_env()
+    subprocess.run(["git", "init", "-q", str(path)], env=env, check=True)
     subprocess.run(
         [
             "git",
             "-C",
-            str(tmp_path),
+            str(path),
             "-c",
             "user.email=t@t",
             "-c",
@@ -310,16 +329,74 @@ def test_git_revision_reports_commit_and_dirty_flag(tmp_path: Path) -> None:
             "-m",
             "x",
         ],
+        env=env,
         check=True,
     )
+
+
+def _head_and_count(repo: Path) -> tuple[str, str]:
+    env = _isolated_git_env()
+    git = ["git", "-C", str(repo)]
+    head = subprocess.run([*git, "rev-parse", "HEAD"], env=env, capture_output=True, text=True, check=True)
+    count = subprocess.run(
+        [*git, "rev-list", "--count", "HEAD"], env=env, capture_output=True, text=True, check=True
+    )
+    return head.stdout.strip(), count.stdout.strip()
+
+
+def test_repo_setup_ignores_an_inherited_git_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # bug caught: the setup's git calls inherit GIT_DIR (exported by `git rebase -x`) and commit
+    # into the repository being rebased instead of the temporary one
+    decoy = tmp_path / "decoy"
+    env = _isolated_git_env()
+    subprocess.run(["git", "init", "-q", str(decoy)], env=env, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(decoy),
+            "-c",
+            "user.email=d@d",
+            "-c",
+            "user.name=d",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "d",
+        ],
+        env=env,
+        check=True,
+    )
+    head_before, count_before = _head_and_count(decoy)
+    assert count_before == "1"
+
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    _init_repo_with_commit(tmp_path / "repo")
+
+    assert _head_and_count(decoy) == (head_before, "1")
+
+
+def _drop_inherited_repo_location(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `_git_revision` runs git with the process env; under `git rebase -x` it would read the rebased repo
+    for name in _REPO_LOCATION_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_git_revision_reports_commit_and_dirty_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _drop_inherited_repo_location(monkeypatch)
+    _init_repo_with_commit(tmp_path)
     rev = bs._git_revision(tmp_path)
     assert isinstance(rev["git_commit"], str) and len(rev["git_commit"]) == 40
+    # bug caught: the reported sha comes from an inherited GIT_DIR's repository, not the temp repo
+    assert rev["git_commit"] == _head_and_count(tmp_path)[0]
     assert rev["git_dirty"] is False
     (tmp_path / "f").write_text("x")
     assert bs._git_revision(tmp_path)["git_dirty"] is True
 
 
-def test_git_revision_outside_a_repo_is_none(tmp_path: Path) -> None:
+def test_git_revision_outside_a_repo_is_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _drop_inherited_repo_location(monkeypatch)
     assert bs._git_revision(tmp_path) == {"git_commit": None, "git_dirty": None}
 
 

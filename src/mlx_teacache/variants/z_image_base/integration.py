@@ -8,9 +8,9 @@ residual `main_out - unified_in` per CFG branch; a skipped step reconstructs
 through). The timestep-only adaLN modulation rules out a cheap caption-independent
 prelude signal, so Signal B is tapped one layer into the unified stream.
 
-No sibling-variant imports: this variant defines its own internal handle and
-forward, depending only on the model-agnostic _kernel/, the public handle, and
-the shared mflux lifecycle helpers. mflux is imported lazily — the registry
+No sibling-variant imports: this variant defines its own forward, depending
+only on the model-agnostic _kernel/, the public handle, the shared internal
+session and the shared mflux lifecycle helpers. mflux is imported lazily — the registry
 loads this module only after detect.matches() wins.
 
 Vanilla Z-Image wraps `_predict` in `mx.compile` (eager on base and Pro M1/M2). We
@@ -24,12 +24,12 @@ from typing import Any
 
 import mlx.core as mx
 
-from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import GateDecision, gate_step
-from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.stats import StepDecision
 from mlx_teacache.errors import InternalStateError, TransformerShapeError
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
+from mlx_teacache.integrations._session import InternalHandle as _InternalHandle
 from mlx_teacache.integrations.mflux.lifecycle import (
     GenerationContextCallback,
     _remove_callback_by_identity,
@@ -53,51 +53,6 @@ _PROVENANCE = Provenance(
     reference_url="https://github.com/IonDen/mlx-teacache/blob/main/scripts/calibrate_z_image.py",
     default_thresh=DEFAULT_THRESH,
 )
-
-
-# ----- Internal handle shape (mirrors the fields lifecycle.py + the gate read).
-#       Self-contained: defined here, NOT imported from a sibling variant. -----
-
-
-class _InternalHandleState:
-    def __init__(self) -> None:
-        self.cache: TeaCacheState = TeaCacheState()
-        self.stats: TeaCacheStats = TeaCacheStats()
-        self.no_benefit_warned: bool = False
-
-
-class _GenerationContext:
-    def __init__(self) -> None:
-        self.token: int = 0
-        self.active_num_steps: int | None = None
-        self.consumed_at_token: int | None = None
-
-
-class _InternalHandle:
-    """Duck-type-compatible with the handle fields lifecycle.py + the forward
-    block reference. Not returned to the user."""
-
-    def __init__(
-        self,
-        *,
-        rel_l1_thresh: float,
-        coefficients: tuple[float, float, float, float, float],
-        skip_first_n_steps: int,
-        skip_last_n_steps: int,
-        calibrated_range: tuple[float, float] | None = None,
-    ) -> None:
-        self._state = _InternalHandleState()
-        self._gen_ctx = _GenerationContext()
-        self.rel_l1_thresh = rel_l1_thresh
-        self.coefficients = coefficients
-        self.skip_first_n_steps = skip_first_n_steps
-        self.skip_last_n_steps = skip_last_n_steps
-        # (min, max) rel_l1 the coefficients were fitted on; None = evaluate the raw delta.
-        self.calibrated_range = calibrated_range
-        self._generate_image_was_instance_attr: bool = False
-        self._original_generate_image: Any = None
-        self._pending_finalize: Any = None
-        self._callback_instance: Any = None
 
 
 def _step_decision_from_gate(decision: GateDecision, *, step_idx: int, timestep: float) -> StepDecision:
@@ -566,5 +521,6 @@ def apply(
         rel_l1_thresh=resolved_thresh,
     )
     handle._coefficients = resolved_coeffs
-    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    handle._session = internal
+    handle._callback_instance = internal._callback_instance
     return handle

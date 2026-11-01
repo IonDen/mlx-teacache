@@ -17,28 +17,13 @@ arguments (e.g., kontext_image).
 import inspect
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from mlx_teacache._kernel.window import window_too_short
 from mlx_teacache.errors import InternalStateError
-
-
-@dataclass
-class GenerationContext:
-    token: int = 0  # incremented in call_before_loop
-    active_num_steps: int | None = None  # set in call_before_loop, cleared by wrapper
-    consumed_at_token: int | None = None  # set when FLUX.2 predict closure consumes
-
-
-@dataclass(frozen=True)
-class PendingFinalize:
-    """Set by call_after_loop; consumed by the generate_image wrapper after
-    original() returns naturally. Typed (rather than dict) so strict mypy
-    can verify the field shapes at every callsite."""
-
-    num_inference_steps: int
-    cfg_was_active: bool
+from mlx_teacache.integrations._session import GenerationContext as GenerationContext
+from mlx_teacache.integrations._session import InternalHandle
+from mlx_teacache.integrations._session import PendingFinalize as PendingFinalize
 
 
 def _active_step_count(config: Any) -> int:
@@ -68,7 +53,7 @@ class GenerationContextCallback:
       invariant); the generate_image wrapper's try/finally clears context.
     """
 
-    def __init__(self, handle: Any) -> None:
+    def __init__(self, handle: InternalHandle) -> None:
         self._handle = handle
 
     def call_before_loop(
@@ -88,7 +73,7 @@ class GenerationContextCallback:
         self._handle._gen_ctx.active_num_steps = active_num_steps
         self._handle._gen_ctx.consumed_at_token = None
         # Lifecycle is the single owner of cache reset (was: scattered across
-        # forward.py for FLUX.1 and flux2.py for FLUX.2). Using active_num_steps
+        # the integrations/mflux forward modules). Using active_num_steps
         # (not nominal) makes the cache invariants consistent under img2img.
         self._handle._state.cache.reset_for_new_generation(num_steps=active_num_steps)
 
@@ -178,7 +163,7 @@ class GenerationContextCallback:
         return None
 
 
-def wrap_generate_image(flux: Any, handle: Any) -> None:
+def wrap_generate_image(flux: Any, handle: InternalHandle) -> None:
     """Replace flux.generate_image with a try/finally wrapper that:
     - Verifies our lifecycle callback is still registered.
     - On natural completion: finalizes staged stats via _pending_finalize.

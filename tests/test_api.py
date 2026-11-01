@@ -652,3 +652,20 @@ def test_restore_releases_cached_arrays_through_the_public_handle():
     handle.restore()
     assert state.cached_residual is None
     assert state.previous_mod_input is None
+
+
+def test_restore_releases_arrays_through_the_session_not_the_callback():
+    """bug caught: the release hook walks the callback chain and silently does nothing once that chain changes."""
+    import mlx.core as mx
+
+    flux = _make_fake_flux1("dev")
+    handle = apply_teacache(flux)
+    handle._callback_instance = None
+    cache = handle._session._state.cache
+    cache.previous_mod_input = mx.zeros((4,))
+    cache.cached_residual = mx.zeros((4,))
+    cache.cached_residual_neg = mx.zeros((4,))
+    handle.restore()
+    assert cache.previous_mod_input is None
+    assert cache.cached_residual is None
+    assert cache.cached_residual_neg is None

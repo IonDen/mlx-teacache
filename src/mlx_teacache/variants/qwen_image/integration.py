@@ -13,10 +13,9 @@ from typing import Any, cast
 import mlx.core as mx
 import mlx.nn as nn
 
-from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.gate import gate_step
-from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.stats import StepDecision
 from mlx_teacache._kernel.window import check_step_window
 from mlx_teacache.errors import (
     InternalStateError,
@@ -24,12 +23,12 @@ from mlx_teacache.errors import (
     TransformerShapeError,
 )
 from mlx_teacache.handle import TeaCacheHandle, VariantPatch
+from mlx_teacache.integrations._session import InternalHandle as _InternalHandle
 from mlx_teacache.integrations.mflux.lifecycle import _active_step_count
 from mlx_teacache.variants._proxy_restore import make_restore_transformer
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH, META
 from .detect import is_calibrated_checkpoint
-from .pairing import CfgBranchPairer
 
 _PROVENANCE = Provenance(
     source="builtin",
@@ -69,45 +68,6 @@ ORIGINAL_CALIBRATION = QwenCalibration(
     provenance=_PROVENANCE,
     hf_model_id=META["hf_model_id"],
 )
-
-
-class _InternalHandleState:
-    def __init__(self) -> None:
-        self.cache: TeaCacheState = TeaCacheState()
-        self.stats: TeaCacheStats = TeaCacheStats()
-        self.no_benefit_warned: bool = False
-
-
-class _GenerationContext:
-    def __init__(self) -> None:
-        self.token: int = 0
-        self.active_num_steps: int | None = None
-        self.consumed_at_token: int | None = None
-
-
-class _InternalHandle:
-    def __init__(
-        self,
-        *,
-        rel_l1_thresh: float,
-        coefficients: tuple[float, float, float, float, float],
-        skip_first_n_steps: int,
-        skip_last_n_steps: int,
-        calibrated_range: tuple[float, float] | None = None,
-    ) -> None:
-        self._state = _InternalHandleState()
-        self._gen_ctx = _GenerationContext()
-        self._pairer = CfgBranchPairer()
-        self.rel_l1_thresh = rel_l1_thresh
-        self.coefficients = coefficients
-        self.skip_first_n_steps = skip_first_n_steps
-        self.skip_last_n_steps = skip_last_n_steps
-        # (min, max) rel_l1 the coefficients were fitted on; None = evaluate the raw delta.
-        self.calibrated_range = calibrated_range
-        self._generate_image_was_instance_attr: bool = False
-        self._original_generate_image: Any = None
-        self._pending_finalize: Any = None
-        self._callback_instance: Any = None
 
 
 class ProxyQwenTransformer(nn.Module):  # type: ignore[misc,name-defined]
@@ -535,5 +495,6 @@ def apply_qwen(
         rel_l1_thresh=resolved_thresh,
     )
     handle._coefficients = resolved_coeffs
-    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
+    handle._session = internal
+    handle._callback_instance = internal._callback_instance
     return handle

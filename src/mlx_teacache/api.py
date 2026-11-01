@@ -26,16 +26,12 @@ from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.variants import _REGISTRY
 
 
-def _release_cache_arrays(handle: Any) -> None:
+def _release_cache_arrays(handle: TeaCacheHandle) -> None:
     """Drop the cached arrays a torn-down handle would otherwise keep alive
-    through its finalizer closure (handle -> callback -> internal handle ->
-    state). Best-effort by construction: a variant without the chain is left
-    alone."""
-    cb = getattr(handle, "_callback_instance", None)
-    cache = getattr(getattr(getattr(cb, "_handle", None), "_state", None), "cache", None)
-    release = getattr(cache, "release_arrays", None)
-    if callable(release):
-        release()
+    through its session. A handle with no session patches nothing and holds
+    no arrays."""
+    if handle._session is not None:
+        handle._session.release_arrays()
 
 
 def _validate_thresh(value: object) -> float:
@@ -154,7 +150,7 @@ def apply_teacache(
                 if getattr(_flux, "_teacache_handle", None) is _handle:
                     delattr(_flux, "_teacache_handle")
 
-            def _release_arrays(_handle: Any = handle) -> None:
+            def _release_arrays(_handle: TeaCacheHandle = handle) -> None:
                 _release_cache_arrays(_handle)
 
             handle._patch.on_restored.append(_release_arrays)

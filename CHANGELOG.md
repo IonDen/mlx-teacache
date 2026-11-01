@@ -7,6 +7,14 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-02
+
+An internal restructuring with no change in behaviour. The gate, the default thresholds, the coefficients, the variants, the skip decisions and the generated images are the same as in 0.16.0, and `decision_rule_revision` is still 1. The public API is unchanged. Before and after, the library's outputs and skip decisions were compared on small test models and matched exactly. This release has no speed or quality measurements.
+
+### Changed
+- For contributors: variants now share one internal session type, one patch installer for each patch strategy, one threshold resolver, and one module for the skip checks and residual reuse. No variant's code imports another, though a config may reuse a sibling's coefficients. The FLUX.1, FLUX.2 Klein and Qwen-Image forwards moved to `mlx_teacache.integrations.mflux` and are shared by their variants. Z-Image keeps its own forward and uses the shared predict installer. These modules are private, so code that imported them from a variant package needs the new path.
+- The benchmark and calibration scripts keep their per-model memory caps in the scripts. The variant configs no longer carry `memory_cap_hint_gb`.
+
 ## [0.16.0] — 2026-11-01
 
 A stability preview. This release writes down what mlx-teacache will promise from 1.0 ([docs/stability.md](docs/stability.md)), adds the pieces that policy needs, and deprecates what it leaves out. Everything deprecated here still works. All of it warns except the `"cfg-fallback"` decision string, which gets this notice and no runtime warning. The gate, the default thresholds, the coefficients, the variants and every generated image are unchanged, and this release has no speed or quality measurements.

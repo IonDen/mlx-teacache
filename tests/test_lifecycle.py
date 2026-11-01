@@ -2,41 +2,20 @@
 """Lifecycle helpers — callback + generate_image wrapper. Tests use fake
 flux objects to avoid pulling in mflux at unit-test time."""
 
-from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import pytest
 
-from mlx_teacache._kernel.cache import TeaCacheState
-from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.stats import StepDecision
+from mlx_teacache.integrations._session import PendingFinalize
 from mlx_teacache.integrations.mflux.lifecycle import (
-    GenerationContext,
     GenerationContextCallback,
-    PendingFinalize,
     _callback_present_by_identity,
     _remove_callback_by_identity,
     wrap_generate_image,
 )
 from tests._fakes import FaithfulCallbackRegistry
-
-
-@dataclass
-class _FakeHandle:
-    variant_id: str = "flux1-dev"
-    skip_first_n_steps: int = 1
-    skip_last_n_steps: int = 1
-    _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: SimpleNamespace = field(
-        default_factory=lambda: SimpleNamespace(
-            stats=TeaCacheStats(),
-            cache=TeaCacheState(),
-            no_benefit_warned=False,
-        )
-    )
-    _original_generate_image: object = None
-    _generate_image_was_instance_attr: bool = False
-    _pending_finalize: PendingFinalize | None = None
-
+from tests._session_fakes import make_session
 
 # -- _GenerationContextCallback --
 
@@ -56,7 +35,7 @@ def _img2img_config():
 
 
 def test_before_loop_captures_num_steps():
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
     assert handle._gen_ctx.active_num_steps == 25
@@ -66,7 +45,7 @@ def test_before_loop_captures_num_steps():
 
 def test_before_loop_accepts_img2img_no_rejection():
     """img2img is supported as of v0.2 — no exception expected."""
-    handle = _FakeHandle(variant_id="flux2-klein-4b")
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     # Should not raise:
     cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_img2img_config())
@@ -79,7 +58,7 @@ def test_after_loop_marks_pending_finalize_does_not_commit():
     the generate_image wrapper commits after original() returns cleanly.
     Per audit High #2: defers so user after-loop callbacks raising won't
     leak partial committed stats."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
     handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
@@ -97,7 +76,7 @@ def test_after_loop_marks_pending_finalize_does_not_commit():
 
 
 def test_interrupt_does_not_finalize_stats():
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
     handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
@@ -110,7 +89,7 @@ def test_interrupt_does_not_finalize_stats():
 
 
 def test_before_loop_accepts_extra_kwargs():
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     # Real mflux passes canny_image= and depth_image= via kwargs
     cb.call_before_loop(
@@ -125,7 +104,7 @@ def test_before_loop_accepts_extra_kwargs():
 def test_wrap_finalizes_stats_only_when_call_after_loop_ran():
     """Wrapper finalizes only when call_after_loop set _pending_finalize AND
     original() returned naturally."""
-    handle = _FakeHandle()
+    handle = make_session()
     handle._pending_finalize = None
 
     flux = SimpleNamespace()
@@ -150,7 +129,7 @@ def test_wrap_after_loop_user_callback_raises_no_partial_commit():
     """Per audit High #2: if call_after_loop set _pending_finalize but then a
     LATER after-loop callback raises (so original() raises), the wrapper
     must discard staging rather than commit."""
-    handle = _FakeHandle()
+    handle = make_session()
     handle._pending_finalize = None
 
     flux = SimpleNamespace()
@@ -172,7 +151,7 @@ def test_wrap_after_loop_user_callback_raises_no_partial_commit():
 
 
 def test_wrap_clears_context_on_exception_and_discards_staging():
-    handle = _FakeHandle()
+    handle = make_session()
     handle._gen_ctx.active_num_steps = 25
     handle._state.stats.record(StepDecision(0, 1.0, None, 0.0, "computed"))
 
@@ -200,7 +179,7 @@ def test_wrap_records_no_prior_instance_attr_when_class_level():
         def generate_image(self):
             return "class-method"
 
-    handle = _FakeHandle()
+    handle = make_session()
     flux = FluxClass()
     wrap_generate_image(flux, handle)
     assert handle._generate_image_was_instance_attr is False
@@ -212,12 +191,12 @@ def test_wrap_callback_replacement_raises_missing_context():
     running, rather than silently completing with no lifecycle hook."""
     from mlx_teacache.errors import MissingGenerationContextError
 
-    handle = _FakeHandle()
+    handle = make_session()
     # Register a hook-bearing callback on the original registry, as mflux does.
     original = FaithfulCallbackRegistry()
     cb = SimpleNamespace(call_before_loop=lambda **_: None)
     original.register(cb)
-    handle._callback_instance = cb  # type: ignore[attr-defined]
+    handle._callback_instance = cb
 
     flux = SimpleNamespace(callbacks=original)
     flux.generate_image = lambda: "ok"
@@ -237,7 +216,7 @@ def test_after_loop_releases_cached_arrays():
     VAE decode (where peak memory lands) and for the process lifetime."""
     import mlx.core as mx
 
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=42, prompt="hi", latents=None, config=_txt2img_config())
     handle._state.cache.previous_mod_input = mx.zeros((2,))
@@ -255,7 +234,7 @@ def test_wrapper_releases_cached_arrays_when_generation_raises():
     arrays resident until the next generation's before_loop."""
     import mlx.core as mx
 
-    handle = _FakeHandle()
+    handle = make_session()
     cache = handle._state.cache
 
     def _boom(**kw):

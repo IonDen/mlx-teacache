@@ -21,9 +21,7 @@ from typing import Any
 
 from mlx_teacache._kernel.window import window_too_short
 from mlx_teacache.errors import InternalStateError
-from mlx_teacache.integrations._session import GenerationContext as GenerationContext
-from mlx_teacache.integrations._session import InternalHandle
-from mlx_teacache.integrations._session import PendingFinalize as PendingFinalize
+from mlx_teacache.integrations._session import InternalHandle, PendingFinalize
 
 
 def _active_step_count(config: Any) -> int:

@@ -18,8 +18,8 @@ import mlx.core as mx
 
 from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.stats import TeaCacheStats
+from mlx_teacache.integrations.mflux.forward_flux2 import flux2_forward_with_gate
 from mlx_teacache.variants.flux2_klein_4b.config import COEFFICIENTS as _FLUX2_KLEIN_4B_COEFFICIENTS
-from mlx_teacache.variants.flux2_klein_base_4b.integration import flux2_forward_with_gate
 
 # ---------------------------------------------------------------------------
 # Fake Flux2Transformer
@@ -254,9 +254,9 @@ class _ResidualFlux2Inner(_FakeFlux2Inner):
 
 
 def _zero_coefficient_handle() -> Any:
-    from mlx_teacache.variants.flux1_dev.integration import _InternalHandle
+    from mlx_teacache.integrations._session import InternalHandle
 
-    handle = _InternalHandle(
+    handle = InternalHandle(
         rel_l1_thresh=0.5,
         coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ every gated step after the seed skips
         skip_first_n_steps=0,
@@ -299,7 +299,7 @@ def test_predict_with_negative_prompt_runs_cfg_forward():
     return the CFG combine neg + 4 * (pos - neg): hidden 1.0, positive text 1.0,
     negative text 0.25 gives 4.25 + 4 * 0.75 = 7.25. The non-CFG forward would
     return 1.0 + 1.0 + 3.0 = 5.0."""
-    from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_predict_factory
+    from mlx_teacache.integrations.mflux.forward_flux2 import make_teacache_predict_factory
 
     handle = _zero_coefficient_handle()
     handle._gen_ctx.token = 1

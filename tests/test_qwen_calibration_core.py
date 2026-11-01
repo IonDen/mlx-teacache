@@ -10,7 +10,7 @@ import pytest
 from mlx_teacache import apply_teacache
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.errors import TeaCacheUncalibratedCheckpointWarning
-from mlx_teacache.variants.qwen_image.integration import QwenCalibration, apply_qwen
+from mlx_teacache.integrations.mflux.forward_qwen import QwenCalibration, apply_qwen
 from tests._fakes import FaithfulCallbackRegistry
 from tests._variant_fakes import fake_for_variant
 

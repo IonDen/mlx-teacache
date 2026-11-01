@@ -36,7 +36,7 @@ from mlx_teacache.errors import (
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.integrations.mflux.lifecycle import resolve_active_num_steps
 from mlx_teacache.integrations.mflux.patch import install_proxy_patch
-from mlx_teacache.variants.qwen_image.detect import is_calibrated_checkpoint
+from mlx_teacache.variants._qwen_checkpoint import is_calibrated_checkpoint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -116,10 +116,6 @@ class ProxyQwenTransformer(nn.Module):  # type: ignore[misc,name-defined]
         except AttributeError:
             inner = object.__getattribute__(self, "_inner")
             return getattr(inner, name)
-
-
-# The old name, kept only for the variant module that still re-exports it.
-_step_decision_from_gate = step_decision
 
 
 class _Prelude:

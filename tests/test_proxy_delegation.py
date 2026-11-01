@@ -4,8 +4,8 @@ import mlx.core as mx
 import mlx.nn as nn
 import pytest
 
-from mlx_teacache.variants.flux1_dev.integration import ProxyFlux1Transformer
-from mlx_teacache.variants.qwen_image.integration import ProxyQwenTransformer
+from mlx_teacache.integrations.mflux.forward_flux1 import ProxyFlux1Transformer
+from mlx_teacache.integrations.mflux.forward_qwen import ProxyQwenTransformer
 
 pytestmark = pytest.mark.mflux
 

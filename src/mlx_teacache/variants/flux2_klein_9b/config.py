@@ -39,7 +39,6 @@ META: dict[str, Any] = {
     "display_name": "FLUX.2 Klein 9B",
     "hf_model_id": "black-forest-labs/FLUX.2-klein-9B",
     "non_distilled": False,
-    "memory_cap_hint_gb": None,
     "recipes": RECIPES,
     "license": LICENSE,
     "license_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B",

@@ -29,9 +29,6 @@ from mlx_teacache._kernel.step import (
 
 # ---------- Gated FLUX.2 forwards ----------
 
-# The old name, kept only for the variant module that still re-exports it.
-_step_decision_from_gate = step_decision
-
 
 def _flux2_extract_mod_input(
     inner: Any,

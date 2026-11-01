@@ -48,8 +48,8 @@ Memory safety
 
 Each worker subprocess sets a hard wired-memory cap (`mx.set_wired_limit`)
 and a soft cap (`mx.set_memory_limit`) BEFORE constructing the model, taken
-from the variant's `META["memory_cap_hint_gb"]` in the mlx-teacache variant
-registry when present, else a 20 GB wired / 22 GB soft fallback. An
+from the variant's hint in `scripts/_memory_cap_hints.py` when present, else
+a 20 GB wired / 22 GB soft fallback. An
 unconstrained wired peak kernel-panics rather than cleanly OOMing on a 32 GB
 M1 Max — see CLAUDE.md "Memory guardrails".
 """
@@ -67,7 +67,7 @@ import numpy as np
 from _mlx_watchdog import WATCHDOG_EXIT_CODE
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # the RUNTIME gate signal fn
-from mlx_teacache.variants.flux2_klein_base_4b.integration import (
+from mlx_teacache.integrations.mflux.forward_flux2 import (
     _flux2_extract_mod_input,
     _flux2_run_body,
 )
@@ -92,8 +92,8 @@ WIDTH = 512
 GUIDANCE = 1.0
 SEED = 42
 
-# Default soft memory cap (GB) when the variant's registry META has no
-# memory_cap_hint_gb. Worker derives the hard wired cap as (soft_cap - 2) GB —
+# Default soft memory cap (GB) when the variant has no hint in
+# _memory_cap_hints.py. Worker derives the hard wired cap as (soft_cap - 2) GB —
 # mirrors scripts/bench_speedup.py's worker cap convention.
 _DEFAULT_CAP_GB = 22
 
@@ -532,10 +532,9 @@ def _run_worker(
     # --- Memory guardrail (MUST come before the model load). ---
     variant_cfg = _VARIANTS[variant]
     variant_id: str = variant_cfg["variant_id"]
-    from mlx_teacache.variants import _REGISTRY
+    from _memory_cap_hints import memory_cap_hint_gb
 
-    registry_entry = _REGISTRY.get(variant_id)
-    hint = registry_entry["META"].get("memory_cap_hint_gb") if registry_entry is not None else None
+    hint = memory_cap_hint_gb(variant_id)
     cap_gb = hint if hint is not None else _DEFAULT_CAP_GB
     wired_gb = max(1, cap_gb - 2)
     from _mlx_caps import install_caps

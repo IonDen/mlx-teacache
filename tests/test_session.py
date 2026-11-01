@@ -3,11 +3,7 @@
 import mlx.core as mx
 
 from mlx_teacache.integrations import _session
-from mlx_teacache.integrations.mflux import lifecycle
 from mlx_teacache.testing import fake_handle
-from mlx_teacache.variants.flux1_dev import integration as flux1_dev_integration
-from mlx_teacache.variants.qwen_image import integration as qwen_image_integration
-from mlx_teacache.variants.z_image_base import integration as z_image_base_integration
 
 _COEFFS = (1.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -19,15 +15,6 @@ def _session_handle() -> _session.InternalHandle:
         skip_first_n_steps=1,
         skip_last_n_steps=1,
     )
-
-
-def test_every_bridge_name_is_the_one_session_type():
-    """bug caught: a variant keeps a private copy of the bridge, so a new session field reaches some variants only."""
-    assert flux1_dev_integration._InternalHandle is _session.InternalHandle
-    assert z_image_base_integration._InternalHandle is _session.InternalHandle
-    assert qwen_image_integration._InternalHandle is _session.InternalHandle
-    assert lifecycle.GenerationContext is _session.GenerationContext
-    assert lifecycle.PendingFinalize is _session.PendingFinalize
 
 
 def test_session_defaults_match_the_three_old_copies():

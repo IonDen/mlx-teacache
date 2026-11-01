@@ -21,9 +21,9 @@ from mlx_teacache import AlreadyPatchedError, apply_teacache
 from mlx_teacache._kernel.gate import GateDecision
 from mlx_teacache._kernel.step import step_decision
 from mlx_teacache.errors import InvalidStepWindowError, MissingGenerationContextError
+from mlx_teacache.integrations._session import InternalHandle
 from mlx_teacache.variants.z_image_base.config import COEFFICIENTS, DEFAULT_THRESH
 from mlx_teacache.variants.z_image_base.integration import (
-    _InternalHandle,
     make_teacache_predict_factory,
 )
 from tests._fakes import FaithfulCallbackRegistry
@@ -104,8 +104,8 @@ def test_double_apply_raises():
 # --- predict factory: context + skip-window validation (no forward) -------
 
 
-def _ready_handle(*, skip_first: int = 1, skip_last: int = 1) -> _InternalHandle:
-    return _InternalHandle(
+def _ready_handle(*, skip_first: int = 1, skip_last: int = 1) -> InternalHandle:
+    return InternalHandle(
         rel_l1_thresh=0.12,
         coefficients=COEFFICIENTS,
         skip_first_n_steps=skip_first,

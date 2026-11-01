@@ -3,20 +3,18 @@
 avoid loading real FLUX.2 weights. Deep parity tests use a real Flux2Klein
 4b in tests/test_parity_flux2.py (Task 26)."""
 
-from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import mlx.core as mx
 import pytest
 
-from mlx_teacache._kernel.cache import TeaCacheState
-from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.errors import (
     InvalidStepWindowError,
     MissingGenerationContextError,
 )
-from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
-from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_predict_factory
+from mlx_teacache.integrations._session import InternalHandle
+from mlx_teacache.integrations.mflux.forward_flux2 import make_teacache_predict_factory
+from tests._session_fakes import make_session
 
 # NOTE: this file runs in the pure-core (no-mflux) CI lane. The current tests
 # all raise before reaching flux2_forward_with_gate, which does a function-local
@@ -24,20 +22,9 @@ from mlx_teacache.variants.flux2_klein_base_4b.integration import make_teacache_
 # validation gates would ImportError in that lane — mark it mflux if so.
 
 
-@dataclass
-class _FakeHandle:
-    variant_id: str = "flux2-klein-4b"
-    rel_l1_thresh: float = 0.0  # always-compute, threshold-zero short-circuit
-    coefficients: tuple = (0.0, 0.0, 0.0, 0.0, 0.0)
-    skip_first_n_steps: int = 1
-    skip_last_n_steps: int = 1
-    _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: SimpleNamespace = field(
-        default_factory=lambda: SimpleNamespace(
-            stats=TeaCacheStats(),
-            cache=TeaCacheState(),
-        )
-    )
+def _session(**overrides: object) -> InternalHandle:
+    """The real session, always-compute (threshold-zero short-circuit), zero coefficients."""
+    return make_session(**{"rel_l1_thresh": 0.0, "coefficients": (0.0, 0.0, 0.0, 0.0, 0.0), **overrides})
 
 
 def _set_ctx_ready(handle, num_steps):
@@ -47,7 +34,7 @@ def _set_ctx_ready(handle, num_steps):
 
 
 def test_factory_returns_callable_per_generation():
-    handle = _FakeHandle()
+    handle = _session()
     factory = make_teacache_predict_factory(handle)
     transformer = SimpleNamespace(__call__=lambda *a, **kw: mx.ones((1, 2, 4)))
     p1 = factory(transformer)
@@ -56,7 +43,7 @@ def test_factory_returns_callable_per_generation():
 
 
 def test_missing_context_before_first_call_raises():
-    handle = _FakeHandle()
+    handle = _session()
     factory = make_teacache_predict_factory(handle)
 
     def transformer(**kw):
@@ -77,7 +64,7 @@ def test_missing_context_before_first_call_raises():
 
 
 def test_invalid_step_window_raised_on_first_non_cfg_step():
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = _session(skip_first_n_steps=1, skip_last_n_steps=1)
     _set_ctx_ready(handle, num_steps=2)  # 1+1 >= 2 ⇒ invalid
     factory = make_teacache_predict_factory(handle)
 
@@ -112,7 +99,7 @@ def test_cfg_path_enforces_skip_window_validation():
     transformer."""
     from mlx_teacache.errors import InvalidStepWindowError
 
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = _session(skip_first_n_steps=1, skip_last_n_steps=1)
     _set_ctx_ready(handle, num_steps=2)
     factory = make_teacache_predict_factory(handle)
 

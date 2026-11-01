@@ -2,20 +2,14 @@
 
 mflux 0.19 and later give the `qwen-image` config the aliases ["qwen-image", "qwen", "qwen-image-2512",
 "qwen-2512"] and load Qwen/Qwen-Image-2512 from it. The split from the original Qwen-Image variant is one rule,
-`qwen_image.detect.is_2512_checkpoint`: a 2512 alias, unless model_name is the original checkpoint (mflux resolves
+`_qwen_checkpoint.is_2512_checkpoint`: a 2512 alias, unless model_name is the original checkpoint (mflux resolves
 `Qwen/Qwen-Image` by repo id against the same config). The original variant matches exactly the configs that rule
 rejects, so the two never both match. Edit-2511 (`zero_cond_t`) is refused like the original refuses it.
 """
 
 from mlx_teacache.variants._pipeline_class import config_matches
-from mlx_teacache.variants.qwen_image.detect import (
-    ALIASES_2512,
-    has_zero_cond_t,
-    is_2512_checkpoint,
-)
-from mlx_teacache.variants.qwen_image.detect import (
-    is_calibrated_checkpoint as is_calibrated_checkpoint,
-)
+from mlx_teacache.variants._qwen_checkpoint import ALIASES_2512, has_zero_cond_t, is_2512_checkpoint
+from mlx_teacache.variants._qwen_checkpoint import is_calibrated_checkpoint as is_calibrated_checkpoint
 
 _ALLOWED = frozenset({"QwenImage"})
 

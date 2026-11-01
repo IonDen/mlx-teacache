@@ -23,8 +23,8 @@ from typing import Any
 
 import mlx.core as mx
 
+from mlx_teacache.integrations._session import InternalHandle
 from mlx_teacache.variants.z_image_base.integration import (
-    _InternalHandle,
     _zimage_t_emb,
     zimage_cfg_forward_with_gate,
     zimage_forward_with_gate,
@@ -99,8 +99,8 @@ class _FakeZImageTransformer:
         return x
 
 
-def _handle(rel_l1_thresh: float = 0.5) -> _InternalHandle:
-    handle = _InternalHandle(
+def _handle(rel_l1_thresh: float = 0.5) -> InternalHandle:
+    handle = InternalHandle(
         rel_l1_thresh=rel_l1_thresh,
         coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ every gated step after the seed skips
         skip_first_n_steps=0,
@@ -114,7 +114,7 @@ def _full(shape: tuple[int, ...], value: float) -> mx.array:
     return mx.full(shape, value)
 
 
-def _decisions(handle: _InternalHandle) -> list[str]:
+def _decisions(handle: InternalHandle) -> list[str]:
     return [d.decision for d in handle._state.stats._staging.decisions]
 
 

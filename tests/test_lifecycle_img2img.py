@@ -4,20 +4,17 @@ plumbing through before/after-loop, image_strength=1.0 no-op, and the deletion
 regression guard for img2img rejection.
 """
 
-from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
-from mlx_teacache._kernel.cache import TeaCacheState
-from mlx_teacache._kernel.stats import StepDecision, TeaCacheStats
+from mlx_teacache._kernel.stats import StepDecision
+from mlx_teacache.integrations._session import PendingFinalize
 from mlx_teacache.integrations.mflux.lifecycle import (
-    GenerationContext,
     GenerationContextCallback,
-    PendingFinalize,
     _active_step_count,
 )
+from tests._session_fakes import make_session
 
 
 def _make_config(num_inference_steps: int, *, image_strength: float | None = None) -> SimpleNamespace:
@@ -78,35 +75,15 @@ def test_active_step_count_floor_at_zero():
 # ---- Lifecycle plumbing ----
 
 
-@dataclass
-class _FakeHandleState:
-    cache: TeaCacheState = field(default_factory=TeaCacheState)
-    stats: TeaCacheStats = field(default_factory=TeaCacheStats)
-    no_benefit_warned: bool = False
-
-
-@dataclass
-class _FakeHandle:
-    variant_id: str = "flux1-dev"
-    skip_first_n_steps: int = 1
-    skip_last_n_steps: int = 1
-    rel_l1_thresh: float = 0.20
-    _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: _FakeHandleState = field(default_factory=_FakeHandleState)
-    _original_generate_image: Any = None
-    _generate_image_was_instance_attr: bool = False
-    _pending_finalize: Any = None
-
-
 def test_before_loop_sets_active_num_steps_for_txt2img():
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25))
     assert handle._gen_ctx.active_num_steps == 25
 
 
 def test_before_loop_sets_active_num_steps_for_img2img_07():
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25, image_strength=0.7))
     assert handle._gen_ctx.active_num_steps == 8  # 25 - 17
@@ -115,7 +92,7 @@ def test_before_loop_sets_active_num_steps_for_img2img_07():
 def test_before_loop_zero_active_steps_for_strength_1():
     """image_strength=1.0 yields 0 active steps; lifecycle reset still runs
     cleanly with num_steps=0 (cache simply never engages)."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25, image_strength=1.0))
     assert handle._gen_ctx.active_num_steps == 0
@@ -123,7 +100,7 @@ def test_before_loop_zero_active_steps_for_strength_1():
 
 def test_before_loop_does_not_raise_img2img_supported_error():
     """Regression guard: the v0.1 Img2ImgNotSupportedError no longer fires."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     # Must not raise:
     cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_make_config(25, image_strength=0.5))
@@ -133,7 +110,7 @@ def test_after_loop_uses_active_num_steps_for_pending_finalize():
     """call_after_loop reads active count from _gen_ctx (NOT config.num_inference_steps),
     so finalize_last_generation's len(decisions) == num_inference_steps invariant
     holds under img2img."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     cfg = _make_config(25, image_strength=0.7)  # active = 8
     cb.call_before_loop(seed=1, prompt="hi", latents=None, config=cfg)
@@ -150,7 +127,7 @@ def test_after_loop_uses_active_num_steps_for_pending_finalize():
 def test_after_loop_defensive_recompute_when_gen_ctx_active_is_none():
     """If _gen_ctx.active_num_steps was never set (shouldn't happen, but
     defensive), recompute from config rather than silently skipping finalization."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     # Skip the before_loop call; jump straight to after_loop.
     cfg = _make_config(25, image_strength=0.5)  # active = 13
@@ -169,7 +146,7 @@ def test_before_loop_resets_stale_cache_for_img2img():
     cleared by call_before_loop."""
     import mlx.core as mx
 
-    handle = _FakeHandle()
+    handle = make_session()
     # Seed stale state simulating a previous generation that finished:
     cache = handle._state.cache
     cache.step_counter = 8

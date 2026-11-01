@@ -113,10 +113,6 @@ class ProxyFlux1Transformer(nn.Module):  # type: ignore[misc,name-defined]
 # ----- Gated FLUX.1 forward -----
 
 
-# The old name, kept only for the variant module that still re-exports it.
-_step_decision_from_gate = step_decision
-
-
 def _flux1_extract_mod_input(block_0: Any, hidden_states_pre: mx.array, text_embeddings: mx.array) -> Any:
     """Extract the modulated block-0 input — the TeaCache gating signal.
     For FLUX.1's JointTransformerBlock, the gating signal is the output of

@@ -37,7 +37,7 @@ from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from calibrate_flux2 import CALIBRATION_PROMPTS, _fit_polynomial
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1, poly_eval
-from mlx_teacache.variants.flux1_dev.integration import (
+from mlx_teacache.integrations.mflux.forward_flux1 import (
     _flux1_extract_mod_input,
     _flux1_prelude,
     _flux1_run_body,

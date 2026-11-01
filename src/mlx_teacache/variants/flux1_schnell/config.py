@@ -21,7 +21,6 @@ META: dict[str, Any] = {
     "display_name": "FLUX.1 schnell",
     "hf_model_id": "black-forest-labs/FLUX.1-schnell",
     "non_distilled": False,
-    "memory_cap_hint_gb": None,
     "recipes": RECIPES,
     "license": LICENSE,
     "license_url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell",

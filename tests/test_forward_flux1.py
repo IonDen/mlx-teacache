@@ -18,8 +18,8 @@ import pytest
 
 from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.stats import TeaCacheStats
+from mlx_teacache.integrations.mflux.forward_flux1 import flux1_forward_with_gate
 from mlx_teacache.variants.flux1_dev.config import COEFFICIENTS as _FLUX1_DEV_COEFFICIENTS
-from mlx_teacache.variants.flux1_dev.integration import flux1_forward_with_gate
 
 # ---------------------------------------------------------------------------
 # Fake transformer
@@ -334,3 +334,31 @@ def test_skip_step_reconstructs_body_out_from_cached_residual():
     assert bool(mx.all(mx.abs(actual - expected) < 1e-5)), (
         f"skip reconstruction mismatch: max abs diff = {float(mx.max(mx.abs(actual - expected)))}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Patch target of the real-weights retry test
+# ---------------------------------------------------------------------------
+
+
+class _SimulatedBodyCrash(RuntimeError):
+    pass
+
+
+@pytest.mark.parametrize("rel_l1_thresh", [0.0, 0.25], ids=["fast-path", "gated-compute"])
+def test_compute_steps_call_the_body_through_the_forward_modules_global(
+    monkeypatch: pytest.MonkeyPatch, rel_l1_thresh: float
+) -> None:
+    """The real-weights retry test in tests/test_parity_flux1.py simulates a mid-loop crash by replacing
+    `_flux1_run_body` on `mlx_teacache.integrations.mflux.forward_flux1`. Bug: the forward reaches the body
+    through another binding (an alias, a default argument, a copy in another module), so that patch silently
+    misses, the crash never fires, and the retry test runs a plain generation that proves nothing."""
+    import mlx_teacache.integrations.mflux.forward_flux1 as forward_flux1
+
+    def crash(*args: Any, **kwargs: Any) -> Any:
+        raise _SimulatedBodyCrash("body reached through the patched name")
+
+    monkeypatch.setattr(forward_flux1, "_flux1_run_body", crash)
+    handle = _make_handle(rel_l1_thresh=rel_l1_thresh)
+    with pytest.raises(_SimulatedBodyCrash):
+        _run_one_step(handle, t=0)

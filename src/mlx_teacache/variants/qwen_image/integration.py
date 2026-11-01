@@ -8,23 +8,9 @@ from typing import Any
 
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.handle import TeaCacheHandle
-from mlx_teacache.integrations._session import InternalHandle
-from mlx_teacache.integrations.mflux.forward_qwen import ProxyQwenTransformer as ProxyQwenTransformer
-from mlx_teacache.integrations.mflux.forward_qwen import QwenCalibration as QwenCalibration
-from mlx_teacache.integrations.mflux.forward_qwen import _Prelude as _Prelude
-from mlx_teacache.integrations.mflux.forward_qwen import _qwen_prelude as _qwen_prelude
-from mlx_teacache.integrations.mflux.forward_qwen import _qwen_run_body as _qwen_run_body
-from mlx_teacache.integrations.mflux.forward_qwen import _qwen_signal_a as _qwen_signal_a
-from mlx_teacache.integrations.mflux.forward_qwen import _qwen_tail as _qwen_tail
-from mlx_teacache.integrations.mflux.forward_qwen import _step_decision_from_gate as _step_decision_from_gate
-from mlx_teacache.integrations.mflux.forward_qwen import apply_qwen as apply_qwen
-from mlx_teacache.integrations.mflux.forward_qwen import qwen_forward_with_gate as qwen_forward_with_gate
+from mlx_teacache.integrations.mflux.forward_qwen import QwenCalibration, apply_qwen
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH, META
-
-# The shared session type under the name the tests still import from here.
-_InternalHandle = InternalHandle
-
 
 _PROVENANCE = Provenance(
     source="builtin",

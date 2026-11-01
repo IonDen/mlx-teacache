@@ -10,21 +10,7 @@ from typing import Any
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.resolve import BuiltinFit, resolve_rule
 from mlx_teacache.handle import TeaCacheHandle
-from mlx_teacache.integrations.mflux.forward_flux2 import PredictFactory as PredictFactory
-from mlx_teacache.integrations.mflux.forward_flux2 import PredictFn as PredictFn
-from mlx_teacache.integrations.mflux.forward_flux2 import (
-    _flux2_apply_tail_and_combine as _flux2_apply_tail_and_combine,
-)
-from mlx_teacache.integrations.mflux.forward_flux2 import _flux2_extract_mod_input as _flux2_extract_mod_input
-from mlx_teacache.integrations.mflux.forward_flux2 import _flux2_run_body as _flux2_run_body
-from mlx_teacache.integrations.mflux.forward_flux2 import _step_decision_from_gate as _step_decision_from_gate
-from mlx_teacache.integrations.mflux.forward_flux2 import (
-    flux2_cfg_forward_with_gate as flux2_cfg_forward_with_gate,
-)
-from mlx_teacache.integrations.mflux.forward_flux2 import flux2_forward_with_gate as flux2_forward_with_gate
-from mlx_teacache.integrations.mflux.forward_flux2 import (
-    make_teacache_predict_factory as make_teacache_predict_factory,
-)
+from mlx_teacache.integrations.mflux.forward_flux2 import make_teacache_predict_factory
 from mlx_teacache.integrations.mflux.patch import install_predict_patch
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH

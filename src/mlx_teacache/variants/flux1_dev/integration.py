@@ -10,28 +10,7 @@ from typing import Any
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.resolve import BuiltinFit, resolve_rule
 from mlx_teacache.handle import TeaCacheHandle
-from mlx_teacache.integrations._session import InternalHandle
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    ProxyFlux1Transformer as ProxyFlux1Transformer,
-)
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    _flux1_extract_mod_input as _flux1_extract_mod_input,
-)
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    _flux1_prelude as _flux1_prelude,
-)
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    _flux1_run_body as _flux1_run_body,
-)
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    _flux1_tail as _flux1_tail,
-)
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    _step_decision_from_gate as _step_decision_from_gate,
-)
-from mlx_teacache.integrations.mflux.forward_flux1 import (
-    flux1_forward_with_gate as flux1_forward_with_gate,
-)
+from mlx_teacache.integrations.mflux.forward_flux1 import ProxyFlux1Transformer
 from mlx_teacache.integrations.mflux.patch import install_proxy_patch
 
 from .config import COEFFICIENTS, DEFAULT_THRESH
@@ -43,10 +22,6 @@ _PROVENANCE = Provenance(
     reference_url="https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py",
     default_thresh=DEFAULT_THRESH,
 )
-
-
-# The shared session type under the name the tests still import from here.
-_InternalHandle = InternalHandle
 
 
 # ----- apply() — translated from v0.5.x api.py::apply_teacache FLUX.1 branch -----

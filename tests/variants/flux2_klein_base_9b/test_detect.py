@@ -19,12 +19,6 @@ def test_meta_variant_id() -> None:
     assert META["non_distilled"] is True
 
 
-def test_meta_memory_cap_hint() -> None:
-    from mlx_teacache.variants.flux2_klein_base_9b.config import META
-
-    assert META["memory_cap_hint_gb"] == 24
-
-
 def test_default_thresh_is_017() -> None:
     from mlx_teacache.variants.flux2_klein_base_9b.config import DEFAULT_THRESH
 

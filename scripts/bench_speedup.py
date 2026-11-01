@@ -66,7 +66,7 @@ for qwen), then arms the active+cache watchdog (``_mlx_watchdog``), which
 aborts the worker with exit 4 and a ``::BENCH_RESULT::{"aborted": ...}`` line
 the moment resident memory exceeds ``memory_size - 4 GiB``. The orchestrator
 persists that payload as ``<condition>_rep<N>.aborted.json`` (never as a chunk)
-and exits 4. The soft cap is taken from the variant's META["memory_cap_hint_gb"]
+and exits 4. The soft cap is taken from the variant's hint in _memory_cap_hints.py
 (a cap request, not a peak prediction), 22 GB by default, or --cap-gb. Running
 vanilla then wrapper in the same process panicked the kernel on 2026-05-19 and
 2026-05-20 on a 32 GB M1 Max; subprocess isolation prevents wired-memory
@@ -167,7 +167,7 @@ def _resolution_for(variant: str) -> tuple[int, int]:
     return _VARIANT_RESOLUTION.get(variant, (HEIGHT, WIDTH))
 
 
-# Default soft memory cap (GB) per variant when _REGISTRY META is absent.
+# Default soft memory cap (GB) for a variant with no hint in _memory_cap_hints.py.
 # Workers derive the hard wired cap as (soft_cap - 2) GB. This is a cap request
 # (the wired cap is clamped to the device anyway), not a prediction of the peak.
 _DEFAULT_CAP_GB = 22
@@ -272,17 +272,15 @@ def _worker_main(args: argparse.Namespace) -> None:
     # --- Memory guardrail (MUST come before model load) ---
     # cap_gb is passed by the orchestrator; fall back to _DEFAULT_CAP_GB.
     cap_gb: int = args.cap_gb if args.cap_gb is not None else _DEFAULT_CAP_GB
-    # If the variant has a META hint, prefer that (unless orchestrator overrode).
+    # If the variant has a cap hint, prefer that (unless orchestrator overrode).
     if args.cap_gb is None:
         variant_id = _VARIANT_SLUG_TO_ID.get(args.variant, "")
         if variant_id:
-            from mlx_teacache.variants import _REGISTRY
+            from _memory_cap_hints import memory_cap_hint_gb
 
-            registry_entry = _REGISTRY.get(variant_id)
-            if registry_entry is not None:
-                hint = registry_entry["META"].get("memory_cap_hint_gb")
-                if hint is not None:
-                    cap_gb = hint
+            hint = memory_cap_hint_gb(variant_id)
+            if hint is not None:
+                cap_gb = hint
 
     wired_gb = max(1, cap_gb - 2)
     from _mlx_caps import install_caps
@@ -715,7 +713,7 @@ def main() -> None:
         help=(
             "Advisory MLX memory cap in GB. The worker also sets a device-clamped hard "
             "wired cap at (cap - 2) GB, bounds the MLX cache pool, and arms the "
-            "active+cache watchdog. Defaults to the variant META's memory_cap_hint_gb "
+            "active+cache watchdog. Defaults to the variant's hint in _memory_cap_hints.py "
             f"(a cap request, not a peak prediction) or {_DEFAULT_CAP_GB} GB otherwise."
         ),
     )

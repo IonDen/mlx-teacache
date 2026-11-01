@@ -7,37 +7,22 @@ inside gate_step, NOT the absolute scheduler timestep. These tests assert
 that change.
 """
 
-from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
 import mlx.core as mx
 import pytest
 
-from mlx_teacache._kernel.cache import TeaCacheState
-from mlx_teacache._kernel.stats import TeaCacheStats
 from mlx_teacache.errors import InvalidStepWindowError
-from mlx_teacache.integrations.mflux.lifecycle import GenerationContext
-from mlx_teacache.variants.flux1_dev.integration import flux1_forward_with_gate
+from mlx_teacache.integrations._session import InternalHandle
+from mlx_teacache.integrations.mflux.forward_flux1 import flux1_forward_with_gate
+from tests._session_fakes import make_session
 
 # --- Stubs ---
 
 
-@dataclass
-class _FakeHandleState:
-    cache: TeaCacheState = field(default_factory=TeaCacheState)
-    stats: TeaCacheStats = field(default_factory=TeaCacheStats)
-    no_benefit_warned: bool = False
-
-
-@dataclass
-class _FakeHandle:
-    variant_id: str = "flux1-dev"
-    skip_first_n_steps: int = 1
-    skip_last_n_steps: int = 1
-    rel_l1_thresh: float = 0.0  # fast-path; no need to seed cached_residual
-    coefficients: tuple = (1.0, 0.0, 0.0, 0.0, 0.0)
-    _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: _FakeHandleState = field(default_factory=_FakeHandleState)
+def _session(**overrides: object) -> InternalHandle:
+    """The real session on the fast path (threshold 0.0, no need to seed cached_residual)."""
+    return make_session(**{"rel_l1_thresh": 0.0, "coefficients": (1.0, 0.0, 0.0, 0.0, 0.0), **overrides})
 
 
 def _make_fake_inner():
@@ -65,7 +50,7 @@ def _make_fake_config(num_inference_steps: int = 25):
 def test_img2img_first_call_uses_step_counter_zero_even_when_t_positive():
     """First img2img call has absolute t = init_time_step > 0, but gate_step
     must be invoked with step_idx=0 (relative). The stats record reflects this."""
-    handle = _FakeHandle()
+    handle = _session()
     # Simulate lifecycle setting active_num_steps for an img2img call:
     handle._gen_ctx.active_num_steps = 8  # 25 - 17
     inner = _make_fake_inner()
@@ -96,7 +81,7 @@ def test_img2img_first_call_uses_step_counter_zero_even_when_t_positive():
 def test_forward_does_not_reset_cache_on_t_zero():
     """Cache reset is now lifecycle-owned. forward.py must NOT call
     reset_for_new_generation, even when t == 0."""
-    handle = _FakeHandle()
+    handle = _session()
     handle._gen_ctx.active_num_steps = 25  # txt2img
     # Seed the cache with a known step_counter > 0; if forward improperly reset,
     # this would go back to 0.
@@ -131,7 +116,7 @@ def test_skip_window_validated_against_active_num_steps_not_nominal():
     must raise (sum >= active). Under the old code (validated against nominal=25),
     the validation would silently pass even though we'd never have any eligible
     step. The new code uses the active window from _gen_ctx."""
-    handle = _FakeHandle(skip_first_n_steps=2, skip_last_n_steps=2)
+    handle = _session(skip_first_n_steps=2, skip_last_n_steps=2)
     handle._gen_ctx.active_num_steps = 4  # img2img with strength=0.84 + 25 steps
     handle._state.cache.step_counter = 0
     handle._state.cache.skip_window_validated = False

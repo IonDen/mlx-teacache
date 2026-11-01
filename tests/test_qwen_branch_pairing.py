@@ -11,8 +11,8 @@ import mlx.core as mx
 import pytest
 
 import mlx_teacache.integrations.mflux.forward_qwen as integ
-from mlx_teacache.variants.qwen_image.integration import _InternalHandle, qwen_forward_with_gate
-from mlx_teacache.variants.qwen_image.pairing import CfgBranchPairer
+from mlx_teacache.integrations._session import CfgBranchPairer, InternalHandle
+from mlx_teacache.integrations.mflux.forward_qwen import qwen_forward_with_gate
 
 
 def test_fresh_token_starts_positive() -> None:
@@ -105,8 +105,8 @@ def _patch_physics(monkeypatch, *, signal_value: float) -> dict:
     return calls
 
 
-def _orch_handle(thresh: float) -> _InternalHandle:
-    h = _InternalHandle(
+def _orch_handle(thresh: float) -> InternalHandle:
+    h = InternalHandle(
         rel_l1_thresh=thresh,
         coefficients=(0.0, 0.0, 0.0, 0.0, 1.0),  # poly→1.0/step ⇒ accumulate fast ⇒ compute
         skip_first_n_steps=1,
@@ -154,7 +154,7 @@ def test_gate_runs_on_positive_only(monkeypatch) -> None:  # noqa: ANN001
 def test_skip_step_reconstructs_from_cache_without_running_body(monkeypatch) -> None:  # noqa: ANN001
     calls = _patch_physics(monkeypatch, signal_value=0.5)
     inner = SimpleNamespace()
-    h = _InternalHandle(
+    h = InternalHandle(
         rel_l1_thresh=0.20,
         coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ accumulator never grows ⇒ skip after seed
         skip_first_n_steps=1,
@@ -201,7 +201,7 @@ def test_negative_branch_reuses_its_own_residual_on_skip(monkeypatch) -> None:  
     own residual on top of that step's h_in."""
     calls = _patch_physics(monkeypatch, signal_value=0.5)
     inner = SimpleNamespace()
-    h = _InternalHandle(
+    h = InternalHandle(
         rel_l1_thresh=0.5,
         coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0 ⇒ step 1 skips after the step-0 seed
         skip_first_n_steps=0,
@@ -252,7 +252,7 @@ def test_overwide_skip_window_raises(monkeypatch) -> None:  # noqa: ANN001
 
     _patch_physics(monkeypatch, signal_value=0.5)
     inner = SimpleNamespace()
-    handle = _InternalHandle(
+    handle = InternalHandle(
         rel_l1_thresh=0.20,
         coefficients=(0.0, 0.0, 0.0, 0.0, 1.0),
         skip_first_n_steps=3,
@@ -284,7 +284,7 @@ def test_interrupt_midpair_then_fresh_generation_clears_stale_residual(monkeypat
     stale state so it cannot leak into gen 2 — the documented interrupt heal."""
     _patch_physics(monkeypatch, signal_value=0.5)
     inner = SimpleNamespace()
-    handle = _InternalHandle(
+    handle = InternalHandle(
         rel_l1_thresh=0.20,
         coefficients=(0.0, 0.0, 0.0, 0.0, 0.0),  # poly→0; the first eligible step seeds + caches
         skip_first_n_steps=0,

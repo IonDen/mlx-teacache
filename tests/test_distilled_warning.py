@@ -11,34 +11,13 @@ so skipping is achievable even at guidance > 1.0; the warning fires normally.
 """
 
 import warnings
-from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import pytest
 
 from mlx_teacache import TeaCacheNoBenefitWarning
-from mlx_teacache._kernel.cache import TeaCacheState
-from mlx_teacache._kernel.stats import TeaCacheStats
-from mlx_teacache.integrations.mflux.lifecycle import (
-    GenerationContext,
-    GenerationContextCallback,
-)
-
-
-@dataclass
-class _FakeHandleState:
-    cache: TeaCacheState = field(default_factory=TeaCacheState)
-    stats: TeaCacheStats = field(default_factory=TeaCacheStats)
-    no_benefit_warned: bool = False
-
-
-@dataclass
-class _FakeHandle:
-    variant_id: str = "flux1-schnell"
-    skip_first_n_steps: int = 1
-    skip_last_n_steps: int = 1
-    _gen_ctx: GenerationContext = field(default_factory=GenerationContext)
-    _state: _FakeHandleState = field(default_factory=_FakeHandleState)
+from mlx_teacache.integrations.mflux.lifecycle import GenerationContextCallback
+from tests._session_fakes import make_session
 
 
 def _config(
@@ -62,7 +41,7 @@ def _config(
 def test_does_not_fire_at_schnell_default_eligible_is_two():
     """FLUX.1 schnell default: 4 steps, skip_first=1, skip_last=1
     → eligible=2 → possible_skips=1. Should NOT fire."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -74,7 +53,7 @@ def test_does_not_fire_at_schnell_default_eligible_is_two():
 def test_fires_when_eligible_is_one():
     """active=3, skip_first=1, skip_last=1 → eligible=1 → possible_skips=0.
     Should fire."""
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb = GenerationContextCallback(handle)
     with pytest.warns(TeaCacheNoBenefitWarning, match=r"eligible"):
         cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(3))
@@ -82,7 +61,7 @@ def test_fires_when_eligible_is_one():
 
 def test_does_not_fire_when_eligible_is_two():
     """eligible=2 → possible_skips=1. Caching can engage technically; no warning."""
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -94,7 +73,7 @@ def test_does_not_fire_when_eligible_is_two():
 def test_does_not_fire_when_window_is_invalid():
     """skip_first + skip_last >= active_num_steps → InvalidStepWindowError
     will fire elsewhere. Don't add a duplicate warning."""
-    handle = _FakeHandle(skip_first_n_steps=3, skip_last_n_steps=3)
+    handle = make_session(skip_first_n_steps=3, skip_last_n_steps=3)
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -107,7 +86,7 @@ def test_fires_under_flux2_all_cfg():
     """v0.4.1: FLUX.2 with guidance > 1.0 no longer suppresses the no-benefit
     warning. The CFG path is gated, so skipping is achievable; eligible=1
     → possible_skips=0 should emit TeaCacheNoBenefitWarning as usual."""
-    handle = _FakeHandle(variant_id="flux2-klein-4b")
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     with pytest.warns(TeaCacheNoBenefitWarning, match=r"eligible"):
         cb.call_before_loop(seed=1, prompt="hi", latents=None, config=_config(3, guidance=3.5))
@@ -115,7 +94,7 @@ def test_fires_under_flux2_all_cfg():
 
 def test_does_not_fire_for_active_zero():
     """image_strength=1.0 yields active=0; valid no-op generation, no warning."""
-    handle = _FakeHandle()
+    handle = make_session()
     cb = GenerationContextCallback(handle)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -130,7 +109,7 @@ def test_does_not_fire_for_active_zero():
 def test_fires_once_per_handle():
     """Second call under the same handle stays quiet even when the
     config still has no possible skips."""
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb = GenerationContextCallback(handle)
     bad_cfg = _config(3)  # eligible=1 → possible_skips=0
 
@@ -152,13 +131,13 @@ def test_fires_again_after_new_handle():
     bad_cfg = _config(3)
 
     # First handle.
-    h1 = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    h1 = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb1 = GenerationContextCallback(h1)
     with pytest.warns(TeaCacheNoBenefitWarning):
         cb1.call_before_loop(seed=1, prompt="hi", latents=None, config=bad_cfg)
 
     # Fresh handle.
-    h2 = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    h2 = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb2 = GenerationContextCallback(h2)
     with pytest.warns(TeaCacheNoBenefitWarning):
         cb2.call_before_loop(seed=1, prompt="hi", latents=None, config=bad_cfg)
@@ -169,7 +148,7 @@ def test_fires_again_after_new_handle():
 
 def test_filterwarnings_ignore_suppresses_emission():
     """Standard warnings.filterwarnings('ignore', category=...) silences the warning."""
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb = GenerationContextCallback(handle)
     bad_cfg = _config(3)
 
@@ -185,7 +164,7 @@ def test_filterwarnings_ignore_suppresses_emission():
 
 
 def test_message_contains_numeric_values():
-    handle = _FakeHandle(skip_first_n_steps=1, skip_last_n_steps=1)
+    handle = make_session(skip_first_n_steps=1, skip_last_n_steps=1)
     cb = GenerationContextCallback(handle)
     bad_cfg = _config(3)
 

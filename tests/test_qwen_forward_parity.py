@@ -15,13 +15,13 @@ import mlx.core as mx
 import mlx.nn as nn
 import pytest
 
-from mlx_teacache.variants.qwen_image.detect import matches
-from mlx_teacache.variants.qwen_image.integration import (
-    _InternalHandle,
+from mlx_teacache.integrations._session import InternalHandle
+from mlx_teacache.integrations.mflux.forward_qwen import (
     _qwen_prelude,
     _qwen_signal_a,
     qwen_forward_with_gate,
 )
+from mlx_teacache.variants.qwen_image.detect import matches
 
 pytest.importorskip("mflux")
 from mflux.models.qwen.model.qwen_transformer.qwen_transformer import QwenTransformer  # noqa: E402
@@ -74,10 +74,10 @@ def _inputs() -> tuple[mx.array, mx.array, mx.array, mx.array]:
     return latents, prompt_pos, prompt_neg, mask
 
 
-def _handle(rel_l1_thresh: float) -> _InternalHandle:
+def _handle(rel_l1_thresh: float) -> InternalHandle:
     # Step 1 computes through the gate's seed guard (step 0 is forced and caches nothing) and writes the cache;
     # the constant coefficients would only matter from a third step pair on.
-    handle = _InternalHandle(
+    handle = InternalHandle(
         rel_l1_thresh=rel_l1_thresh,
         coefficients=(0.0, 0.0, 0.0, 0.0, 1.0),
         skip_first_n_steps=1,

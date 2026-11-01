@@ -37,14 +37,9 @@ from mlx_teacache._kernel.step import (
     validate_window_once,
 )
 from mlx_teacache.handle import TeaCacheHandle
-from mlx_teacache.integrations._session import InternalHandle
 from mlx_teacache.integrations.mflux.patch import install_predict_patch
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
-
-# The shared session type under the name the tests still import from here.
-_InternalHandle = InternalHandle
-
 
 _PROVENANCE = Provenance(
     source="builtin",

@@ -41,9 +41,9 @@ Memory safety
 -------------
 
 Each worker subprocess installs device-clamped caps (`install_caps`) before
-constructing the model, taken from flux2-klein-base-4b's
-`META["memory_cap_hint_gb"]` in the mlx-teacache variant registry when present,
-else a 20 GB wired / 22 GB soft fallback. The wired cap bounds only wired Metal
+constructing the model, taken from flux2-klein-base-4b's hint in
+`scripts/_memory_cap_hints.py` when present, else a 20 GB wired / 22 GB soft
+fallback. The wired cap bounds only wired Metal
 memory; the active+cache memory watchdog armed in each worker is what aborts a
 paging storm.
 """
@@ -71,8 +71,8 @@ VARIANT_ID = "flux2-klein-base-4b"
 # Coarse + fine, in one pass. The knee is between 0.165 and 0.175.
 THRESHOLDS = [0.05, 0.08, 0.10, 0.12, 0.15, 0.155, 0.16, 0.165, 0.17, 0.175, 0.18]
 
-# Default soft memory cap (GB) when the variant's registry META has no
-# memory_cap_hint_gb. Worker derives the hard wired cap as (soft_cap - 2) GB —
+# Default soft memory cap (GB) when the variant has no hint in
+# _memory_cap_hints.py. Worker derives the hard wired cap as (soft_cap - 2) GB —
 # mirrors scripts/bench_speedup.py's worker cap convention.
 _DEFAULT_CAP_GB = 22
 
@@ -206,10 +206,9 @@ def _run_worker(unit: str, *, chunk_dir: Path, dry_run: bool) -> None:
         return
 
     # --- Memory guardrail (MUST come before the model load). ---
-    from mlx_teacache.variants import _REGISTRY
+    from _memory_cap_hints import memory_cap_hint_gb
 
-    registry_entry = _REGISTRY.get(VARIANT_ID)
-    hint = registry_entry["META"].get("memory_cap_hint_gb") if registry_entry is not None else None
+    hint = memory_cap_hint_gb(VARIANT_ID)
     cap_gb = hint if hint is not None else _DEFAULT_CAP_GB
     wired_gb = max(1, cap_gb - 2)
     from _mlx_caps import install_caps

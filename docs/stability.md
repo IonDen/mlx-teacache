@@ -39,7 +39,7 @@ A removal always warns for at least one minor release first, and it happens only
 | setting `handle.rel_l1_thresh`, `handle.stats`, `handle.provenance` or `handle.coefficients` (the gate never read the written values; `coefficients` was a writable attribute in 0.15) | pass the values to `apply_teacache` | an error from 1.0, when the handle becomes read-only |
 | `InvalidStepWindowError(num_steps=...)` | `active_num_steps=` | removed in 2.0 |
 
-Writing `handle.variant_id` does not warn in 0.16; a warning for it comes in a later minor release. The CHANGELOG lists each deprecation in the release that introduced it.
+Writing `handle.variant_id` does not warn yet; a warning for it comes in a later minor release. The CHANGELOG lists each deprecation in the release that introduced it.
 
 Python hides a `DeprecationWarning` unless it is raised from `__main__`, so a library user may not see these. To see them, run Python with `-W default::DeprecationWarning` or set `PYTHONWARNINGS=default::DeprecationWarning`. pytest shows them without any flag.
 

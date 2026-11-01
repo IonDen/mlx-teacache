@@ -187,40 +187,29 @@ def test_apply_teacache_coerces_list_coefficients_to_tuple():
         h.restore()
 
 
-@pytest.mark.parametrize(
-    "alias,patch_module",
-    [
-        # dev calls wrap_generate_image via the module object (deliberately
-        # monkeypatchable) — patch the lifecycle module itself.
-        ("dev", "mlx_teacache.integrations.mflux.lifecycle"),
-        # schnell calls wrap_generate_image via its module-level imported name —
-        # patch the VARIANT module's copy; patching lifecycle would not
-        # intercept the call and the test would become an always-green no-op.
-        ("schnell", "mlx_teacache.variants.flux1_schnell.integration"),
-    ],
-)
-def test_apply_rollback_on_failure_flux1(alias, patch_module, monkeypatch):
+@pytest.mark.parametrize("alias", ["dev", "schnell"])
+def test_apply_rollback_on_failure_flux1(alias, monkeypatch):
     """Per audit medium #3: if wrap_generate_image raises mid-apply, the
     transactional guard must roll back fully — no leftover callback, no proxy
     transformer, no sentinel.
 
-    dev   → patches the lifecycle module (dev calls via the module object).
-    schnell → patches the variant module's imported-name binding.
+    Every variant calls wrap_generate_image through the lifecycle module (the
+    one seam), so patching that module intercepts the call for both aliases; a
+    variant that bound the name at import would not raise here.
     """
-    import importlib
+    from mlx_teacache.integrations.mflux import lifecycle
 
     flux = _make_fake_flux1(alias)
     before = list(flux.callbacks.before_loop)
     original_transformer = flux.transformer
-    target = importlib.import_module(patch_module)
     monkeypatch.setattr(
-        target,
+        lifecycle,
         "wrap_generate_image",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with pytest.raises(RuntimeError):
         apply_teacache(flux)
-    # Pristine-state asserts — schnell is the RED signal (dangling state IS the bug):
+    # Pristine-state asserts (dangling state IS the bug):
     assert flux.callbacks.before_loop == before, "callback left registered"
     assert flux.transformer is original_transformer, "proxy transformer left installed"
     assert "_teacache_handle" not in vars(flux), "sentinel left behind"
@@ -403,11 +392,10 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
 
 @pytest.mark.parity
 @pytest.mark.parametrize(
-    "variant_id,patch_module,make_flux",
+    "variant_id,make_flux",
     [
         (
             "flux2-klein-4b",
-            "mlx_teacache.variants.flux2_klein_4b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -419,7 +407,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "flux2-klein-9b",
-            "mlx_teacache.variants.flux2_klein_9b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -431,7 +418,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "flux2-klein-base-4b",
-            "mlx_teacache.variants.flux2_klein_base_4b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -443,7 +429,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "flux2-klein-base-9b",
-            "mlx_teacache.variants.flux2_klein_base_9b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -455,7 +440,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "z-image-base",
-            "mlx_teacache.variants.z_image_base.integration",
             lambda: __import__("mflux.models.z_image.variants.z_image", fromlist=["ZImage"]).ZImage(
                 quantize=8,
                 model_config=__import__(
@@ -465,12 +449,13 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
     ],
 )
-def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, make_flux, monkeypatch) -> None:
+def test_apply_rollback_on_failure_flux2(variant_id: str, make_flux, monkeypatch) -> None:
     """Per audit medium #3: if wrap_generate_image raises mid-apply on a FLUX.2/Z-Image
     variant, the transactional guard must restore pristine state — no dangling _predict,
     no leftover callback, no instance-level generate_image.
 
-    Each variant patches ITS OWN module's local wrap_generate_image binding.
+    Every variant calls wrap_generate_image through the lifecycle module (the one
+    seam), so the test patches that module.
 
     Distilled Kleins (flux2-klein-4b/9b) warn TeaCacheNoBenefitWarning at
     apply time, before load_integration()/wrap_generate_image ever run — under
@@ -479,16 +464,14 @@ def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, mak
     expect_distilled_warning inside the pytest.raises(RuntimeError) block
     (pytest.warns resets the filter to "always" for its scope, letting
     execution continue to the real failure)."""
-    import importlib
-
+    from mlx_teacache.integrations.mflux import lifecycle
     from tests.conftest import expect_distilled_warning
 
     flux = make_flux()
     flux.freeze()
     before_callback_count = len(flux.callbacks.before_loop)
-    target = importlib.import_module(patch_module)
     monkeypatch.setattr(
-        target,
+        lifecycle,
         "wrap_generate_image",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )

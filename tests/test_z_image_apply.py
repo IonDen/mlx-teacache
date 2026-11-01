@@ -19,11 +19,11 @@ import pytest
 
 from mlx_teacache import AlreadyPatchedError, apply_teacache
 from mlx_teacache._kernel.gate import GateDecision
+from mlx_teacache._kernel.step import step_decision
 from mlx_teacache.errors import InvalidStepWindowError, MissingGenerationContextError
 from mlx_teacache.variants.z_image_base.config import COEFFICIENTS, DEFAULT_THRESH
 from mlx_teacache.variants.z_image_base.integration import (
     _InternalHandle,
-    _step_decision_from_gate,
     make_teacache_predict_factory,
 )
 from tests._fakes import FaithfulCallbackRegistry
@@ -149,10 +149,10 @@ def test_invalid_step_window_raises():
         _call_predict(predict)
 
 
-# --- _step_decision_from_gate pure mapping --------------------------------
+# --- step_decision pure mapping ------------------------------------------
 
 
-def test_step_decision_from_gate_maps_fields():
+def test_step_decision_maps_fields():
     decision = GateDecision(
         kind="skipped",
         should_compute=False,
@@ -161,7 +161,7 @@ def test_step_decision_from_gate_maps_fields():
         predicted_distance=0.1,
         accumulated_distance=0.3,
     )
-    sd = _step_decision_from_gate(decision, step_idx=7, timestep=123.0)
+    sd = step_decision(decision, step_idx=7, timestep=123.0)
     assert sd.step_idx == 7
     assert sd.timestep == 123.0
     assert sd.rel_l1 == 0.05

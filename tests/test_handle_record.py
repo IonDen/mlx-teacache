@@ -128,20 +128,38 @@ def test_every_integration_that_builds_a_handle_writes_its_coefficients() -> Non
     """Bug: a variant (or a new one) leaves the handle's coefficients at the placeholder.
 
     A text check, the floor for the variants without a behavioural check above (FLUX.1 schnell and Krea, distilled
-    FLUX.2 Klein, Klein base 9B, Qwen-Image-2512)."""
-    variants_dir = Path(mlx_teacache.variants.__file__).parent
-    builders = [
-        path
-        for path in sorted(variants_dir.glob("*/integration.py"))
+    FLUX.2 Klein, Klein base 9B, Qwen-Image-2512). The shared mflux installers are the one place that builds a
+    patching handle and writes its coefficients, so every variant must reach one of them: directly, or through the
+    shared Qwen apply. `testing.fake_handle` builds a handle too, but patches nothing."""
+    package_dir = Path(mlx_teacache.variants.__file__).parent.parent
+    builders = sorted(
+        str(path.relative_to(package_dir))
+        for path in package_dir.rglob("*.py")
         if "TeaCacheHandle(" in path.read_text(encoding="utf-8")
-    ]
-    assert len(builders) >= 9
+    )
+    assert builders == ["integrations/mflux/patch.py", "testing.py"]
+    patch_source = (package_dir / "integrations" / "mflux" / "patch.py").read_text(encoding="utf-8")
+    assert "handle._coefficients = rule.coefficients" in patch_source
+
+    integrations = sorted((package_dir / "variants").glob("*/integration.py"))
+    assert len(integrations) >= 10
+    installers = ("install_proxy_patch(", "install_predict_patch(")
+
+    def _reaches_an_installer(source: str) -> bool:
+        if any(name in source for name in installers):
+            return True
+        # A delegate to the shared Qwen apply, which itself must call an installer (checked below, on its own file).
+        return "def apply_qwen(" not in source and "return apply_qwen(" in source
+
     missing = [
-        str(path.relative_to(variants_dir))
-        for path in builders
-        if "handle._coefficients = " not in path.read_text(encoding="utf-8")
+        str(path.relative_to(package_dir))
+        for path in integrations
+        if not _reaches_an_installer(path.read_text(encoding="utf-8"))
     ]
     assert missing == []
+    forward_qwen = (package_dir / "integrations" / "mflux" / "forward_qwen.py").read_text(encoding="utf-8")
+    assert "def apply_qwen(" in forward_qwen
+    assert "install_proxy_patch(" in forward_qwen
 
 
 @pytest.mark.parametrize("variant_id", ["flux1-dev", "flux2-klein-base-4b", "qwen-image", "z-image-base"])

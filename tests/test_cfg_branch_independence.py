@@ -5,10 +5,10 @@ residual, never the other branch's.
 
 Module-level import contract
 ----------------------------
-`from mlx_teacache.variants.flux2_klein_base_4b.integration import
+`from mlx_teacache.integrations.mflux.forward_flux2 import
  flux2_cfg_forward_with_gate` does NOT pull mflux at import time — confirmed
 by `uv run python -c "import sys; sys.modules['mflux'] = None; from
-mlx_teacache.variants.flux2_klein_base_4b.integration import
+mlx_teacache.integrations.mflux.forward_flux2 import
 flux2_cfg_forward_with_gate; print('OK')"` printing OK.
 
 However, *calling* the function triggers a lazy `from mflux.models.common.config.
@@ -26,7 +26,7 @@ import mlx.core as mx
 
 from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.stats import TeaCacheStats
-from mlx_teacache.variants.flux2_klein_base_4b.integration import flux2_cfg_forward_with_gate
+from mlx_teacache.integrations.mflux.forward_flux2 import flux2_cfg_forward_with_gate
 
 # ---------------------------------------------------------------------------
 # Geometry constants

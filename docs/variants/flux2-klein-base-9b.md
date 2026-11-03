@@ -15,9 +15,9 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_9b())
 
 - Default recipe: 50 steps, `guidance=4.0` (canonical CFG, matches upstream)
 - Alternative recipe `low_step`: 25 steps, `guidance=1.0`
-- Default `rel_l1_thresh`: **0.17** (cross-import from `flux2_klein_base_4b`)
+- Default `rel_l1_thresh`: **0.17** (reuses `flux2_klein_base_4b`'s)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
-- `memory_cap_hint_gb: 24` — 32 GB unified memory headroom
+- Memory cap for the bench and calibration scripts: 24 GB soft cap, set in the scripts (`scripts/_memory_cap_hints.py`), not in the variant config. It leaves headroom on a 32 GB Mac.
 
 At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps interleaved rep-outer, bf16, q4, mflux 0.18.0, v0.12.0 bench, 2026-09-28):
 
@@ -39,7 +39,7 @@ Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b -
 
 ## Coefficient provenance — intentional reuse
 
-Coefficients are **cross-imported from `flux2_klein_base_4b`** (object-identity-equal — `BASE_9B is BASE_4B`). The reuse is justified by:
+Coefficients are **reused from `flux2_klein_base_4b`'s config** (object-identity-equal — `BASE_9B is BASE_4B`). The reuse is justified by:
 - Same architecture family (FLUX.2 Klein, non-distilled).
 - Same calibration recipe (25-step, guidance=1.0, origin-constrained polyfit).
 - Validated empirically before each release: `tests/variants/flux2_klein_base_9b/test_shared_coefficients.py` enforces the identity invariant.
@@ -52,15 +52,15 @@ If a future release recalibrates 9B-specific coefficients, that test will need t
 
 ## Quirks
 
-- **Memory cap hint = 24 GB.** `META["memory_cap_hint_gb"]` is the advisory soft cap the heavy workers pass to `scripts/_mlx_caps.py::install_caps` before model load. `install_caps` sets three limits: a device-clamped wired cap (the request, capped at 0.85× the machine's recommended working set, so it can never exceed the system wired limit and still works on a 16/24 GB Mac), the 24 GB advisory soft limit, and a bounded MLX cache pool. On a 32 GB M1 Max the clamp puts the wired cap near 21 GB regardless of the request. Lower the hint if you have less than 32 GB or are competing with other memory-heavy processes; see [Memory guardrails](#memory-guardrails) below.
-- Default threshold 0.17 (cross-imported from base-4b), not the package fallback 0.20.
+- **Memory cap hint = 24 GB.** The advisory soft cap the bench and calibration scripts look up for this variant in `scripts/_memory_cap_hints.py` (it is not a config field). The heavy workers pass it to `scripts/_mlx_caps.py::install_caps` before model load. `install_caps` sets three limits: a device-clamped wired cap (the request, capped at 0.85× the machine's recommended working set, so it can never exceed the system wired limit and still works on a 16/24 GB Mac), the 24 GB advisory soft limit, and a bounded MLX cache pool. On a 32 GB M1 Max the clamp puts the wired cap near 21 GB regardless of the request. Lower the hint if you have less than 32 GB or are competing with other memory-heavy processes; see [Memory guardrails](#memory-guardrails) below.
+- Default threshold 0.17 (reuses base-4b's), not the package fallback 0.20.
 - The 1.37× headline number is reproducible via `scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3`.
 
 ## Memory guardrails
 
 On 32 GB Apple Silicon running the canonical 50-step + g=4.0 recipe, peak memory has crossed the system limit twice (2026-05-17 jetsam, 2026-05-19 kernel watchdog panic). The current mitigations:
 
-1. Every heavy worker calls `scripts/_mlx_caps.py::install_caps` before model load — a device-clamped wired cap, an advisory soft cap (this variant's `memory_cap_hint_gb`, 24 GB), and a bounded MLX cache pool (dropped buffers pool there instead of returning to the OS, and MLX's default pool sits near physical RAM).
+1. Every heavy worker calls `scripts/_mlx_caps.py::install_caps` before model load — a device-clamped wired cap, an advisory soft cap (24 GB for this variant, from the scripts' cap table), and a bounded MLX cache pool (dropped buffers pool there instead of returning to the OS, and MLX's default pool sits near physical RAM).
 2. The same worker arms `scripts/_mlx_watchdog.py::arm_mlx_watchdog`, a daemon thread that aborts the run — writing an artifact that says why — the moment `active + cache` memory exceeds physical memory minus a headroom (4 GiB by default).
 3. `tests/conftest.py` installs the same device-derived caps and bounds the cache pool for the test session.
 

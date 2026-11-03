@@ -10,11 +10,14 @@ src/mlx_teacache/integrations/mflux/lifecycle.py::wrap_generate_image).
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mlx_teacache._kernel import decision_rule as _decision_rule
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache._kernel.stats import TeaCacheStats
+
+if TYPE_CHECKING:
+    from mlx_teacache.integrations._session import InternalHandle
 
 
 @dataclass
@@ -87,6 +90,9 @@ class TeaCacheHandle:
         self._decision_rule_revision: int = _decision_rule.DECISION_RULE_REVISION
         self._mflux_version: str | None = None
         self._torn_down = False
+        # Set by the integration that installed the patch; None on a handle that patches nothing.
+        self._session: InternalHandle | None = None
+        self._callback_instance: Any = None
 
     @property
     def stats(self) -> TeaCacheStats:

@@ -1,5 +1,5 @@
-"""FLUX.2 Klein base 9B integration. Reuses the FLUX.2 forward + factory
-verbatim from flux2_klein_base_4b. The 9B variant uses the SAME forward
+"""FLUX.2 Klein base 9B integration. Uses the shared FLUX.2 forward + factory
+(the same code as flux2_klein_base_4b). The 9B variant uses the SAME forward
 path (both no-CFG at low_step recipe and CFG-per-branch at the canonical
 50-step + g=4.0 recipe) — only the metadata (Provenance) and memory_cap
 hint differ.
@@ -8,19 +8,10 @@ hint differ.
 from typing import Any
 
 from mlx_teacache._kernel.coefficients import Provenance
-from mlx_teacache.handle import TeaCacheHandle, VariantPatch
-from mlx_teacache.integrations.mflux.lifecycle import (
-    GenerationContextCallback,
-    wrap_generate_image,
-)
-
-# Cross-import everything heavy from base_4b. The factory + forward + helpers
-# are byte-equivalent; only the per-variant constants (COEFFICIENTS,
-# DEFAULT_THRESH) and provenance change.
-from mlx_teacache.variants.flux1_dev.integration import _InternalHandle
-from mlx_teacache.variants.flux2_klein_base_4b.integration import (
-    make_teacache_predict_factory,
-)
+from mlx_teacache._kernel.resolve import BuiltinFit, resolve_rule
+from mlx_teacache.handle import TeaCacheHandle
+from mlx_teacache.integrations.mflux.forward_flux2 import make_teacache_predict_factory
+from mlx_teacache.integrations.mflux.patch import install_predict_patch
 
 from .config import CALIBRATED_RANGE, COEFFICIENTS, DEFAULT_THRESH
 
@@ -38,6 +29,13 @@ _PROVENANCE = Provenance(
     default_thresh=DEFAULT_THRESH,
 )
 
+_BUILTIN = BuiltinFit(
+    coefficients=COEFFICIENTS,
+    provenance=_PROVENANCE,
+    default_thresh=DEFAULT_THRESH,
+    calibrated_range=CALIBRATED_RANGE,
+)
+
 
 def apply(
     flux: Any,
@@ -49,106 +47,18 @@ def apply(
 ) -> TeaCacheHandle:
     """FLUX.2 Klein base 9B apply. Mirrors flux2_klein_base_4b.apply() but
     with this variant's COEFFICIENTS, DEFAULT_THRESH, and _PROVENANCE."""
-    # 1. Resolve rel_l1_thresh.
-    # Priority: explicit caller > per-variant DEFAULT_THRESH (only when using
-    # builtin coefficients) > package fallback 0.20.
-    if rel_l1_thresh is not None:
-        resolved_thresh: float = rel_l1_thresh
-    elif coefficients is None and DEFAULT_THRESH is not None:
-        resolved_thresh = DEFAULT_THRESH
-    else:
-        resolved_thresh = 0.20
-
-    # 2. Resolve coefficients and provenance (caller > COEFFICIENTS).
-    # User-supplied coefficients get a user provenance; builtin get _PROVENANCE.
-    if coefficients is not None:
-        resolved_coeffs: tuple[float, float, float, float, float] = coefficients
-        resolved_provenance = Provenance.for_user_supplied()
-    else:
-        resolved_coeffs = COEFFICIENTS
-        resolved_provenance = _PROVENANCE
-
-    # 3. Build internal handle (carries state, gen context, and per-generation
-    #    fields that lifecycle.py and the forward block reference).
-    internal = _InternalHandle(
-        rel_l1_thresh=resolved_thresh,
-        coefficients=resolved_coeffs,
-        # The clamp belongs to this variant's fit, never to caller-supplied coefficients.
-        calibrated_range=CALIBRATED_RANGE if coefficients is None else None,
+    # Caller > the variant default with the built-in coefficients > the package fallback 0.20. A custom polynomial
+    # gets the fallback because the default was tuned for the bundled one.
+    rule = resolve_rule(
+        rel_l1_thresh=rel_l1_thresh,
+        coefficients=coefficients,
+        builtin=_BUILTIN,
+        policy="fallback-for-caller-coefficients",
+    )
+    return install_predict_patch(
+        flux,
+        make_factory=make_teacache_predict_factory,
+        rule=rule,
         skip_first_n_steps=skip_first_n_steps,
         skip_last_n_steps=skip_last_n_steps,
     )
-
-    import contextlib
-
-    # 4. Register lifecycle callback.
-    callback = GenerationContextCallback(internal)
-    internal._callback_instance = callback
-
-    # Eager rollback list for the transactional patch:
-    # if any mutation after callback registration raises, preceding mutations
-    # are reversed. Start with the callback unregister.
-    from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity
-
-    _rollbacks_so_far: list[Any] = [lambda: _remove_callback_by_identity(flux.callbacks, callback)]
-
-    # 5. Wrap generate_image (records _generate_image_was_instance_attr, sets
-    #    internal._original_generate_image).
-    try:
-        flux.callbacks.register(callback)
-        wrap_generate_image(flux, internal)
-    except BaseException:
-        for _undo in reversed(_rollbacks_so_far):
-            with contextlib.suppress(Exception):
-                _undo()
-        raise
-
-    # wrap_generate_image succeeded — add its rollback before the next mutation.
-    def _restore_generate_image() -> None:
-        if internal._generate_image_was_instance_attr:
-            flux.generate_image = internal._original_generate_image
-        else:
-            if "generate_image" in vars(flux):
-                del flux.generate_image
-
-    _rollbacks_so_far.append(_restore_generate_image)
-
-    # 6. Patch flux._predict with the factory. FLUX.2 uses _predict replacement,
-    #    NOT flux.transformer — the factory is called as
-    #    predict = self._predict(self.transformer) inside generate_image.
-    _predict_was_instance_attr = "_predict" in vars(flux)
-    _original_predict = flux.__dict__.get("_predict")
-    flux._predict = make_teacache_predict_factory(internal)
-    # No try needed: _predict assignment is the last mutation; fall through.
-
-    # 7. Build VariantPatch: rollback deletes _predict + restores generate_image.
-    #    Finalizer unsubscribes the callback. No stats finalize.
-    def _restore_predict() -> None:
-        if _predict_was_instance_attr:
-            flux._predict = _original_predict
-        else:
-            if "_predict" in vars(flux):
-                del flux._predict
-
-    def _unsubscribe_callback() -> None:
-        from mlx_teacache.integrations.mflux.lifecycle import _remove_callback_by_identity as _rcbi
-
-        _rcbi(flux.callbacks, callback)
-
-    patch = VariantPatch(
-        rollbacks=[_restore_predict, _restore_generate_image],
-        finalizers=[_unsubscribe_callback],
-    )
-
-    # 8. Return the public, variant-agnostic TeaCacheHandle.
-    handle = TeaCacheHandle(
-        patch=patch,
-        stats=internal._state.stats,
-        provenance=resolved_provenance,
-        rel_l1_thresh=resolved_thresh,
-    )
-    # Expose resolved coefficients and callback instance as dynamic attributes
-    # so callers and tests can inspect them (mirrors v0.5.x TeaCacheHandle).
-    handle._coefficients = resolved_coeffs
-    handle._callback_instance = internal._callback_instance  # type: ignore[attr-defined]
-    return handle

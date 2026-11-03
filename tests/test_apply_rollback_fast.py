@@ -54,12 +54,15 @@ def test_register_failure_leaves_nothing_behind(variant: str, monkeypatch: pytes
 def test_wrap_failure_rolls_back_the_registration(variant: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """bug caught: deleting the rollback loop in the except clause (mutation-verified
     2026-09-05 to leave every other fast FLUX.2 test green)."""
+    from mlx_teacache.integrations.mflux import lifecycle
+
     mod = importlib.import_module(f"mlx_teacache.variants.{variant}.integration")
     flux = _fake_flux()
     original_gi = flux.generate_image
     before = _lists(flux)
+    # The one seam every variant calls through; a variant binding the name at import would not raise.
     monkeypatch.setattr(
-        mod, "wrap_generate_image", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("wrap boom"))
+        lifecycle, "wrap_generate_image", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("wrap boom"))
     )
     with pytest.raises(RuntimeError, match="wrap boom"):
         mod.apply(flux, rel_l1_thresh=0.25)

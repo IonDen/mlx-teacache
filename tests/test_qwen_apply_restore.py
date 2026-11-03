@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from mlx_teacache.integrations.mflux.forward_qwen import ProxyQwenTransformer
 from mlx_teacache.variants.qwen_image.detect import matches
-from mlx_teacache.variants.qwen_image.integration import ProxyQwenTransformer, apply
+from mlx_teacache.variants.qwen_image.integration import apply
 from tests._fakes import FaithfulCallbackRegistry
 
 

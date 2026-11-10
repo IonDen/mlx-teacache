@@ -293,9 +293,9 @@ KNOWN: dict[str, dict[str, str]] = {
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
     # 0.24.0, fingerprinted 2026-10-28 from the installed release: twelve equal 0.23.0. The two that moved,
-    # Flux2Klein.generate_image and ZImage.generate_image, equal the reviewed main commit below (changes outside the
-    # copied loop: the pid_decode/small_decoder refusal and new metadata keys). The denoising loops, both _predict
-    # and every transformer and block forward are unchanged.
+    # Flux2Klein.generate_image and ZImage.generate_image, equal mflux main 0fea52b, the main commit reviewed before
+    # this release (changes outside the copied loop: the pid_decode/small_decoder refusal and new metadata keys). The
+    # denoising loops, both _predict and every transformer and block forward are unchanged.
     "0.24.0": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
@@ -316,15 +316,15 @@ KNOWN: dict[str, dict[str, str]] = {
 
 
 # A git install of mflux main keeps reporting the last release's version, so it cannot be judged by
-# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-10-22,
-# 0fea52b. Against 0.23.0 only two targets moved, both outside the copied path: Flux2Klein.generate_image refuses
-# pid_decode together with the new small_decoder option before the loop and writes more generation_parameters
-# metadata (mflux PRs 896, 897, 910), and ZImage.generate_image adds a vae_full_precision metadata key (PR 910). The
-# denoising loops, _predict and the callbacks are unchanged. Bump it, commit and digests together, after reviewing a
-# newer main. Applies to git+URL installs only: an editable checkout writes `dir_info`, not `vcs_info`, and is judged
-# by its version string like a wheel.
+# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-11-10,
+# 17b47e9. Against 0.24.0 one target moved, outside the copied path: ZImage.generate_image builds its
+# generation_parameters metadata in a new `_generation_parameters()` helper, which adds a small_text_encoder key
+# when the model was built with mflux's new small text encoder (PR 974). The signature, the denoising loop, _predict
+# and the callbacks are unchanged. Bump it, commit and digests together, after reviewing a newer main. Applies to
+# git+URL installs only: an editable checkout writes `dir_info`, not `vcs_info`, and is judged by its version string
+# like a wheel.
 REVIEWED_MAIN: dict[str, Any] = {
-    "commit": "0fea52bada4ade619f1cdb7ae26087b32d87dd89",
+    "commit": "17b47e9aa0fd4b65a3ec03b46db31c911e8ac18d",
     "fingerprints": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
@@ -337,7 +337,7 @@ REVIEWED_MAIN: dict[str, Any] = {
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "e9e087f0c835ada7",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
-        "z_image.ZImage.generate_image": "88204535dc85b78e",
+        "z_image.ZImage.generate_image": "061ebd266b779369",
         "z_image.ZImage._predict": "016c64c92ceefbdf",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },

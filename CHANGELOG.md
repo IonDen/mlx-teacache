@@ -7,6 +7,11 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Docs correction: the note on v0.5.0's withdrawn 2.68× for FLUX.2 Klein base 9B (README, roadmap, variant page, and a dated note under the v0.6.0 entry) now says only what the recorded run shows. The earlier shared-process explanation was wrong. The Klein peak figures in the README and the Klein variant pages are now labelled GiB.
+- Docs correction: the README's Qwen-Image mixed-precision sentence now gives the two recorded peaks, 30.43 GiB and 26.16 GiB, and what differs between those runs, instead of a difference figure. The Qwen-Image variant page gives its peaks in GiB.
+- Docs correction: the note on the FLUX.2 Klein base 4B v0.4.1 compile-avoidance figure (README footnote 3 and the variant page) now says the change in the ratio came from the plain run, and that the records do not say why.
+
 ## [0.17.0] — 2026-11-12
 
 An internal restructuring with no change in behaviour. The gate, the default thresholds, the coefficients, the variants, the skip decisions and the generated images are the same as in 0.16.0, and `decision_rule_revision` is still 1. The public API is unchanged. Before and after, the library's outputs and skip decisions were compared on small test models and matched exactly. On real weights, the threshold-0 parity checks and the default-threshold checks passed on mflux 0.24.0 for FLUX.1-dev, FLUX.2 Klein base 4B and Z-Image; the rest of the real-weights suite was not run. Neither Qwen-Image variant was checked on real weights in this release. They and the other models were checked only on small test models. This release has no speed or quality measurements.
@@ -476,6 +481,8 @@ Three-way bench on `flux2-klein-base-9b` at the canonical 50-step + g=4.0 recipe
 - Wrapper peak memory: ~10 GB vs vanilla's ~22 GB
 
 **Correction to v0.5.0's headline.** v0.5.0 reported a 2.68× combined speedup on klein-base-9b (vanilla 2744 s, wrapper 1025 s). That measurement was inflated by same-process MLX state leakage: the v0.5.0 bench harness ran vanilla and wrapper sequentially in one Python interpreter, so the vanilla rep paid the full-cold MLX compilation cost while the wrapper rep inherited warm allocator state from it. Wall-clock difference under that setup conflates the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness gives every (variant, condition, rep) its own fresh interpreter, so vanilla and wrapper are both genuinely cold. The honest number is 1.36×, in line with v0.4.1's klein-base-4b result of 1.26×. v0.5.0's `README.md` and `docs/variants/flux2-klein-base-9b.md` are updated in this release.
+
+*Corrected 2026-11-13.* The explanation in the paragraph above was wrong. The v0.5.0 record (`_artifacts/validation_klein_base_9b.json`) shows plain mflux and the wrapper each ran once, each in its own process, at 768×1024. Plain mflux peaked at 25.21 GiB, above the 24 GiB cap that run set. The wrapper peaked at 13.17 GiB. That fits a slowdown from memory pressure in the plain run. The run did not test whether memory pressure caused it, and it was never repeated. The 1.36× above comes from a different recipe (512×512, a different prompt, three reps). The 2.68× stays withdrawn, and the current 1.37× (v0.12.0) stands at its own recipe.
 
 Three-way bench on `flux2-klein-base-4b` at the same recipe (3 reps, subprocess-per-rep, M1 Max 32 GB, bf16, q4):
 

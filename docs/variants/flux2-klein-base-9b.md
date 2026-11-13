@@ -23,9 +23,9 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 
 | Condition | Median wall-clock | Peak memory |
 |---|---|---|
-| vanilla | 517.3 s | ~22 GB |
-| wrapper, no gate (compile-avoidance only) | 508.3 s | ~9.8 GB |
-| wrapper, gated (full TeaCache) | 377.5 s | ~9.8 GB |
+| vanilla | 517.3 s | ~22 GiB |
+| wrapper, no gate (compile-avoidance only) | 508.3 s | ~9.8 GiB |
+| wrapper, gated (full TeaCache) | 377.5 s | ~9.8 GiB |
 
 - **Combined speedup: 1.37×** (v0.10.0 measured 1.37× and v0.6.0 1.36× at the same recipe)
 - **Gating contribution (v0.4.1 effect): 1.35×**
@@ -33,7 +33,9 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 - Skip count stable across reps: 13 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row (max consecutive-skip streak 1), the same steps as before 0.12.0's calibrated-range clamp, which changes nothing at this recipe (the bench ran before the rule that always computes a change above the range was added; that rule was not traced on 9B)
 - SSIM 0.993 vs vanilla at this recipe (`_artifacts/v0.12.0_klein_base_ssim.json`)
 
-> **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. That measurement was inflated by same-process MLX state leakage in the v0.5.x bench harness: vanilla ran cold while the wrapper inherited warm MLX allocator state from it, so the wall-clock difference conflated the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness makes every condition cold and exposes the honest 1.36×; the v0.10.0 and v0.12.0 re-measurements land at 1.37×.
+> **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. It came from one run of each condition, plain mflux and the wrapper, each in its own process, at 768×1024 (`_artifacts/validation_klein_base_9b.json`). Plain mflux took 2743.9 s and the wrapper 1025.3 s. Plain mflux peaked at 25.21 GiB, above the 24 GiB cap the run set and above the 24.96 GiB recommended working set of a 32 GB Mac. The wrapper peaked at 13.17 GiB. That fits a slowdown from memory pressure in the plain run. The run did not test whether memory pressure caused it, and nobody repeated it. The 1.36× at v0.6.0 and the 1.37× at v0.10.0 and v0.12.0 are a different recipe: 512×512, a different prompt, three reps. No other tracked 768×1024 timing of this model exists. The 2.68× stays withdrawn, and 1.37× stands at its own recipe.
+>
+> (Corrected 2026-11-13: an earlier version of this note said the two runs shared one Python process, so the wrapper inherited a warm allocator. The record shows each ran in its own process. That explanation was wrong.)
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.12.0_bench_klein_base_9b.json` (v0.10.0's and v0.6.0's sit alongside it); regenerate side-by-side images with `scripts/bench_comparison.py`.
 

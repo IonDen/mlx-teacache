@@ -16,7 +16,7 @@ flux = Flux1.from_name("dev", quantize=4)
 - Default `rel_l1_thresh`: 0.20 (the package fallback)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At the default threshold and 25 steps the gate skips 6/25 steps (never two in a row) and produces a measured 1.57× wall-clock speedup on M1 Max (median of three cold reps, 2026-08-15; 1.50× fastest-to-fastest, see the README footnote for the vanilla spread) with SSIM ≥ 0.80 on the 5-prompt suite (≥ 0.90 on the PR-gate red-apple prompt). See [`README.md` → Benchmarks](../../README.md#benchmarks).
+At the default threshold and 25 steps the gate skips 6/25 steps (never two in a row) and produces a measured 1.57× wall-clock speedup on M1 Max (median of three cold reps, 2026-08-15; 1.50× fastest-to-fastest, see the README footnote for the vanilla spread) with SSIM ≥ 0.80 on the 5-prompt suite (≥ 0.90 on the PR-gate red-apple prompt). The record (`_artifacts/v0.10.0_bench_flux1_dev.json`) has no commit, dirty flag, timestamp or MLX version, so the date comes from the README at the v0.10.0 release. MLX 0.31.2 per the lock file at c33e8d5, the commit that added the record (macOS entry). The gate measured is the one as of the v0.10.0 work, which differs slightly from the release's. Measured on mflux 0.18.0; mflux 0.22.0 loads the bias of FLUX.1's last normalization layer again, which changes its images slightly, so the figure holds for mflux 0.18.0. See [`README.md` → Benchmarks](../../README.md#benchmarks).
 
 ## Coefficient provenance
 

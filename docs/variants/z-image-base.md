@@ -19,18 +19,20 @@ Z-Image base and Z-Image Turbo are the same `ZImage` class, distinguished by `mo
 - Default `rel_l1_thresh`: **0.12** (per-variant default, set at the SSIM knee from the sweep)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At the 512×512 red-apple bench recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps, q8, mflux 0.18.0, v0.10.0 bench, 2026-08-15):
+At the 512×512 red-apple bench recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps, q8, mflux 0.18.0, the bench as of the v0.10.0 work, 2026-08-15):
 
 | Condition | Median wall-clock | Peak memory |
 |---|---|---|
-| vanilla | 227.4 s | 17.2 GB |
-| wrapper, no gate (compile path bypass only) | 228.9 s | 11.5 GB |
-| wrapper, gated (full TeaCache) | 174.2 s | 11.5 GB |
+| vanilla | 227.4 s | 17.2 GiB |
+| wrapper, no gate (compile path bypass only) | 228.9 s | 11.5 GiB |
+| wrapper, gated (full TeaCache) | 174.2 s | 11.5 GiB |
+
+The record (`_artifacts/v0.10.0_bench_z_image.json`) has no commit, dirty flag, timestamp or MLX version, so the date comes from the README at the v0.10.0 release. MLX 0.31.2 per the lock file at c33e8d5, the commit that added the record (macOS entry). The gate measured is the one as of the v0.10.0 work, which differs slightly from the release's. Measured on mflux 0.18.0; mflux 0.22.0 runs Z-Image's transformer in bfloat16 instead of float32 (and 0.24.0 changed the VAE decode), so the figure holds for mflux 0.18.0.
 
 - **Combined speedup: 1.31×** (gating 1.31×, compile-avoidance 0.99×)
 - The wall-clock win is entirely gating. `mx.compile`-path avoidance is not a tailwind on Z-Image — the no-gate wrapper runs at vanilla speed (228.9 s vs 227.4 s; the eager re-walk neither beats nor loses to mflux's compiled `_predict` on this model), so the whole 1.31× is step-skipping.
-- Peak memory drops from 17.2 GB to 11.5 GB. This is the eager wrapper bypassing mflux's compiled `_predict`, not the skip path: the no-gate wrapper shows the same ~11.5 GB peak. Same effect documented on klein-base-9b.
-- Skip count stable across reps: 15 of 48 active steps skipped at `rel_l1_thresh=0.12`, never two in a row (max consecutive-skip streak 1). SSIM 0.991 vs vanilla on this prompt.
+- Peak memory drops from 17.2 GiB to 11.5 GiB. This is the eager wrapper bypassing mflux's compiled `_predict`, not the skip path: the no-gate wrapper shows the same ~11.5 GiB peak. Same effect documented on klein-base-9b.
+- Skip count stable across reps: 15 of 48 active steps skipped at `rel_l1_thresh=0.12`, never two in a row (max consecutive-skip streak 1). SSIM 0.991 vs vanilla on this prompt. No record of this sweep was committed.
 - v0.7.0 reported 1.17× at this recipe (245.3 s → 209.4 s, `_artifacts/_bench_z_image_v0_7_0.json`) with a thermally confounded three-way split. The skip count and pattern are identical, so the gap is host state in that session, not the gate.
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant z-image --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.10.0_bench_z_image.json`.
@@ -39,7 +41,7 @@ A separate 640×896 q8 generation on the comparison page skips 16 of 50 steps fo
 
 ## Threshold sweep
 
-`scripts/sweep_threshold_z_image.py` sweeps `rel_l1_thresh` at the 512² recipe and records skip count + SSIM vs vanilla per threshold. SSIM holds ≥ 0.99 through 0.12 (15/48 skips, SSIM 0.991), then drops to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first knee — the last threshold before the cliff.
+`scripts/sweep_threshold_z_image.py` sweeps `rel_l1_thresh` at the 512² recipe and records skip count + SSIM vs vanilla per threshold. SSIM holds ≥ 0.99 through 0.12 (15/48 skips, SSIM 0.991), then drops to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first knee — the last threshold before the cliff. No record of this sweep was committed.
 
 ## CFG (guidance > 1.0)
 

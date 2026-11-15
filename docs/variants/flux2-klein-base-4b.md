@@ -26,6 +26,8 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 | wrapper, no gate (compile-avoidance only) | 234.2 s | ~5.5 GiB |
 | wrapper, gated (full TeaCache) | 197.8 s | ~5.5 GiB |
 
+The record (`_artifacts/v0.12.0_bench_klein_base_4b.json`) names commit ec4d110 with a clean tree and has no MLX version field; MLX 0.31.2 per the lock file at ec4d110 (macOS entry). The date comes from the record's chunk timestamps, and `scripts/` and `src/` are identical at ec4d110 and at 1290c01, the commit that added the record, on the pull-request branch (public in [PR #42](https://github.com/IonDen/mlx-teacache/pull/42), squashed into main as 0a3482c; that merge also added to `gate.py` the rule that a change above the calibrated range always computes). The record stores the Darwin kernel version, 27.0.0, which maps to macOS 27.0. Measured on mflux 0.18.0; mflux 0.24.0 changed the default VAE decode to bfloat16 strips, so the figure holds for mflux 0.18.0.
+
 - **Combined speedup: 1.20×** (v0.10.0 measured 1.22× and v0.6.0 1.23×, with one more skip; see below)
 - **Gating contribution (v0.4.1 effect): 1.18×**
 - **`mx.compile`-path avoidance (v0.4 effect): 1.01×** — effectively noise on M1 Max at this recipe; the wrapper's main `mx.compile` benefit is memory (~45% peak drop), not wall-clock

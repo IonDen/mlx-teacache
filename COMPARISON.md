@@ -27,7 +27,7 @@ These pairs were rendered with mlx-teacache 0.11.1. In 0.12.0 the gate stopped p
 On this run: 1.25× faster (1.25× with preview decoding left out) · SSIM 0.84 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_flux1_dev.json) · [More details →](docs/comparison/flux1-dev.md)
 <!-- COMPARISON:flux1-dev:summary END -->
 
-The multi-run bench ([footnote ¹](README.md#benchmarks)) measured this variant's 1.57× speedup as all step-skipping. FLUX.1 has no compiled prediction step, so there's no compile effect to separate out.
+The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant's 1.57× speedup as all step-skipping. FLUX.1 has no compiled prediction step, so there's no compile effect to separate out.
 
 ## FLUX.1 Krea [dev]
 
@@ -79,7 +79,7 @@ On this run: 1.34× faster (1.34× with preview decoding left out) · SSIM 0.85 
 On this run: 1.33× faster (1.33× with preview decoding left out) · SSIM 0.95 · multi-run measurement: [bench report](_artifacts/v0.12.0_bench_klein_base_9b.json) · [More details →](docs/comparison/klein-base-9b.md)
 <!-- COMPARISON:klein-base-9b:summary END -->
 
-At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.35× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GB to 9.8 GB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (11.5 GiB vs 11.6 GiB).
+At its matching 512² recipe, [footnote ²](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.35× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GiB to 9.8 GiB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (11.5 GiB vs 11.6 GiB).
 
 ## Qwen-Image
 
@@ -92,7 +92,7 @@ At its matching 512² recipe, [footnote ⁴](README.md#benchmarks) splits this v
 On this run: 2.06× faster (2.10× with preview decoding left out) · SSIM 0.92 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_qwen_image.json) · [More details →](docs/comparison/qwen-image.md)
 <!-- COMPARISON:qwen-image:summary END -->
 
-[Footnote ⁶](README.md#benchmarks) measured this variant's 2.68× multi-run speedup as step-skipping: mflux doesn't compile Qwen's prediction step, and the no-gate wrapper's 1.04× over vanilla sits inside the spread between vanilla reps, so there's no compile effect to separate out.
+[Footnote ¹](README.md#benchmarks) says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. mflux doesn't compile Qwen's prediction step, so the speedup there is step-skipping, with no compile effect to separate out.
 
 ## Distilled Klein vs Base Klein
 

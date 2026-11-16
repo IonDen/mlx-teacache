@@ -6,7 +6,7 @@
 
 ## Update, 2026-11-15: what the two reports can support
 
-In short: the 0.10.0 release published a 3.02× Qwen-Image speedup from a run whose active memory
+The 0.10.0 release published a 3.02× Qwen-Image speedup from a run whose active memory
 peaked above the GPU's recommended working set, and a later run measured 2.68×; this memo credits
 the difference to no single cause. The argument and the tables stay, and this update says what the
 two reports behind them record and what they leave out.
@@ -28,8 +28,10 @@ The thesis, the mechanisms and the rules did not change.
 The [previous version](https://github.com/IonDen/mlx-teacache/blob/bc02ac3475665327dea91a35da999a794a581906/docs/papers/benchmarking-above-the-recommended-working-set.md)
 keeps the earlier text.
 
-Safeguards that never vary the memory regime cannot see a bias that every condition shares. This
-memo works through one case. An earlier memo from this repository,
+---
+
+Safeguards that never vary the memory regime cannot see a bias that every condition shares. An
+earlier memo from this repository,
 [Why the TeaCache Gate Did Not Engage on Short Distilled FLUX Schedules](https://github.com/IonDen/mlx-teacache/blob/main/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md),
 described a speedup that was real but credited to the wrong cause. This one describes a speedup
 that a later run measured lower. For its 0.10.0 release, `mlx-teacache` published two Qwen-Image

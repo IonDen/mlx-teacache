@@ -114,12 +114,18 @@ def test_qwen_config_with_zero_cond_t_is_refused_like_apply_teacache_refuses_it(
     assert (None if info is None else info.variant_id) == expected == _apply_dispatch(config, cls)
 
 
-def test_a_variant_without_a_checkpoint_check_is_always_calibrated() -> None:
-    """Bug: calibrated is computed for every variant by comparing META's hf_model_id with model_name, so the library
-    reports a Z-Image finetune as uncalibrated; for Z-Image that warning belongs
-    to the caller (the mflux plugin warns on a custom checkpoint itself)."""
-    config = types.SimpleNamespace(aliases=["z-image", "zimage"], model_name="someorg/zimage-finetune")
-    info = match_variant(config, _mflux_class("ZImage"))
+def test_a_variant_without_its_own_checkpoint_check_uses_the_shared_one() -> None:
+    """Bug: only the variants whose detector defines a checkpoint check report calibrated=False, so a Z-Image
+    finetune that names neither Tongyi-MAI/Z-Image nor declares it as its base is reported as calibrated."""
+    finetune = types.SimpleNamespace(
+        aliases=["z-image"], model_name="someorg/zimage-finetune", base_model=None
+    )
+    declared = types.SimpleNamespace(
+        aliases=["z-image"], model_name="someorg/zimage-finetune", base_model="Tongyi-MAI/Z-Image"
+    )
+    info = match_variant(finetune, _mflux_class("ZImage"))
+    assert info is not None and info.calibrated is False
+    info = match_variant(declared, _mflux_class("ZImage"))
     assert info is not None and info.calibrated is True
 
 

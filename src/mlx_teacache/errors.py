@@ -225,10 +225,10 @@ class TeaCacheWarning(UserWarning):
 class TeaCacheNoBenefitWarning(TeaCacheWarning):
     """Emitted when the gate cannot deliver step-skipping. Two triggers:
 
-    At `apply_teacache()` time, on a distilled variant whose few-step
-    schedule never lets the polynomial gate engage. The wrapper still adds
-    per-step gate overhead, and any wall-clock gain comes from bypassing
-    `mx.compile`, not from skipping steps.
+    At `apply_teacache()` time, on a distilled variant (FLUX.1 schnell,
+    FLUX.2 Klein 4B and 9B) called without your own `coefficients`: its
+    few-step schedule leaves the polynomial gate nothing to skip, so the
+    wrapper adds per-step overhead and gives no speedup from step-skipping.
 
     Once per TeaCacheHandle during a generation, when the active step
     configuration leaves no possible cache skips (i.e., `active_num_steps -
@@ -242,9 +242,11 @@ class TeaCacheNoBenefitWarning(TeaCacheWarning):
 
 
 class TeaCacheUncalibratedCheckpointWarning(TeaCacheWarning):
-    """Emitted once at apply time when the model was loaded from a checkpoint
-    other than the one the variant's built-in coefficients were calibrated on,
-    and the caller supplied no coefficients of their own.
+    """Emitted once at apply time, for any variant, when the model's config names
+    a checkpoint other than the one the variant's built-in coefficients were
+    calibrated on (and does not declare that checkpoint as its base), and the
+    caller supplied no coefficients of their own. A config without a model name
+    is not checked.
 
     The polynomial gate predicts how much the transformer body changes per
     step; that prediction was fitted on a specific checkpoint's trajectories.

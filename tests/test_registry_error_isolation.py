@@ -27,7 +27,7 @@ def test_validate_meta_rejects_missing_required_key() -> None:
 
 
 def test_validate_meta_accepts_complete_meta() -> None:
-    meta = {"variant_id": "v", "display_name": "D", "license": "L"}
+    meta = {"variant_id": "v", "display_name": "D", "license": "L", "non_distilled": True}
     assert _validate_meta(meta, subname="v") is meta
 
 
@@ -46,7 +46,7 @@ def test_build_one_wraps_import_failure_in_named_calibration_error(monkeypatch) 
 
 
 _VALID_CONFIG = types.SimpleNamespace(
-    META={"variant_id": "phantom", "display_name": "Phantom", "license": "L"},
+    META={"variant_id": "phantom", "display_name": "Phantom", "license": "L", "non_distilled": True},
     COEFFICIENTS=(0.0, 0.0, 0.0, 1.0, 0.0),
     DEFAULT_THRESH=0.2,
 )
@@ -98,3 +98,44 @@ def test_build_one_requires_the_config_level_detector(monkeypatch, detect, fragm
     with pytest.raises(CalibrationError, match=fragment) as caught:
         _build_one("mlx_teacache.variants.phantom", "phantom")
     assert caught.value.variant_id == "phantom"
+
+
+@pytest.mark.parametrize(
+    ("meta_extra", "fragment"),
+    [
+        ({}, "non_distilled"),
+        ({"non_distilled": None}, "non_distilled"),
+        ({"non_distilled": 0}, "non_distilled"),
+        ({"non_distilled": "False"}, "non_distilled"),
+    ],
+)
+def test_non_distilled_is_required_and_boolean(meta_extra, fragment) -> None:
+    """Bug: a new variant without META["non_distilled"] (or with a truthy/falsy non-bool) silently counts as
+    non-distilled, so apply_teacache never tells its callers the gate skips nothing."""
+    meta = {"variant_id": "v", "display_name": "D", "license": "L", **meta_extra}
+    with pytest.raises(CalibrationError, match=fragment) as caught:
+        _validate_meta(meta, subname="ghost")
+    assert caught.value.variant_id == "v"
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_build_one_carries_non_distilled_into_the_entry(monkeypatch, flag) -> None:
+    """Bug: the registry entry drops META["non_distilled"], so the apply-time check reads a default."""
+    config = types.SimpleNamespace(
+        META={**_VALID_CONFIG.META, "non_distilled": flag, "hf_model_id": "someone/phantom"},
+        COEFFICIENTS=_VALID_CONFIG.COEFFICIENTS,
+        DEFAULT_THRESH=0.2,
+    )
+    detect = types.SimpleNamespace(
+        matches=lambda f: False, matches_config=lambda c, k: False, MODEL_NAMES=("p",)
+    )
+    modules = {
+        "mlx_teacache.variants.phantom.config": config,
+        "mlx_teacache.variants.phantom.detect": detect,
+    }
+    real_import = importlib.import_module
+    monkeypatch.setattr(
+        importlib, "import_module", lambda name, *a, **k: modules.get(name) or real_import(name, *a, **k)
+    )
+    _, entry = _build_one("mlx_teacache.variants.phantom", "phantom")
+    assert entry["non_distilled"] is flag

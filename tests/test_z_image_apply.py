@@ -73,7 +73,8 @@ def test_default_threshold_is_variant_default():
 def test_custom_coefficients_use_fallback_threshold_and_user_provenance():
     flux = _fake_zimage()
     custom = (1.0, 0.0, 0.0, 0.0, 0.0)
-    handle = apply_teacache(flux, coefficients=custom)
+    with pytest.warns(FutureWarning, match=r"rel_l1_thresh=0\.20"):
+        handle = apply_teacache(flux, coefficients=custom)
     try:
         # custom coefficients skip the per-variant default -> package fallback 0.20
         assert handle.rel_l1_thresh == 0.20

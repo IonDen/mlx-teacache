@@ -9,18 +9,17 @@ configs the rule rejects, the qwen_image_2512 variant only configs it accepts, s
 mflux 0.22 also builds Qwen-Image-Edit-2511 with `zero_cond_t` (its config sets
 `transformer_overrides={"zero_cond_t": True}`): the reference-image tokens take the timestep-0 modulation. The gated
 forward does not implement that path, so neither variant matches a config with it on.
+
+The checkpoint rule every variant shares (`same_repo_id`, `is_calibrated_checkpoint`) lives in `variants/_checkpoint.py`;
+the two Qwen detectors re-export `is_calibrated_checkpoint` from here.
 """
+
+from mlx_teacache.variants._checkpoint import is_calibrated_checkpoint, same_repo_id
 
 # The checkpoint the qwen_image variant's coefficients were fitted on, and the aliases mflux 0.19+ adds for
 # Qwen-Image-2512.
 ORIGINAL_MODEL_NAME = "Qwen/Qwen-Image"
 ALIASES_2512: tuple[str, ...] = ("qwen-image-2512", "qwen-2512")
-
-
-def same_repo_id(name: object, repo_id: str) -> bool:
-    """True when `name` is the Hugging Face repo id `repo_id`. The Hub resolves repo ids case-insensitively and mflux
-    accepts any casing (`--model qwen/qwen-image` loads the original checkpoint), so the comparison ignores case."""
-    return isinstance(name, str) and name.casefold() == repo_id.casefold()
 
 
 def has_zero_cond_t(model_config: object) -> bool:
@@ -39,13 +38,11 @@ def is_2512_checkpoint(model_config: object) -> bool:
     )
 
 
-def is_calibrated_checkpoint(model_config: object, calibrated: str) -> bool:
-    """True unless the model reports a model_name that is neither the calibrated checkpoint nor declares it as its
-    base (repo ids compared case-insensitively, see same_repo_id). mflux resolves a local path or a pre-quantized
-    mirror by copying the base config and recording the base's model_name in base_model, so such a mirror counts as
-    calibrated. On mflux 0.19 and later a pre-quantized mirror resolves against the `qwen-image` alias config, which
-    is Qwen-Image-2512, so it is the qwen_image_2512 variant's model (and calibrated there) even when it re-quantizes
-    the original Qwen-Image."""
-    loaded = getattr(model_config, "model_name", None)
-    base = getattr(model_config, "base_model", None)
-    return not isinstance(loaded, str) or same_repo_id(loaded, calibrated) or same_repo_id(base, calibrated)
+__all__ = [
+    "ALIASES_2512",
+    "ORIGINAL_MODEL_NAME",
+    "has_zero_cond_t",
+    "is_2512_checkpoint",
+    "is_calibrated_checkpoint",
+    "same_repo_id",
+]

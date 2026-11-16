@@ -13,7 +13,9 @@ from collections.abc import Callable
 from typing import Any, TypedDict, cast
 
 from mlx_teacache._kernel.coefficients import validate_custom
+from mlx_teacache._kernel.resolve import ThreshPolicy
 from mlx_teacache.errors import CalibrationError, TeaCacheValueError
+from mlx_teacache.variants._checkpoint import is_calibrated_checkpoint
 
 
 class _RegistryEntry(TypedDict):
@@ -21,9 +23,26 @@ class _RegistryEntry(TypedDict):
     matches: Callable[[object], bool]
     matches_config: Callable[[object, type], bool]
     model_names: tuple[str, ...]
-    is_calibrated_checkpoint: Callable[[object, str], bool] | None
+    hf_model_id: str
+    is_calibrated_checkpoint: Callable[[object, str], bool]
     load_integration: Callable[[], Callable[..., Any]]
     default_thresh: float | None
+    non_distilled: bool
+    thresh_policy: ThreshPolicy
+
+
+# The variants whose integration keeps the per-variant default threshold when the caller passes
+# coefficients; every other variant falls back to the package default. Mirrors the policy literal at
+# each integration's resolve_rule call, so apply_teacache can name the threshold before it patches.
+_VARIANT_DEFAULT_WITH_CALLER_COEFFICIENTS: frozenset[str] = frozenset(
+    {"flux1-dev", "flux1-schnell", "flux1-krea-dev", "flux2-klein-4b", "flux2-klein-9b"}
+)
+
+
+def _thresh_policy(variant_id: str) -> ThreshPolicy:
+    if variant_id in _VARIANT_DEFAULT_WITH_CALLER_COEFFICIENTS:
+        return "variant-default"
+    return "fallback-for-caller-coefficients"
 
 
 _REGISTRY: dict[str, _RegistryEntry] = {}
@@ -37,7 +56,7 @@ def _make_lazy_loader(module_name: str) -> Callable[[], Callable[..., Any]]:
     return _load
 
 
-_REQUIRED_META_KEYS = ("variant_id", "display_name", "license")
+_REQUIRED_META_KEYS = ("variant_id", "display_name", "license", "non_distilled")
 
 
 def _validate_meta(meta: object, *, subname: str) -> dict[str, Any]:
@@ -55,6 +74,11 @@ def _validate_meta(meta: object, *, subname: str) -> dict[str, Any]:
             variant_id=str(meta.get("variant_id", subname)),
             reason=f"variant {subname!r} META is missing required key(s): {missing}",
         )
+    if not isinstance(meta["non_distilled"], bool):
+        raise CalibrationError(
+            variant_id=str(meta["variant_id"]),
+            reason=f"variant {subname!r} META['non_distilled'] must be a bool, got {meta['non_distilled']!r}",
+        )
     return meta
 
 
@@ -64,9 +88,10 @@ _CheckpointCheck = Callable[[object, str], bool]
 
 def _detect_contract(
     detect: object, meta: dict[str, Any], *, variant_id: str
-) -> tuple[_ConfigPredicate, tuple[str, ...], _CheckpointCheck | None]:
-    """The config-level predicate and model names a detect module must define, plus its optional checkpoint check,
-    or a CalibrationError naming the variant (match_variant needs all of them)."""
+) -> tuple[_ConfigPredicate, tuple[str, ...], _CheckpointCheck]:
+    """The config-level predicate and model names a detect module must define, plus the checkpoint check (the detect
+    module's own is_calibrated_checkpoint if it defines one, else the shared rule), or a CalibrationError naming the
+    variant. Every variant needs a non-empty META['hf_model_id'] for the check to compare against."""
     matches_config = getattr(detect, "matches_config", None)
     model_names = getattr(detect, "MODEL_NAMES", None)
     checkpoint_check = getattr(detect, "is_calibrated_checkpoint", None)
@@ -81,19 +106,32 @@ def _detect_contract(
             variant_id=variant_id,
             reason=f"detect.py MODEL_NAMES must be a non-empty tuple of non-empty names, got {model_names!r}",
         )
-    if checkpoint_check is not None:
-        hf_model_id = meta.get("hf_model_id")
-        if not callable(checkpoint_check) or not (isinstance(hf_model_id, str) and hf_model_id):
-            raise CalibrationError(
-                variant_id=variant_id,
-                reason="detect.py is_calibrated_checkpoint needs a callable and a non-empty META['hf_model_id'], "
-                f"got hf_model_id={hf_model_id!r}",
-            )
+    hf_model_id = meta.get("hf_model_id")
+    if not (isinstance(hf_model_id, str) and hf_model_id):
+        raise CalibrationError(
+            variant_id=variant_id,
+            reason="META['hf_model_id'] must name the checkpoint the coefficients were calibrated on, "
+            f"got hf_model_id={hf_model_id!r}",
+        )
+    if checkpoint_check is None:
+        checkpoint_check = is_calibrated_checkpoint
+    elif not callable(checkpoint_check):
+        raise CalibrationError(
+            variant_id=variant_id,
+            reason=f"detect.py is_calibrated_checkpoint must be callable, got {checkpoint_check!r}",
+        )
     return (
         cast(_ConfigPredicate, matches_config),
         cast("tuple[str, ...]", model_names),
-        cast("_CheckpointCheck | None", checkpoint_check),
+        cast(_CheckpointCheck, checkpoint_check),
     )
+
+
+def checkpoint_is_calibrated(entry: _RegistryEntry, model_config: object) -> bool:
+    """True unless `model_config` names a checkpoint that is neither the one the entry's built-in coefficients were
+    fitted on nor declares it as its base. apply_teacache warns on False and match_variant reports it as
+    VariantInfo.calibrated, so the two cannot disagree. A config without a model_name is not checked (True)."""
+    return bool(entry["is_calibrated_checkpoint"](model_config, entry["hf_model_id"]))
 
 
 def _build_one(full: str, subname: str) -> tuple[str, _RegistryEntry]:
@@ -131,9 +169,12 @@ def _build_one(full: str, subname: str) -> tuple[str, _RegistryEntry]:
         matches=detect.matches,
         matches_config=matches_config,
         model_names=model_names,
+        hf_model_id=str(meta["hf_model_id"]),
         is_calibrated_checkpoint=checkpoint_check,
         load_integration=_make_lazy_loader(full),
         default_thresh=default_thresh,
+        non_distilled=meta["non_distilled"],
+        thresh_policy=_thresh_policy(variant_id),
     )
 
 
@@ -168,4 +209,4 @@ def _build_registry() -> None:
 
 _build_registry()
 
-__all__ = ["_REGISTRY"]
+__all__ = ["_REGISTRY", "checkpoint_is_calibrated"]

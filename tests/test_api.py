@@ -16,6 +16,7 @@ from mlx_teacache import (
 )
 from mlx_teacache.errors import TeaCacheDisabledWarning, TeaCacheValueError
 from tests._fakes import FaithfulCallbackRegistry
+from tests.conftest import expect_distilled_warning
 
 
 class _FakeTransformer(nn.Module):
@@ -178,7 +179,7 @@ def test_apply_teacache_rejects_nonfinite_coefficients_at_call_time():
 
 def test_apply_teacache_coerces_list_coefficients_to_tuple():
     flux = _make_fake_flux1()
-    h = apply_teacache(flux, coefficients=[1.0, -0.5, 0.1, 0.0, 0.0])
+    h = apply_teacache(flux, coefficients=[1.0, -0.5, 0.1, 0.0, 0.0], rel_l1_thresh=0.2)
     try:
         assert h.coefficients == (1.0, -0.5, 0.1, 0.0, 0.0)
         assert isinstance(h.coefficients, tuple)
@@ -207,7 +208,7 @@ def test_apply_rollback_on_failure_flux1(alias, monkeypatch):
         "wrap_generate_image",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError), expect_distilled_warning(f"flux1-{alias}"):
         apply_teacache(flux)
     # Pristine-state asserts (dangling state IS the bug):
     assert flux.callbacks.before_loop == before, "callback left registered"
@@ -229,7 +230,7 @@ def test_apply_rollback_on_register_failure_flux1(alias, monkeypatch):
         raise RuntimeError("register boom")
 
     monkeypatch.setattr(flux.callbacks, "register", _partially_register_then_boom)
-    with pytest.raises(RuntimeError, match="register boom"):
+    with pytest.raises(RuntimeError, match="register boom"), expect_distilled_warning(f"flux1-{alias}"):
         apply_teacache(flux)
     assert flux.transformer is original_transformer, "proxy transformer left installed"
     assert "_teacache_handle" not in vars(flux), "sentinel left behind"
@@ -325,7 +326,8 @@ def test_apply_teacache_user_coefficients_skip_per_variant_default():
     flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
     flux.freeze()
     custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
-    handle = apply_teacache(flux, coefficients=custom_coeffs)
+    with pytest.warns(FutureWarning, match=r"rel_l1_thresh=0\.20"):
+        handle = apply_teacache(flux, coefficients=custom_coeffs)
     try:
         assert handle.rel_l1_thresh == 0.20
         assert handle.provenance.source == "user"
@@ -566,7 +568,7 @@ def test_user_coefficients_provenance_all_variants(variant_id: str, make_flux) -
     flux.freeze()
     custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
     with expect_distilled_warning(variant_id, coefficients=custom_coeffs):
-        handle = apply_teacache(flux, coefficients=custom_coeffs)
+        handle = apply_teacache(flux, coefficients=custom_coeffs, rel_l1_thresh=0.2)
     try:
         assert handle.variant_id == variant_id
         assert handle.provenance.source == "user"
@@ -619,7 +621,41 @@ def test_distilled_variant_does_not_warn_when_caller_supplies_coefficients(monke
     with warnings.catch_warnings():
         warnings.simplefilter("error", TeaCacheNoBenefitWarning)
         with pytest.raises(_StopAtIntegration):
-            apply_teacache(_fake_distilled_klein_4b(), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5))
+            apply_teacache(
+                _fake_distilled_klein_4b(), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5), rel_l1_thresh=0.2
+            )
+
+
+def test_schnell_warns_at_apply_with_builtin_coefficients(monkeypatch):
+    """Bug: the at-apply trigger reads `default_thresh is None`, and schnell's 0.20 default keeps it silent although
+    its distilled few-step schedule skips nothing."""
+    from mlx_teacache.errors import TeaCacheNoBenefitWarning
+    from mlx_teacache.variants import _REGISTRY
+
+    monkeypatch.setitem(_REGISTRY["flux1-schnell"], "load_integration", _raise_stop_at_integration)
+    with pytest.warns(TeaCacheNoBenefitWarning, match="distilled"), pytest.raises(_StopAtIntegration):
+        apply_teacache(_make_fake_flux1(alias="schnell"))
+
+
+def test_schnell_with_caller_coefficients_does_not_warn(monkeypatch):
+    """Bug: the schnell trigger ignores `coefficients`, so a caller calibrating their own polynomial on schnell
+    cannot apply under filterwarnings=error. rel_l1_thresh is passed so the threshold FutureWarning stays out."""
+    import warnings
+
+    from mlx_teacache.errors import TeaCacheNoBenefitWarning
+    from mlx_teacache.variants import _REGISTRY
+
+    monkeypatch.setitem(_REGISTRY["flux1-schnell"], "load_integration", _raise_stop_at_integration)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TeaCacheNoBenefitWarning)
+        with pytest.raises(_StopAtIntegration):
+            apply_teacache(
+                _make_fake_flux1(alias="schnell"), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5), rel_l1_thresh=0.2
+            )
+
+
+def _raise_stop_at_integration():
+    raise _StopAtIntegration
 
 
 def test_restore_releases_cached_arrays_through_the_public_handle():

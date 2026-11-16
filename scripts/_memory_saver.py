@@ -13,8 +13,9 @@ def make_memory_saver(flux: Any, saver_cls: Any) -> Any:
 
     keep_transformer=True frees only the text encoders. cache_limit_bytes=None
     matters: MemorySaver's default (1 GB) branch calls mx.set_cache_limit,
-    overriding install_caps, calls mx.reset_peak_memory before the load peak is
-    read, and switches the VAE to tiled decode, which changes output pixels and
+    overriding install_caps, calls mx.reset_peak_memory, which would cut the
+    process-lifetime peak the bench reads once after generation, and switches
+    the VAE to tiled decode, which changes output pixels and
     would make the SSIM numbers and committed images incomparable. MemorySaver
     also runs gc.collect and mx.clear_cache after every loop; that applies to
     every condition alike, so the ratios stand."""

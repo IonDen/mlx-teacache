@@ -9,9 +9,12 @@ then compared key by key; any difference is a behaviour change.
 Command line, from the repository root:
 
     python -m tests._equivalence_oracle record --out PATH [--device gpu|cpu]
-    python -m tests._equivalence_oracle compare A B
+    python -m tests._equivalence_oracle compare A B [--expect FILE] [--allow-unmet]
 
-`compare` exits 0 and prints `identical (N scenarios)`, or exits 1 and prints each differing key path.
+`compare` exits 0 and prints `identical (N scenarios)`, or exits 1 and prints each differing key path. With
+`--expect FILE` (JSON: `required`, `allowed`, `forbidden` lists of fnmatch globs over the `/`-joined key paths) it
+exits 0 only when every difference is expected and every required glob matched a difference (`--allow-unmet` drops
+the second condition); see `check_expected`.
 `meta.module_file` (which library was imported) and `meta.recorded_at` are not compared; `meta.harness_sha256` is,
 so both sides must run the same harness. It covers this file and the fakes it builds models from (`_variant_fakes.py`,
 `_fakes.py`).
@@ -195,6 +198,33 @@ def _qwen_uncalibrated_checkpoint() -> dict[str, Any]:
     return record
 
 
+def _uncalibrated(variant_id: str) -> dict[str, Any]:
+    """A variant whose config names a checkpoint that is neither the calibrated one nor declares it as its base,
+    applied with the built-in coefficients: the apply-time warnings and the handle."""
+    from types import SimpleNamespace
+
+    from mlx_teacache import apply_teacache
+
+    flux = _build(variant_id, cfg=False)
+    flux.model_config = SimpleNamespace(
+        aliases=_MODELS[variant_id][1], model_name="someone/finetune", base_model=None
+    )
+    with _recording() as caught:
+        handle = apply_teacache(flux)
+    record = {"handle": _handle_record(handle), "warnings": [_warning_row(w) for w in caught]}
+    handle.restore()
+    return record
+
+
+def _warning_attribution() -> dict[str, Any]:
+    from mlx_teacache.variants import _REGISTRY
+
+    return {
+        "qwen-image/uncalibrated-checkpoint": _qwen_uncalibrated_checkpoint(),
+        **{f"uncalibrated/{variant_id}": _uncalibrated(variant_id) for variant_id in sorted(_REGISTRY)},
+    }
+
+
 # ---------- generation pipelines ----------
 #
 # Each pipeline follows mflux's generate_image order: before-loop callbacks, one transformer or predict call per
@@ -227,6 +257,8 @@ class _Pipeline:
     latent_shape: tuple[int, ...] = ()
     changed_latent_shape: tuple[int, ...] = ()
     dtype: Any = mx.bfloat16
+    # Called with the step index after each step's latents are evaluated, where an in-loop mflux callback runs.
+    step_hook: Callable[[int], None] | None = None
 
     def __init__(self, model_config: Any, transformer: Any, *, cfg: bool) -> None:
         from tests._fakes import FaithfulCallbackRegistry
@@ -269,6 +301,8 @@ class _Pipeline:
                 raise RuntimeError(f"generation failed on purpose at step {t}")
             latents = latents - _STEP_SIZE * noise
             mx.eval(latents)
+            if self.step_hook is not None:
+                self.step_hook(t)
         for cb in self.callbacks.after_loop:
             cb.call_after_loop(seed=request.seed, prompt="oracle", latents=latents, config=config)
         return latents
@@ -661,16 +695,17 @@ _STRATEGY = {
     "z-image": "predict-z-image",
     "qwen": "proxy-qwen",
 }
-# variant id -> (family, aliases, model_name). Qwen-Image names the checkpoint its fit was measured on.
+# variant id -> (family, aliases, model_name). Every model_name is the variant's META["hf_model_id"], as mflux sets it,
+# so a check of the loaded checkpoint against the calibrated one sees the calibrated checkpoint everywhere.
 _MODELS: dict[str, tuple[str, list[str], str | None]] = {
     "flux1-dev": ("flux1", ["dev"], "black-forest-labs/FLUX.1-dev"),
     "flux1-schnell": ("flux1", ["schnell"], "black-forest-labs/FLUX.1-schnell"),
     "flux1-krea-dev": ("flux1", ["krea-dev"], "black-forest-labs/FLUX.1-Krea-dev"),
-    "flux2-klein-4b": ("flux2", ["flux2-klein-4b"], None),
-    "flux2-klein-9b": ("flux2", ["flux2-klein-9b"], None),
-    "flux2-klein-base-4b": ("flux2", ["flux2-klein-base-4b"], None),
-    "flux2-klein-base-9b": ("flux2", ["flux2-klein-base-9b"], None),
-    "z-image-base": ("z-image", ["z-image"], None),
+    "flux2-klein-4b": ("flux2", ["flux2-klein-4b"], "black-forest-labs/FLUX.2-klein-4B"),
+    "flux2-klein-9b": ("flux2", ["flux2-klein-9b"], "black-forest-labs/FLUX.2-klein-9B"),
+    "flux2-klein-base-4b": ("flux2", ["flux2-klein-base-4b"], "black-forest-labs/FLUX.2-klein-base-4B"),
+    "flux2-klein-base-9b": ("flux2", ["flux2-klein-base-9b"], "black-forest-labs/FLUX.2-klein-base-9B"),
+    "z-image-base": ("z-image", ["z-image"], "Tongyi-MAI/Z-Image"),
     "qwen-image": ("qwen", ["qwen-image"], "Qwen/Qwen-Image"),
     "qwen-image-2512": (
         "qwen",
@@ -710,6 +745,15 @@ def _scenarios() -> Iterator[tuple[str, str, bool, dict[str, Any], list[_Request
             # run of skips as long as the consecutive-skip cap.
             high = [_Request(seed=1, num_inference_steps=12)]
             yield f"{prefix}/builtin-thresh=0.9", variant_id, cfg, {"rel_l1_thresh": 0.9}, high
+        # Caller coefficients and no threshold: the threshold the package resolves for them. Its decisions,
+        # digests and latents pin that default; only the apply-time warnings may say more about it.
+        yield (
+            f"{variant_id}/caller-coeffs-default-thresh",
+            variant_id,
+            False,
+            {"coefficients": _CONST_COEFFICIENTS},
+            [_Request(seed=1)],
+        )
     for variant_id in _FAMILY_REPRESENTATIVES:
         yield f"{variant_id}/img2img/default", variant_id, False, {}, [_Request(seed=1, init_time_step=4)]
         yield (
@@ -824,11 +868,100 @@ def _generation(
     return scenario
 
 
+def _restore_outcome(handle: Any) -> list[str] | None:
+    """Call `restore()`; None when it returns, else the error's class name and message."""
+    try:
+        handle.restore()
+    except Exception as exc:
+        return [type(exc).__name__, str(exc)]
+    return None
+
+
+def _restore_in_loop(variant_id: str) -> dict[str, Any]:
+    """`restore()` called between steps 3 and 4 of a running generation, the error (if any) kept so the generation
+    goes on; then whether the later steps ran, and a restore after the generation."""
+    from mlx_teacache import apply_teacache
+
+    flux = _build(variant_id, cfg=False)
+    original_transformer = flux.transformer
+    with _recording() as caught:
+        handle = apply_teacache(flux, rel_l1_thresh=0.25, coefficients=_CONST_COEFFICIENTS)
+    scenario: dict[str, Any] = {
+        "strategy": _STRATEGY[_MODELS[variant_id][0]],
+        "handle": _handle_record(handle),
+        "apply_warnings": [_warning_row(w) for w in caught],
+    }
+    probe: dict[str, Any] = {}
+
+    def restore_after_step_3(t: int) -> None:
+        if t == 3:
+            probe["at"] = t
+            probe["outcome"] = _restore_outcome(handle)
+
+    flux.step_hook = restore_after_step_3
+    scenario["runs"] = [_run(flux, handle, _Request(seed=1))]
+    del flux.step_hook
+    scenario["restore_called_at_step"] = probe.get("at")
+    scenario["in_loop_restore"] = probe.get("outcome")
+    internal = _internal(handle)
+    with _recording() as caught:
+        scenario["teardown_restore"] = _restore_outcome(handle)
+    scenario["teardown"] = _teardown_record(flux, original_transformer, internal)
+    scenario["teardown_warnings"] = [_warning_row(w) for w in caught]
+    return scenario
+
+
+def _wrapper_over(variant_id: str, attribute: str) -> dict[str, Any]:
+    """A user wrapper installed over `flux.<attribute>` after apply_teacache, then `restore()`: the error (if any)
+    and whether the wrapper is still installed. Then the wrapper is removed and `restore()` called again."""
+    from mlx_teacache import apply_teacache
+
+    flux = _build(variant_id, cfg=False)
+    original_transformer = flux.transformer
+    with _recording() as caught:
+        handle = apply_teacache(flux, rel_l1_thresh=0.25, coefficients=_CONST_COEFFICIENTS)
+    scenario: dict[str, Any] = {
+        "strategy": _STRATEGY[_MODELS[variant_id][0]],
+        "handle": _handle_record(handle),
+        "apply_warnings": [_warning_row(w) for w in caught],
+        "runs": [],
+    }
+    installed = vars(flux)[attribute]
+
+    def user_wrapper(*args: Any, **kwargs: Any) -> Any:
+        return installed(*args, **kwargs)
+
+    setattr(flux, attribute, user_wrapper)
+    internal = _internal(handle)
+    with _recording() as caught:
+        scenario["restore"] = _restore_outcome(handle)
+    scenario["restore_warnings"] = [_warning_row(w) for w in caught]
+    scenario["wrapper_kept"] = vars(flux).get(attribute) is user_wrapper
+    if scenario["wrapper_kept"]:
+        setattr(flux, attribute, installed)
+    with _recording() as caught:
+        scenario["second_restore"] = _restore_outcome(handle)
+    scenario["teardown"] = _teardown_record(flux, original_transformer, internal)
+    scenario["teardown_warnings"] = [_warning_row(w) for w in caught]
+    return scenario
+
+
+# One representative per patch strategy for restore() from inside a generation and over a wrapper of
+# generate_image; the predict strategies also over a wrapper of _predict.
+_PREDICT_REPRESENTATIVES = ("flux2-klein-base-4b", "z-image-base")
+
+
 def _generations() -> dict[str, Any]:
-    return {
+    generations = {
         name: _generation(variant_id, cfg, kwargs, requests)
         for name, variant_id, cfg, kwargs, requests in _scenarios()
     }
+    for variant_id in _FAMILY_REPRESENTATIVES:
+        generations[f"{variant_id}/restore-in-loop"] = _restore_in_loop(variant_id)
+        generations[f"{variant_id}/wrapper-over-generate-image"] = _wrapper_over(variant_id, "generate_image")
+    for variant_id in _PREDICT_REPRESENTATIVES:
+        generations[f"{variant_id}/wrapper-over-predict"] = _wrapper_over(variant_id, "_predict")
+    return generations
 
 
 # ---------- the record ----------
@@ -885,7 +1018,7 @@ def collect(*, device: str = "gpu") -> dict[str, Any]:
         return {
             "meta": _meta(device),
             "threshold_matrix": _threshold_matrix(),
-            "warning_attribution": {"qwen-image/uncalibrated-checkpoint": _qwen_uncalibrated_checkpoint()},
+            "warning_attribution": _warning_attribution(),
             "generations": _generations(),
         }
 
@@ -925,6 +1058,28 @@ def compare(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
     return out
 
 
+def check_expected(
+    diffs: list[str], expected: dict[str, list[str]], *, allow_unmet: bool
+) -> tuple[list[str], list[str]]:
+    """(unexpected differing paths, unmet required globs), matched with fnmatch on the `/`-joined paths.
+
+    A difference is expected when it matches a `required` or an `allowed` glob and no `forbidden` glob. Each
+    `required` glob must match at least one difference; `allow_unmet` (a task that lands only part of a release)
+    drops that check but never the first."""
+    from fnmatch import fnmatchcase
+
+    required = expected.get("required", [])
+    allowed = [*required, *expected.get("allowed", [])]
+    forbidden = expected.get("forbidden", [])
+    unexpected = [
+        path
+        for path in diffs
+        if any(fnmatchcase(path, g) for g in forbidden) or not any(fnmatchcase(path, g) for g in allowed)
+    ]
+    unmet = [] if allow_unmet else [g for g in required if not any(fnmatchcase(path, g) for path in diffs)]
+    return unexpected, unmet
+
+
 # ---------- command line ----------
 
 
@@ -937,6 +1092,8 @@ def main(argv: list[str] | None = None) -> int:
     cmp_ = sub.add_parser("compare")
     cmp_.add_argument("a", type=Path)
     cmp_.add_argument("b", type=Path)
+    cmp_.add_argument("--expect", type=Path, default=None)
+    cmp_.add_argument("--allow-unmet", action="store_true")
     args = parser.parse_args(argv)
 
     if args.command == "record":
@@ -949,6 +1106,17 @@ def main(argv: list[str] | None = None) -> int:
     a = json.loads(args.a.read_text())
     b = json.loads(args.b.read_text())
     differences = compare(a, b)
+    if args.expect is not None:
+        expected = json.loads(args.expect.read_text())
+        unexpected, unmet = check_expected(differences, expected, allow_unmet=args.allow_unmet)
+        for path in unexpected:
+            print(f"unexpected: {path}")
+        for glob in unmet:
+            print(f"unmet required: {glob}")
+        print(
+            f"{len(differences)} difference(s), {len(unexpected)} unexpected, {len(unmet)} unmet required glob(s)"
+        )
+        return 0 if not unexpected and not unmet else 1
     if not differences:
         print(f"identical ({count_scenarios(a)} scenarios)")
         return 0

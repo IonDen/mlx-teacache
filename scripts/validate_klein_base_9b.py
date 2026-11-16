@@ -144,7 +144,7 @@ def _worker(condition: str, save_image_to: Path, mlx_memory_cap_gb: int) -> None
             width=WIDTH,
             guidance=GUIDANCE,
         )
-        mx.eval(mx.zeros(1))
+        mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
         elapsed = time.perf_counter() - t0
     elif condition == "wrapper":
         from mlx_teacache import apply_teacache
@@ -159,7 +159,7 @@ def _worker(condition: str, save_image_to: Path, mlx_memory_cap_gb: int) -> None
                 width=WIDTH,
                 guidance=GUIDANCE,
             )
-            mx.eval(mx.zeros(1))
+            mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
             elapsed = time.perf_counter() - t0
             skipped = handle.stats.skipped_count
             computed = handle.stats.computed_count

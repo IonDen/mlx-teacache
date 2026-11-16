@@ -169,7 +169,7 @@ def _gen(flux: Any, *, save_path: Path) -> float:
         width=WIDTH,
         guidance=1.0,
     )
-    mx.eval(mx.zeros(1))
+    mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
     elapsed = time.perf_counter() - start
     save_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path=str(save_path), export_json_metadata=False)

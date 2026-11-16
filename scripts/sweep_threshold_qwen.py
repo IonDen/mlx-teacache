@@ -183,7 +183,7 @@ def _gen(flux: Any, *, save_path: Path) -> float:
     image = flux.generate_image(
         prompt=PROMPT, seed=SEED, num_inference_steps=STEPS, height=HEIGHT, width=WIDTH, guidance=GUIDANCE
     )
-    mx.eval(mx.zeros(1))
+    mx.synchronize()  # drain submitted GPU work; generate_image already returned a host-side image
     elapsed = time.perf_counter() - start
     save_path.parent.mkdir(parents=True, exist_ok=True)
     # mflux's image.save() AUTO-APPENDS `_1` on a name collision instead of

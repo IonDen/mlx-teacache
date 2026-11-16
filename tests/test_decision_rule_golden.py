@@ -9,7 +9,8 @@ is bumped and the golden file is re-recorded in the same change:
 
 Scope: the gate and the cap, driven by recorded traces. The rel-L1 values a real model produces depend on
 mflux and MLX and are not pinned here. Pure-core: mlx.core plus the kernel, and duck-typed models for the
-threshold a None default resolves to; no weights, no mflux, milliseconds.
+thresholds apply_teacache resolves; no weights, no mflux, milliseconds. One test is the exception: the FLUX.1
+caller-coefficient thresholds need the real-class FLUX.1 fake, so that test carries the mflux marker.
 
 One character per step: C computed, F forced (the skip window), S skipped, N numerical miss.
 """
@@ -32,7 +33,7 @@ from mlx_teacache._kernel.gate import DECISION_RULE_REVISION, gate_step
 from mlx_teacache.api import apply_teacache
 from mlx_teacache.errors import TeaCacheNoBenefitWarning
 from mlx_teacache.variants import _REGISTRY
-from tests._variant_fakes import fake_for_variant
+from tests._variant_fakes import _FLUX1_ALIASES, fake_for_variant
 from tests.test_gate_replay import (
     _BASE_4B_BENCH_RECIPE_DELTAS,
     _BASE_4B_REAL_DELTAS,
@@ -159,7 +160,43 @@ def _resolved_thresh(variant_id: str) -> float:
         handle.restore()
 
 
+# Any five-term polynomial that is not a variant's built-in one: the threshold read below depends on the caller
+# passing coefficients at all, not on their values.
+_CALLER_COEFFICIENTS = (1.0, 0.5, 0.25, 0.0, 0.0)
+
+
+def _caller_coefficient_thresh(variant_id: str) -> float:
+    """The threshold apply_teacache resolves when the caller passes coefficients and no rel_l1_thresh, read from
+    the handle of a weight-free model the variant's detector matches."""
+    with warnings.catch_warnings():
+        # Neither the no-benefit notice nor a notice about the missing threshold is what this reads.
+        warnings.filterwarnings("ignore", category=TeaCacheNoBenefitWarning)
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        handle = apply_teacache(fake_for_variant(variant_id), coefficients=_CALLER_COEFFICIENTS)
+    try:
+        assert handle.variant_id == variant_id, (variant_id, handle.variant_id)
+        return handle.rel_l1_thresh
+    finally:
+        handle.restore()
+
+
 def _rule_parameters() -> dict[str, Any]:
+    return {
+        **_mflux_free_rule_parameters(),
+        # Caller coefficients without a threshold: some variants keep their default, others fall back.
+        "caller_coefficients_resolve_to": {
+            variant_id: _caller_coefficient_thresh(variant_id) for variant_id in sorted(_REGISTRY)
+        },
+    }
+
+
+def _needs_mflux(variant_id: str) -> bool:
+    """True when fake_for_variant builds the real mflux FLUX.1 class for this id."""
+    return variant_id in _FLUX1_ALIASES
+
+
+def _mflux_free_rule_parameters() -> dict[str, Any]:
+    """Every rule parameter except caller_coefficients_resolve_to, which needs the FLUX.1 fakes."""
     params = inspect.signature(apply_teacache).parameters
     return {
         "max_consecutive_skips": gate.MAX_CONSECUTIVE_SKIPS,
@@ -204,10 +241,44 @@ def test_every_committed_trace_replays_to_its_golden_sequence() -> None:
     assert replayed == golden, "decisions moved off the golden lists:\n" + _diff(golden, replayed)
 
 
-def test_rule_parameters_match_the_golden() -> None:
+def test_mflux_free_rule_parameters_match_the_golden() -> None:
     """Bug: a variant's default threshold, the threshold a None default resolves to (the distilled Klein
-    fallback), the runaway cap or a skip-window default changes without a revision bump."""
-    assert _rule_parameters() == _golden()["rule"]
+    fallback), the threshold caller coefficients resolve to on a FLUX.2, Z-Image or Qwen-Image variant, the
+    runaway cap or a skip-window default changes without a revision bump. Runs without mflux."""
+    rule = _golden()["rule"]
+    caller_ids = sorted(v for v in _REGISTRY if not _needs_mflux(v))
+    assert caller_ids, "every variant needs mflux; the pure-core lane pins no caller-coefficient threshold"
+    actual = {
+        **_mflux_free_rule_parameters(),
+        "caller_coefficients_resolve_to": {v: _caller_coefficient_thresh(v) for v in caller_ids},
+    }
+    expected = {
+        **rule,
+        "caller_coefficients_resolve_to": {v: rule["caller_coefficients_resolve_to"][v] for v in caller_ids},
+    }
+    assert actual == expected
+
+
+@pytest.mark.mflux
+def test_flux1_caller_coefficient_thresholds_match_the_golden() -> None:
+    """Bug: the threshold caller coefficients resolve to on a FLUX.1 variant (Krea's 0.30, say) changes without
+    a revision bump. Needs mflux: the FLUX.1 fakes are the real mflux class."""
+    flux1_ids = sorted(v for v in _REGISTRY if _needs_mflux(v))
+    assert flux1_ids
+    pinned = _golden()["rule"]["caller_coefficients_resolve_to"]
+    assert {v: _caller_coefficient_thresh(v) for v in flux1_ids} == {v: pinned[v] for v in flux1_ids}
+
+
+def test_golden_pins_the_caller_coefficient_threshold() -> None:
+    """Bug: the threshold a caller gets with their own coefficients and no rel_l1_thresh moves (FLUX.1 Krea off
+    0.30, or any other variant off 0.20, say Krea switched to the fallback policy) and the golden is re-recorded
+    at the same revision, so the pin follows the change instead of catching it."""
+    pinned = _golden()["rule"]["caller_coefficients_resolve_to"]
+    assert sorted(pinned) == sorted(_REGISTRY)
+    assert pinned["flux1-krea-dev"] == 0.3
+    assert {v: t for v, t in pinned.items() if v != "flux1-krea-dev"} == {
+        v: 0.2 for v in pinned if v != "flux1-krea-dev"
+    }
 
 
 def test_the_golden_set_exercises_a_numerical_miss() -> None:

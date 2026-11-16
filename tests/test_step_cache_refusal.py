@@ -206,6 +206,26 @@ def test_a_positionally_passed_step_cache_ratio_is_refused() -> None:
     assert entries == []
 
 
+def test_var_keyword_generate_image_refuses_a_ratio_passed_through_kwargs() -> None:
+    """Bug caught: the bound check leaves the **kwargs dict nested under its own name instead of merging it, so
+    `teacache_ratio` (not a named parameter here, only reachable through **kwargs) is never seen and the alias turns
+    the step cache on under TeaCache."""
+    flux = make_flux1_fake()
+    inner = flux.generate_image
+    entries: list[dict[str, Any]] = []
+
+    # Names step_cache_ratio but takes its alias only through **kwargs (bound, so no `self` in the signature).
+    def generate_image(prompt: str = "", step_cache_ratio: float | None = None, **kwargs: Any) -> Any:
+        entries.append({"prompt": prompt, "step_cache_ratio": step_cache_ratio, **kwargs})
+        return inner(prompt=prompt, **kwargs)
+
+    flux.generate_image = generate_image
+    apply_teacache(flux, rel_l1_thresh=0.2)
+    with pytest.raises(IncompatibleModelError, match=r"teacache_ratio=0\.5"):
+        flux.generate_image(seed=0, prompt="p", num_inference_steps=_STEPS, teacache_ratio=0.5)
+    assert entries == []
+
+
 def test_a_named_parameter_left_off_runs_normally() -> None:
     """Bug caught: the bound check tests that the parameter exists, or reads use_step_cache's default False as
     on, so every call on a model that has the step cache is refused."""

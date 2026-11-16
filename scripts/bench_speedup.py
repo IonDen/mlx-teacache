@@ -54,7 +54,10 @@ skips chunks whose file exists and the report is written only once every
 chunk is present, so one three-way bench can be split into several short,
 finite jobs — ``--max-chunks 3`` with ``--reps 3`` runs one condition per
 invocation — and an interruption loses at most the in-flight worker. Move the
-variant's chunk subdir to the Trash for a fresh measurement.
+variant's chunk subdir to the Trash for a fresh measurement. The commit and dirty
+state when the measurement started are stored beside the chunks in ``run_start.json``;
+a resumed run keeps that first reading, and the report writes it next to the
+report-time one.
 
 Memory safety
 -------------
@@ -97,7 +100,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from _bench_telemetry import mlx_version, repo_relative, teacache_version
+from _bench_telemetry import _GIT_TIMEOUT_SECONDS, mlx_version, repo_relative, teacache_version
 from _bench_telemetry import streak_telemetry as _streak_telemetry
 from _memory_saver import make_memory_saver as _make_memory_saver
 from _mlx_watchdog import WATCHDOG_EXIT_CODE, arm_mlx_watchdog
@@ -235,6 +238,40 @@ def _load_flux(variant: str) -> Any:
     return flux
 
 
+def _checkpoint_fields(flux: Any) -> dict[str, str | None]:
+    """The checkpoint the loaded model came from: its config's repo id and base model, and the
+    commit mflux pins that repo to (None for a repo mflux does not pin, such as Qwen/Qwen-Image)."""
+    from mflux.models.common.resolution.model_revisions import ModelRevisions
+
+    model_name: str = flux.model_config.model_name
+    return {
+        "model_name": model_name,
+        "base_model": flux.model_config.base_model,
+        "model_revision": ModelRevisions.get(model_name),
+    }
+
+
+_CHECKPOINT_KEYS = ("model_name", "base_model", "model_revision")
+
+
+def _report_checkpoint(all_results: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """The one checkpoint every chunk loaded. A chunk persisted before the checkpoint was
+    recorded reads as None in each field, so it cannot be mixed with recorded ones either."""
+    seen: dict[tuple[Any, ...], list[str]] = {}
+    for condition, results in all_results.items():
+        for r in results:
+            key = tuple(r.get(k) for k in _CHECKPOINT_KEYS)
+            seen.setdefault(key, []).append(f"{condition} rep {r.get('rep')}")
+    if len(seen) > 1:
+        detail = "; ".join(
+            f"{dict(zip(_CHECKPOINT_KEYS, key, strict=True))} in {', '.join(chunks)}"
+            for key, chunks in seen.items()
+        )
+        raise SystemExit(f"the chunks loaded different checkpoints, refusing to build one report: {detail}")
+    (only,) = seen
+    return dict(zip(_CHECKPOINT_KEYS, only, strict=True))
+
+
 def _generate(
     flux: Any,
     *,
@@ -315,8 +352,6 @@ def _worker_main(args: argparse.Namespace) -> None:
         from mflux.callbacks.instances.memory_saver import MemorySaver
 
         flux.callbacks.register(_make_memory_saver(flux, MemorySaver))
-    load_peak = int(mx.get_peak_memory())
-    mx.reset_peak_memory()
 
     stats_summary: dict[str, Any] = {}
     elapsed: float
@@ -381,7 +416,8 @@ def _worker_main(args: argparse.Namespace) -> None:
     else:
         raise ValueError(f"unknown --condition {condition!r}")
 
-    loop_peak = int(mx.get_peak_memory())
+    # One lifetime peak read after the generation: mflux materialises the weights lazily inside it.
+    peak = int(mx.get_peak_memory())
     result: dict[str, Any] = {
         "variant": variant,
         "condition": condition,
@@ -390,26 +426,20 @@ def _worker_main(args: argparse.Namespace) -> None:
         "guidance": guidance,
         "elapsed_s": elapsed,
         "memory_saver": _memory_saver_for(variant),
+        **_checkpoint_fields(flux),
         "started_at": started_at,
         "finished_at": datetime.now(UTC).isoformat(),
-        **_memory_fields(
-            load_peak_bytes=load_peak, loop_peak_bytes=loop_peak, cache_bytes=int(mx.get_cache_memory())
-        ),
+        **_memory_fields(peak_bytes=peak, cache_bytes=int(mx.get_cache_memory())),
         "stats_summary": stats_summary,
     }
     print(f"{WORKER_RESULT_SENTINEL}{json.dumps(result)}", flush=True)
 
 
-def _memory_fields(*, load_peak_bytes: int, loop_peak_bytes: int, cache_bytes: int) -> dict[str, float]:
-    """Load-time peak, denoising-loop peak (after reset_peak_memory), the cache pool at
-    exit, and the legacy process-lifetime `peak_memory_gb` (max of the two peaks)."""
+def _memory_fields(*, peak_bytes: int, cache_bytes: int) -> dict[str, float]:
+    """Schema 4: the process-lifetime peak (weight materialisation included) and the
+    cache pool at exit, both in GiB."""
     gib = 1024**3
-    return {
-        "peak_memory_gb": max(load_peak_bytes, loop_peak_bytes) / gib,
-        "load_peak_memory_gb": load_peak_bytes / gib,
-        "loop_peak_memory_gb": loop_peak_bytes / gib,
-        "cache_memory_gb": cache_bytes / gib,
-    }
+    return {"peak_memory_gb": peak_bytes / gib, "cache_memory_gb": cache_bytes / gib}
 
 
 # ---------------------------------------------------------------------------
@@ -451,18 +481,63 @@ def _macos_sysctl(key: str) -> str | None:
 
 
 def _git_revision(cwd: Path) -> dict[str, Any]:
-    """Commit + dirty flag of the checkout the bench ran from (None outside a repo).
-    The package `__version__` freezes at install time, so it cannot identify the code."""
+    """Commit, dirty flag and dirty paths of the checkout the bench ran from (all None outside
+    a repo). The package `__version__` freezes at install time, so it cannot identify the code.
+    Each dirty path is a `git status --porcelain` line without its two status letters; a rename
+    keeps git's `old -> new` form. The list names untracked, non-ignored files too, so read it
+    before committing a report. Any git failure, including a timeout, gives the None fields."""
+    git = ["git", "-C", str(cwd)]
     try:
         sha = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            [*git, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
         ).stdout.strip()
         status = subprocess.run(
-            ["git", "-C", str(cwd), "status", "--porcelain"], capture_output=True, text=True, check=True
+            [*git, "status", "--porcelain", "--untracked-files=normal"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
         ).stdout
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return {"git_commit": None, "git_dirty": None}
-    return {"git_commit": sha, "git_dirty": bool(status.strip())}
+    except (OSError, subprocess.SubprocessError):
+        return {"git_commit": None, "git_dirty": None, "git_dirty_files": None}
+    dirty_files = [line[3:] for line in status.splitlines() if line.strip()]
+    return {"git_commit": sha, "git_dirty": bool(status.strip()), "git_dirty_files": dirty_files}
+
+
+_RUN_START_FILE = "run_start.json"
+_RUN_START_UNKNOWN: dict[str, Any] = {
+    "git_commit_at_start": None,
+    "git_dirty_at_start": None,
+    "git_dirty_files_at_start": None,
+}
+
+
+def _run_start_reading(results_dir: Path, *, resumed: bool) -> dict[str, Any]:
+    """The commit and dirty state when this measurement started, stored beside its chunks.
+
+    A run with no persisted chunk yet reads git now and stores the reading in
+    `<results_dir>/run_start.json`, replacing any reading left by an earlier invocation
+    that kept no chunk. A resumed run returns the stored reading, so later invocations
+    never overwrite it; chunks persisted before this reading existed give None in each field.
+    Only the three start keys are read back (a missing one is None), so a stale or edited file
+    cannot override the measured hardware fields the report merges this reading into."""
+    path = results_dir / _RUN_START_FILE
+    if resumed:
+        if path.exists():
+            stored = cast(dict[str, Any], json.loads(path.read_text()))
+            return {key: stored.get(key) for key in _RUN_START_UNKNOWN}
+        return dict(_RUN_START_UNKNOWN)
+    rev = _git_revision(REPO_ROOT)
+    reading = {f"{key}_at_start": value for key, value in rev.items()}
+    results_dir.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(reading, indent=2))
+    tmp.replace(path)
+    return reading
 
 
 def _detect_hardware(*, quantize: int) -> dict[str, Any]:
@@ -613,18 +688,9 @@ def _persist_abort(results_dir: Path, payload: dict[str, Any]) -> Path:
 
 
 def _memory_arrays(results: list[dict[str, Any]], key: str) -> list[float | None]:
-    """Per-rep memory figures. Pre-v0.10.1 chunks carry only `peak_memory_gb`: the
-    two peak keys fall back to it (it was the process-lifetime max of both); any
-    other key (the cache pool) is simply unknown for such a chunk."""
-    out: list[float | None] = []
-    for r in results:
-        if key in r:
-            out.append(float(r[key]))
-        elif key.endswith("peak_memory_gb"):
-            out.append(float(r["peak_memory_gb"]))
-        else:
-            out.append(None)
-    return out
+    """Per-rep memory figures; None where a chunk lacks the key (pre-v0.10.1 chunks
+    carry only `peak_memory_gb`, so their cache pool is unknown)."""
+    return [float(r[key]) if key in r else None for r in results]
 
 
 def _persist_chunk(results_dir: Path, result: dict[str, Any]) -> Path:
@@ -674,6 +740,75 @@ def _verify_chunk_recipes(
                         f"persisted chunk {path} was measured with {key}={got} but this invocation "
                         f"uses {key}={want}; move {results_dir} to the Trash for a fresh measurement"
                     )
+
+
+def _build_report(
+    *,
+    all_results: dict[str, list[dict[str, Any]]],
+    variant: str,
+    num_inference_steps: int,
+    guidance: float,
+    reps: int,
+    three_way: bool,
+    bench_dir: Path,
+    hardware: dict[str, Any],
+    run_start: dict[str, Any],
+) -> dict[str, Any]:
+    """The schema-4 report from every condition's per-rep chunks: timings, skip
+    telemetry, and per-rep memory (the lifetime peak and the cache pool only).
+    `generated_at` is the UTC time the report is built; the hardware block carries the
+    report-time git reading and, beside it, the reading taken when the run started."""
+
+    def _times(cond: str) -> list[float]:
+        return [r["elapsed_s"] for r in all_results[cond]]
+
+    vanilla_med = statistics.median(_times("vanilla"))
+    wrapper_med = statistics.median(_times("wrapper"))
+    conditions = ["vanilla", "wrapper_nogate", "wrapper"] if three_way else ["vanilla", "wrapper"]
+    report: dict[str, Any] = {
+        "schema_version": 4,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "isolation": "subprocess-per-rep",
+        "chunk_order": "rep-outer",
+        "memory_saver": _memory_saver_for(variant),
+        "variant": variant,
+        **_report_checkpoint(all_results),
+        "num_inference_steps": num_inference_steps,
+        "guidance": guidance,
+        "prompt": PROMPT,
+        "seed": SEED,
+        "height": _resolution_for(variant)[0],
+        "width": _resolution_for(variant)[1],
+        "reps": reps,
+        "hardware": {**hardware, **run_start},
+        "vanilla_seconds": _times("vanilla"),
+        "wrapper_seconds": _times("wrapper"),
+        "vanilla_median": vanilla_med,
+        "wrapper_median": wrapper_med,
+        "speedup_median": vanilla_med / wrapper_med,
+        "skipped_counts": [r["stats_summary"].get("skipped_count", 0) for r in all_results["wrapper"]],
+        "computed_counts": [r["stats_summary"].get("computed_count", 0) for r in all_results["wrapper"]],
+        **_wrapper_streak_arrays(all_results["wrapper"]),
+        "bench_images_dir": _images_dir_field(bench_dir),
+        "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
+        "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],
+        "vanilla_cache_memory_gb": _memory_arrays(all_results["vanilla"], "cache_memory_gb"),
+        "wrapper_cache_memory_gb": _memory_arrays(all_results["wrapper"], "cache_memory_gb"),
+        "chunk_timestamps": {
+            cond: [[r.get("started_at"), r.get("finished_at")] for r in all_results[cond]]
+            for cond in conditions
+        },
+    }
+    if three_way:
+        nogate_med = statistics.median(_times("wrapper_nogate"))
+        report["nogate_seconds"] = _times("wrapper_nogate")
+        report["nogate_median"] = nogate_med
+        report["compile_avoidance_ratio"] = vanilla_med / nogate_med
+        report["gating_ratio"] = nogate_med / wrapper_med
+        report["combined_ratio"] = vanilla_med / wrapper_med
+        report["nogate_peak_memory_gb"] = [r["peak_memory_gb"] for r in all_results["wrapper_nogate"]]
+        report["nogate_cache_memory_gb"] = _memory_arrays(all_results["wrapper_nogate"], "cache_memory_gb")
+    return report
 
 
 def main() -> None:
@@ -843,6 +978,7 @@ def main() -> None:
         for name in reused:
             print(f"   {name}")
     to_run = pending if args.max_chunks is None else pending[: args.max_chunks]
+    run_start = _run_start_reading(results_dir, resumed=len(pending) < total_chunks)
     print(f"\n== running {len(to_run)} of {len(pending)} pending chunks (reps={reps}) ==")
 
     for condition, rep in to_run:
@@ -924,65 +1060,17 @@ def main() -> None:
 
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
-        report_data: dict[str, Any] = {
-            "schema_version": 3,
-            "isolation": "subprocess-per-rep",
-            "chunk_order": "rep-outer",
-            "memory_saver": _memory_saver_for(variant),
-            "variant": variant,
-            "num_inference_steps": num_inference_steps,
-            "guidance": guidance,
-            "prompt": PROMPT,
-            "seed": SEED,
-            "height": _resolution_for(variant)[0],
-            "width": _resolution_for(variant)[1],
-            "reps": reps,
-            "hardware": _detect_hardware(quantize=_VARIANT_QUANTIZE[variant]),
-            "vanilla_seconds": vanilla_times,
-            "wrapper_seconds": wrapper_times,
-            "vanilla_median": vanilla_med,
-            "wrapper_median": wrapper_med,
-            "speedup_median": speedup,
-            "skipped_counts": skipped_counts,
-            "computed_counts": computed_counts,
-            **_wrapper_streak_arrays(all_results["wrapper"]),
-            "bench_images_dir": _images_dir_field(bench_dir),
-            "vanilla_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["vanilla"]],
-            "wrapper_peak_memory_gb": [r["peak_memory_gb"] for r in all_results["wrapper"]],
-            "vanilla_load_peak_memory_gb": _memory_arrays(all_results["vanilla"], "load_peak_memory_gb"),
-            "vanilla_loop_peak_memory_gb": _memory_arrays(all_results["vanilla"], "loop_peak_memory_gb"),
-            "wrapper_load_peak_memory_gb": _memory_arrays(all_results["wrapper"], "load_peak_memory_gb"),
-            "wrapper_loop_peak_memory_gb": _memory_arrays(all_results["wrapper"], "loop_peak_memory_gb"),
-            "vanilla_cache_memory_gb": _memory_arrays(all_results["vanilla"], "cache_memory_gb"),
-            "wrapper_cache_memory_gb": _memory_arrays(all_results["wrapper"], "cache_memory_gb"),
-            "chunk_timestamps": {
-                cond: [[r.get("started_at"), r.get("finished_at")] for r in all_results[cond]]
-                for cond in conditions
-            },
-        }
-        if three_way:
-            nogate_times = _times("wrapper_nogate")
-            nogate_med = statistics.median(nogate_times)
-            compile_avoidance_ratio = vanilla_med / nogate_med
-            gating_ratio = nogate_med / wrapper_med
-            combined_ratio = vanilla_med / wrapper_med
-            report_data["nogate_seconds"] = nogate_times
-            report_data["nogate_median"] = nogate_med
-            report_data["compile_avoidance_ratio"] = compile_avoidance_ratio
-            report_data["gating_ratio"] = gating_ratio
-            report_data["combined_ratio"] = combined_ratio
-            report_data["nogate_peak_memory_gb"] = [
-                r["peak_memory_gb"] for r in all_results["wrapper_nogate"]
-            ]
-            report_data["nogate_load_peak_memory_gb"] = _memory_arrays(
-                all_results["wrapper_nogate"], "load_peak_memory_gb"
-            )
-            report_data["nogate_loop_peak_memory_gb"] = _memory_arrays(
-                all_results["wrapper_nogate"], "loop_peak_memory_gb"
-            )
-            report_data["nogate_cache_memory_gb"] = _memory_arrays(
-                all_results["wrapper_nogate"], "cache_memory_gb"
-            )
+        report_data = _build_report(
+            all_results=all_results,
+            variant=variant,
+            num_inference_steps=num_inference_steps,
+            guidance=guidance,
+            reps=reps,
+            three_way=three_way,
+            bench_dir=bench_dir,
+            hardware=_detect_hardware(quantize=_VARIANT_QUANTIZE[variant]),
+            run_start=run_start,
+        )
         args.report.write_text(json.dumps(report_data, indent=2))
         print(f"  report:              {args.report}")
 

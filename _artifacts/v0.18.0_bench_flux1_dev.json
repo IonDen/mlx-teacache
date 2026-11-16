@@ -1,0 +1,152 @@
+{
+  "schema_version": 4,
+  "generated_at": "2026-11-16T23:21:38.524175+00:00",
+  "isolation": "subprocess-per-rep",
+  "chunk_order": "rep-outer",
+  "memory_saver": false,
+  "variant": "flux1-dev",
+  "model_name": "black-forest-labs/FLUX.1-dev",
+  "base_model": null,
+  "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "num_inference_steps": 25,
+  "guidance": 3.5,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "reps": 3,
+  "hardware": {
+    "chip": "Apple M1 Max",
+    "ram_gb": 32,
+    "machine": "arm64",
+    "os": "Darwin 27.2.0",
+    "mlx_version": "0.32.2",
+    "mlx_teacache_version": "v0.16.0-20-ge7cb468",
+    "git_commit": "e7cb468d3a579cc457c436389a910b5e67a927c0",
+    "git_dirty": false,
+    "git_dirty_files": [],
+    "mflux_version": "0.24.0",
+    "quantize": 4,
+    "dtype": "bf16",
+    "git_commit_at_start": "e7cb468d3a579cc457c436389a910b5e67a927c0",
+    "git_dirty_at_start": false,
+    "git_dirty_files_at_start": []
+  },
+  "vanilla_seconds": [
+    89.48020020799595,
+    89.46155712500331,
+    89.45467383298092
+  ],
+  "wrapper_seconds": [
+    68.73520083300536,
+    68.75062729199999,
+    68.66992700000992
+  ],
+  "vanilla_median": 89.46155712500331,
+  "wrapper_median": 68.73520083300536,
+  "speedup_median": 1.301539182846841,
+  "skipped_counts": [
+    6,
+    6,
+    6
+  ],
+  "computed_counts": [
+    17,
+    17,
+    17
+  ],
+  "skip_patterns": [
+    "CCCSCSCCSCSCSCSCCCCCCCCCC",
+    "CCCSCSCCSCSCSCSCCCCCCCCCC",
+    "CCCSCSCCSCSCSCSCCCCCCCCCC"
+  ],
+  "max_consecutive_skips": [
+    1,
+    1,
+    1
+  ],
+  "bench_images_dir": "flux1-dev",
+  "vanilla_peak_memory_gb": [
+    11.079020680859685,
+    11.078975776210427,
+    11.079046748578548
+  ],
+  "wrapper_peak_memory_gb": [
+    11.079088132828474,
+    11.079133909195662,
+    11.079057615250349
+  ],
+  "vanilla_cache_memory_gb": [
+    2.00991920940578,
+    2.021137285977602,
+    2.009921111166477
+  ],
+  "wrapper_cache_memory_gb": [
+    2.062838591635227,
+    2.021137271076441,
+    2.0985746793448925
+  ],
+  "chunk_timestamps": {
+    "vanilla": [
+      [
+        "2026-11-16T23:08:35.674623+00:00",
+        "2026-11-16T23:10:08.044084+00:00"
+      ],
+      [
+        "2026-11-16T23:12:55.762759+00:00",
+        "2026-11-16T23:14:27.602439+00:00"
+      ],
+      [
+        "2026-11-16T23:17:22.572976+00:00",
+        "2026-11-16T23:18:54.388978+00:00"
+      ]
+    ],
+    "wrapper_nogate": [
+      [
+        "2026-11-16T23:10:08.411164+00:00",
+        "2026-11-16T23:11:40.268077+00:00"
+      ],
+      [
+        "2026-11-16T23:14:27.974085+00:00",
+        "2026-11-16T23:16:07.132112+00:00"
+      ],
+      [
+        "2026-11-16T23:18:54.771640+00:00",
+        "2026-11-16T23:20:26.642982+00:00"
+      ]
+    ],
+    "wrapper": [
+      [
+        "2026-11-16T23:11:40.634906+00:00",
+        "2026-11-16T23:12:51.845863+00:00"
+      ],
+      [
+        "2026-11-16T23:16:07.520692+00:00",
+        "2026-11-16T23:17:18.663235+00:00"
+      ],
+      [
+        "2026-11-16T23:20:27.029888+00:00",
+        "2026-11-16T23:21:38.081171+00:00"
+      ]
+    ]
+  },
+  "nogate_seconds": [
+    89.42123683402315,
+    96.76043637501425,
+    89.46481633299845
+  ],
+  "nogate_median": 89.46481633299845,
+  "compile_avoidance_ratio": 0.9999635699470615,
+  "gating_ratio": 1.3015865997155727,
+  "combined_ratio": 1.301539182846841,
+  "nogate_peak_memory_gb": [
+    11.079021552577615,
+    11.610073428601027,
+    11.610103946179152
+  ],
+  "nogate_cache_memory_gb": [
+    2.101536812260747,
+    2.06259254924953,
+    2.0602732058614492
+  ]
+}

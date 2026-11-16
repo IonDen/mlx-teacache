@@ -24,10 +24,10 @@ These pairs were rendered with mlx-teacache 0.11.1. In 0.12.0 the gate stopped p
 | Image | ![A: TeaCache off](_artifacts/comparison/flux1-dev/a.jpg) | ![B: TeaCache on](_artifacts/comparison/flux1-dev/b.jpg) |
 | Generation | 237.9 s · peak 14.7 GiB | 190.7 s · peak 15.4 GiB · 5 of 25 steps skipped |
 
-On this run: 1.25× faster (1.25× with preview decoding left out) · SSIM 0.84 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_flux1_dev.json) · [More details →](docs/comparison/flux1-dev.md)
+On this run: 1.25× faster (1.25× with preview decoding left out) · SSIM 0.84 · multi-run measurement: [bench report](_artifacts/v0.18.0_bench_flux1_dev.json) · [More details →](docs/comparison/flux1-dev.md)
 <!-- COMPARISON:flux1-dev:summary END -->
 
-The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant's 1.57× speedup as all step-skipping. FLUX.1 has no compiled prediction step, so there's no compile effect to separate out.
+The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant at 1.30× on mflux 0.24.0 and MLX 0.32.2, all from 6 of 25 skipped steps ([bench report](_artifacts/v0.18.0_bench_flux1_dev.json)). Six skipped steps can give at most about 1.32× (25/19). The wrapper alone gains nothing there: the no-gate run, which computes every step, took the same time as plain mflux (89.46 s both). FLUX.1 has no compiled prediction step, so there's no compile effect to separate out. An older 1.57× from mflux 0.18.0 is above that limit and is kept only as history in the footnote.
 
 ## FLUX.1 Krea [dev]
 
@@ -40,7 +40,7 @@ The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant
 On this run: 1.62× faster (1.64× with preview decoding left out) · SSIM 0.87 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_krea_dev.json) · [More details →](docs/comparison/flux1-krea-dev.md)
 <!-- COMPARISON:flux1-krea-dev:summary END -->
 
-[Footnote ⁷](README.md#benchmarks) credits nearly all of this variant's 1.62× multi-run speedup, about 1.57×, to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder is run-to-run noise.
+[Footnote ⁷](README.md#benchmarks) credits nearly all of this variant's 1.62× multi-run speedup, about 1.57×, to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder is within the spread between runs. Ten skipped steps out of 28 can give at most about 1.56× (28/18). Each figure is above that limit. One of the three TeaCache runs was much faster than the other two (66.5 s against 77.2 and 79.6 s); this will be measured again. The single run above skipped 11 of 28 steps, which allows at most about 1.65× (28/17); its 1.62× is under that.
 
 ## FLUX.2 [klein] base 4B
 

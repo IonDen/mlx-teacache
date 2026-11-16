@@ -16,6 +16,17 @@ command-line plugin, is still 0.x and makes its own promise.
 
 Everything in `mlx_teacache.__all__` and in `mlx_teacache.testing`: the names, their signatures, the stats types, the values of the `decision` field of `StepDecision`, and the exception and warning classes. Code that imports these and uses them as documented keeps working through 1.x.
 
+`restore()` can refuse, and it raises `RestoreRefusedError` when it does. It refuses in two cases:
+
+- A generation still has steps to run. Call `restore()` after `generate_image` returns, or from a callback that runs after the loop.
+- `flux.generate_image` or `flux._predict` was replaced after `apply_teacache`. Restoring would remove that replacement. Undo your replacement first, then call `restore()` again.
+
+The `with apply_teacache(...) as handle:` form calls `restore()` when the block exits. If a later wrapper is still installed at that point, the exit raises `RestoreRefusedError`, and that error replaces any exception raised inside the block.
+
+A refusal undoes nothing, so the handle stays as it was and you can call `restore()` again later. The error has a `reason`, either `"generation-in-flight"` or `"patched-over"`. For `"patched-over"`, `attribute` names the replaced method. For `"generation-in-flight"`, `remaining_steps` and `active_num_steps` give the steps left and the steps in the generation. The attributes that do not apply to the reason are `None`.
+
+One case is not caught. Say a callback was registered before `apply_teacache` and calls `restore()` just before the denoising loop starts. `restore()` is not refused then, no error is raised, and that generation runs without TeaCache. Register such a callback after `apply_teacache` and `restore()` refuses it, or call `restore()` outside a generation.
+
 ## What is not promised
 
 - Skip counts and images across minor releases. See the promise above for when they can change.
@@ -39,7 +50,16 @@ A removal always warns for at least one minor release first, and it happens only
 | setting `handle.rel_l1_thresh`, `handle.stats`, `handle.provenance` or `handle.coefficients` (the gate never read the written values; `coefficients` was a writable attribute in 0.15) | pass the values to `apply_teacache` | an error from 1.0, when the handle becomes read-only |
 | `InvalidStepWindowError(num_steps=...)` | `active_num_steps=` | removed in 2.0 |
 
-Writing `handle.variant_id` does not warn yet; a warning for it comes in a later minor release. The CHANGELOG lists each deprecation in the release that introduced it.
+Writing `handle.variant_id` warns from 0.18 (see the table below). The CHANGELOG lists each deprecation in the release that introduced it.
+
+Added in 0.18:
+
+| Deprecated | Use instead | Timing |
+|---|---|---|
+| `apply_teacache(..., coefficients=...)` without `rel_l1_thresh` (warns with `FutureWarning`) | pass `rel_l1_thresh` with the coefficients | an error from 1.0 |
+| setting `handle.variant_id` (it never changed which variant was patched; it warns with `DeprecationWarning`, and the value is still stored) | read `handle.variant_id`; it is set when `apply_teacache` returns | an error from 1.0, when the handle becomes read-only |
+
+The `coefficients`-without-threshold warning is a `FutureWarning`, which Python shows by default, so you will see it without any flag. It names the threshold `apply_teacache` picked: 0.30 on FLUX.1 Krea [dev] and 0.20 on every other model. Under `-W error` or pytest's `filterwarnings = error` the call raises before the model is patched, so you can retry on the same model.
 
 Python hides a `DeprecationWarning` unless it is raised from `__main__`, so a library user may not see these. To see them, run Python with `-W default::DeprecationWarning` or set `PYTHONWARNINGS=default::DeprecationWarning`. pytest shows them without any flag.
 

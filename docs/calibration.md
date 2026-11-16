@@ -192,9 +192,18 @@ Users can pass their own coefficients at integration time:
 
 ```python
 my_coeffs = (236.92, -201.47, 66.91, -11.15, 1.27)
-with apply_teacache(flux, coefficients=my_coeffs):
+with apply_teacache(flux, coefficients=my_coeffs, rel_l1_thresh=0.20):  # your own threshold
     ...
 ```
+
+Pass a `rel_l1_thresh` with your coefficients. A threshold is tuned for one polynomial, so without one `apply_teacache` picks 0.30 on FLUX.1 Krea [dev] and 0.20 on every other model, and warns with a `FutureWarning`. From 1.0 that call raises an error. After you calibrate a new polynomial, a threshold sweep finds the value to pass.
+
+Where each family's calibration lives:
+
+- FLUX.1 (dev, Krea): `scripts/calibrate_flux1.py`, which also runs the threshold sweep with `--sweep`.
+- FLUX.2 Klein: `scripts/calibrate_flux2.py`; `scripts/sweep_threshold_klein_base_4b.py` sweeps the threshold for Klein base 4B.
+- Qwen-Image (and 2512): `scripts/calibrate_qwen.py`; `scripts/sweep_threshold_qwen.py` sweeps the threshold.
+- Z-Image: `scripts/calibrate_z_image.py`; `scripts/sweep_threshold_z_image.py` sweeps the threshold.
 
 The handle's `provenance` field will record `source="user"` so calls to
 `handle.provenance` make the origin clear.

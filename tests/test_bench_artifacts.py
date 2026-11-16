@@ -135,7 +135,9 @@ def test_flux1_dev_bench_artifact_is_committed_and_valid():
 
 
 def test_readme_benchmark_row_matches_committed_artifact():
-    h = bench_headline(_load_bench())
+    """Bug: the README's FLUX.1-dev Benchmarks row drifts from the current record (v0.18.0, mflux 0.24.0) or
+    keeps quoting the older v0.10.0 run as the current figure."""
+    h = bench_headline(_load_flux1_dev_v018_bench())
     cells = _flux1_dev_benchmark_row()
     # cells: [variant, steps, vanilla, wrapper, speedup, skipped, mechanism]
     assert int(cells[1]) == h["steps"]
@@ -380,3 +382,164 @@ def test_klein_base_ssim_claims_match_the_committed_record():
         assert quoted in readme, f"{quoted} ({slug}) not in README"
         page_text = (_REPO_ROOT / "docs" / "variants" / page).read_text()
         assert f"{quoted} vs vanilla at this recipe" in page_text, f"{quoted} not on {page}"
+
+
+# --- FLUX.1-dev, v0.18.0 three-way re-bench (schema 4) -------------------------------------------------------------
+# Measured 2026-11-16 on the shared 512x512 recipe. This is the current record: the README Benchmarks row is pinned
+# to it (test_readme_benchmark_row_matches_committed_artifact above), and the tests below pin the record itself, so no
+# doc can quote a figure it does not hold. The v0.10.0 record stays as history (see the history test at the end).
+
+_FLUX1_DEV_V018_BENCH = _REPO_ROOT / "_artifacts" / "v0.18.0_bench_flux1_dev.json"
+
+
+def _load_flux1_dev_v018_bench() -> dict:
+    assert _FLUX1_DEV_V018_BENCH.exists(), (
+        f"Committed FLUX.1-dev v0.18.0 bench missing: {_FLUX1_DEV_V018_BENCH}"
+    )
+    return json.loads(_FLUX1_DEV_V018_BENCH.read_text())
+
+
+def test_flux1_dev_v018_bench_artifact_is_committed_at_the_canonical_recipe():
+    """Bug: the v0.18.0 FLUX.1-dev record is missing, was written by an older schema, or comes from another recipe
+    (steps, size, seed or rep count), so a doc quoting it compares against the wrong run."""
+    report = _load_flux1_dev_v018_bench()
+    assert report["schema_version"] == 4
+    assert report["variant"] == "flux1-dev"
+    assert report["num_inference_steps"] == 25
+    assert report["height"] == 512 and report["width"] == 512
+    assert report["seed"] == 42
+    assert report["reps"] == 3
+    for key in ("vanilla_seconds", "wrapper_seconds", "nogate_seconds", "skipped_counts", "skip_patterns"):
+        assert len(report[key]) == 3, f"{key} must hold one entry per rep"
+
+
+def test_flux1_dev_v018_bench_artifact_is_meaningful():
+    """Bug: the record shows a dormant cache (a rep that skipped nothing) or a gated run no faster than vanilla, yet
+    still passes the schema check above."""
+    report = _load_flux1_dev_v018_bench()
+    for rep, skipped in enumerate(report["skipped_counts"]):
+        assert skipped > 0, f"rep {rep}: the cache never engaged (skipped {skipped})"
+    assert report["wrapper_median"] < report["vanilla_median"], (
+        f"gated median {report['wrapper_median']}s is not below vanilla median {report['vanilla_median']}s"
+    )
+
+
+def test_flux1_dev_v018_speedup_is_within_the_skipped_step_limit():
+    """Bug: the record's median speedup is above what its skipped steps allow, N / (N - median skips), so part of
+    the figure comes from something other than step-skipping while the docs say all of it does."""
+    report = _load_flux1_dev_v018_bench()
+    steps = report["num_inference_steps"]
+    skipped = statistics.median(report["skipped_counts"])
+    limit = steps / (steps - skipped)
+    assert report["speedup_median"] <= limit, (
+        f"speedup {report['speedup_median']:.4f} is above the {limit:.4f} limit of {skipped} skips out of {steps}"
+    )
+
+
+def test_readme_flux1_dev_mechanism_cell_states_the_limit_from_the_record():
+    """Bug: the Benchmarks row's mechanism cell states a step-skipping limit or skip count that is not the current
+    record's (6 of 25 skipped, so at most about 1.32x, 25/19), e.g. after a re-bench changed the skip count."""
+    report = _load_flux1_dev_v018_bench()
+    steps = int(report["num_inference_steps"])
+    skipped = int(statistics.median(report["skipped_counts"]))
+    assert (steps, steps - skipped) == (25, 19)
+    limit = f"{round(steps / (steps - skipped), 2):.2f}×"
+    # cells: [variant, steps, vanilla, wrapper, speedup, skipped, mechanism]
+    mechanism = _flux1_dev_benchmark_row()[6]
+    assert f"{skipped} skipped steps give at most about {limit}" in mechanism, mechanism
+
+
+def test_flux1_dev_v018_skip_patterns_match_the_v0_10_record():
+    """Pins the README's "same skipped steps" claim between the two committed FLUX.1-dev records (v0.10.0 and
+    v0.18.0). Bug: one record is replaced by a run whose per-step skip pattern differs, and the README still says
+    both runs skipped the same steps."""
+    old = json.loads(_FLUX1_DEV_BENCH.read_text())["skip_patterns"]
+    assert _load_flux1_dev_v018_bench()["skip_patterns"] == old
+
+
+def test_flux1_dev_v018_bench_artifact_names_its_provenance():
+    """Bug: the record drops or blanks a provenance field (mlx, mflux, chip, commit at report and at start, dirty
+    flag, model name and revision, timestamp), or a dirty flag disagrees with its dirty-file list, so a quoted
+    figure cannot be traced to the code, weights and machine that measured it."""
+    report = _load_flux1_dev_v018_bench()
+    hardware = report["hardware"]
+    for key in ("mlx_version", "mflux_version", "chip", "git_commit", "git_commit_at_start"):
+        value = hardware.get(key)
+        assert isinstance(value, str) and value.strip(), (
+            f"hardware.{key} must be a non-empty string, got {value!r}"
+        )
+    for suffix in ("", "_at_start"):
+        dirty = hardware.get(f"git_dirty{suffix}")
+        files = hardware.get(f"git_dirty_files{suffix}")
+        assert isinstance(dirty, bool), f"hardware.git_dirty{suffix} must be a bool, got {dirty!r}"
+        assert isinstance(files, list), f"hardware.git_dirty_files{suffix} must be a list, got {files!r}"
+        assert bool(files) == dirty, (
+            f"hardware.git_dirty{suffix}={dirty} disagrees with git_dirty_files{suffix}={files!r}"
+        )
+    for key in ("model_name", "model_revision"):
+        value = report.get(key)
+        assert isinstance(value, str) and value.strip(), f"{key} must be a non-empty string, got {value!r}"
+    generated_at = report.get("generated_at")
+    assert isinstance(generated_at, str) and generated_at.strip(), (
+        f"generated_at must be non-empty, got {generated_at!r}"
+    )
+
+
+# --- FLUX.1-dev history: the 1.57x run on mflux 0.18.0 (v0.10.0 record) --------------------------------------------
+
+_FLUX1_DEV_HISTORY_SPEEDUP = "1.57"  # the history figure the README keeps, as the docs state it
+_FLUX1_DEV_HISTORY_PATH = "_artifacts/v0.10.0_bench_flux1_dev.json"
+_FLUX1_DEV_HISTORY_THRESHOLD_ROW = "0.20 (default), mflux 0.18.0"
+
+
+def test_readme_keeps_the_flux1_dev_history_figure_with_its_record():
+    """Bug: the README's FLUX.1-dev history (1.57x on mflux 0.18.0) silently drifts from its record, or is dropped
+    from the Benchmarks footnote or the threshold table once the current row moved to the v0.18.0 record."""
+    record = json.loads(_FLUX1_DEV_BENCH.read_text())
+    assert f"{round(float(record['speedup_median']), 2):.2f}" == _FLUX1_DEV_HISTORY_SPEEDUP
+    figure = f"{_FLUX1_DEV_HISTORY_SPEEDUP}×"
+    lines = [line.strip() for line in _README.read_text().splitlines()]
+
+    history = [line for line in lines if line.startswith(f"History, the {figure} run.")]
+    assert len(history) == 1, (
+        f"footnote 6 must keep one 'History, the {figure} run.' paragraph, found {len(history)}"
+    )
+    assert _FLUX1_DEV_HISTORY_PATH in history[0], f"the history paragraph must name {_FLUX1_DEV_HISTORY_PATH}"
+
+    rows = [
+        [c.strip() for c in line.strip("|").split("|")]
+        for line in lines
+        if line.startswith(f"| {_FLUX1_DEV_HISTORY_THRESHOLD_ROW} |")
+    ]
+    assert len(rows) == 1, (
+        f"threshold table must keep one '{_FLUX1_DEV_HISTORY_THRESHOLD_ROW}' row, found {len(rows)}"
+    )
+    # cells: [threshold, skipped, speedup, ssim, note]; only the speedup cell is read here.
+    assert rows[0][2].startswith(f"{figure} (`{_FLUX1_DEV_HISTORY_PATH}`)"), rows[0][2]
+
+
+_FLUX1_DEV_CURRENT_SPEEDUP = "1.30"  # the current figure the README states for mflux 0.24.0
+_FLUX1_DEV_CURRENT_PATH = "_artifacts/v0.18.0_bench_flux1_dev.json"
+_FLUX1_DEV_CURRENT_THRESHOLD_ROW = "**0.20 (default)**, mflux 0.24.0"
+
+
+def test_readme_current_threshold_row_matches_the_v0_18_record():
+    """Bug: the threshold table's current FLUX.1-dev row (mflux 0.24.0) drifts from the v0.18.0 record (speedup or
+    skipped steps), or still quotes the older 1.57x run and its v0.10.0 record, while the Benchmarks row has moved
+    on."""
+    record = json.loads(_FLUX1_DEV_V018_BENCH.read_text())
+    h = bench_headline(record)
+    speedup = f"{round(float(record['speedup_median']), 2):.2f}"
+    assert speedup == _FLUX1_DEV_CURRENT_SPEEDUP
+    rows = [
+        [c.strip() for c in line.strip().strip("|").split("|")]
+        for line in _README.read_text().splitlines()
+        if line.strip().startswith(f"| {_FLUX1_DEV_CURRENT_THRESHOLD_ROW} |")
+    ]
+    assert len(rows) == 1, (
+        f"threshold table must keep one '{_FLUX1_DEV_CURRENT_THRESHOLD_ROW}' row, found {len(rows)}"
+    )
+    # cells: [threshold, skipped, speedup, ssim, note]; the skipped and speedup cells are read, bold markers stripped.
+    assert rows[0][1].replace("**", "") == f"{h['skipped']} / {h['steps']}", rows[0][1]
+    cell = rows[0][2].replace("**", "")
+    assert cell.startswith(f"{speedup}× (`{_FLUX1_DEV_CURRENT_PATH}`)"), rows[0][2]

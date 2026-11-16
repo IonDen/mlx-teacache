@@ -88,12 +88,13 @@ def test_summary_rows_put_each_condition_in_its_own_column() -> None:
     # preview-subtracted (a_preview = 25 * 0.24 = 6.0 s, b_preview = 25 * 0.26 = 6.5 s).
     assert "On this run: 1.20× faster (1.21× with" in s
     assert "SSIM 0.97" in s and "(docs/comparison/flux1-dev.md)" in s
-    assert "(_artifacts/v0.10.0_bench_flux1_dev.json)" in s
+    assert "(_artifacts/v0.18.0_bench_flux1_dev.json)" in s
 
 
 def test_klein_base_pages_link_the_v0_12_0_bench_reports() -> None:
     """Bug: the Klein base 4B/9B summary rows and detail pages still citing the v0.10.0 bench reports
-    after the v0.12.0 gate was re-benched, so the linked numbers disagree with the README table."""
+    after the v0.12.0 gate was re-benched, so the linked numbers disagree with the README table. Same for
+    FLUX.1-dev, whose current multi-run record is v0.18.0 while the comparison run names v0.10.0."""
     blocks = gen.render_blocks(json.loads(gen.REPORT.read_text()))
     for slug, path in (
         ("klein-base-4b", "_artifacts/v0.12.0_bench_klein_base_4b.json"),
@@ -101,7 +102,8 @@ def test_klein_base_pages_link_the_v0_12_0_bench_reports() -> None:
     ):
         assert f"[bench report]({path})" in blocks[f"{slug}:summary"]
         assert f"[bench report](../../{path})" in blocks[f"{slug}:details"]
-    assert "[bench report](_artifacts/v0.10.0_bench_flux1_dev.json)" in blocks["flux1-dev:summary"]
+    assert "[bench report](_artifacts/v0.18.0_bench_flux1_dev.json)" in blocks["flux1-dev:summary"]
+    assert "[bench report](../../_artifacts/v0.18.0_bench_flux1_dev.json)" in blocks["flux1-dev:details"]
 
 
 def test_machine_line_reports_the_macos_marketing_version_not_the_kernel() -> None:

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 import mlx_teacache._mflux_versions as versions
+import mlx_teacache.testing
 import mlx_teacache.variants
 from mlx_teacache import IncompatibleModelError, Provenance, TeaCacheHandle, TeaCacheStats, apply_teacache
 from mlx_teacache.handle import VariantPatch
@@ -29,7 +30,7 @@ _GETTER_ONLY = [
     "decision_rule_revision",
     "mflux_version",
 ]
-_DEPRECATED_WRITES = ["rel_l1_thresh", "stats", "provenance", "coefficients"]
+_DEPRECATED_WRITES = ["rel_l1_thresh", "stats", "provenance", "coefficients", "variant_id"]
 
 
 def _fake_flux1_dev() -> SimpleNamespace:
@@ -66,6 +67,7 @@ def _new_value(name: str) -> object:
         "stats": TeaCacheStats(),
         "provenance": Provenance.for_user_supplied(),
         "coefficients": (0.5, 0.4, 0.3, 0.2, 0.1),
+        "variant_id": "qwen-image",
     }[name]
 
 
@@ -243,15 +245,15 @@ def test_writing_coefficients_says_the_gate_is_unchanged(mflux_version) -> None:
         assert "read-only from 1.0" in message
 
 
-def test_writing_variant_id_is_silent_in_this_release(mflux_version) -> None:
-    """Bug: a warning here turns mflux-teacache's warnings-as-errors suite red against this release (its test
-    fake writes handle.variant_id)."""
-    mflux_version("0.24.0")
-    with apply_teacache(_fake_flux1_dev()) as h:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            h.variant_id = "x"
-        assert h.variant_id == "x"
+def test_writing_variant_id_says_the_patched_variant_is_unchanged() -> None:
+    """Bug: the notice reads as if the write switched the patched variant, which stays the one apply_teacache
+    matched."""
+    h = mlx_teacache.testing.fake_handle(variant_id="flux1-dev")
+    with pytest.warns(DeprecationWarning) as rec:
+        h.variant_id = "qwen-image"
+    message = str(rec[0].message)
+    assert "does not change which variant was patched" in message
+    assert "read-only from 1.0" in message
 
 
 def test_properties_survive_restore(mflux_version) -> None:
@@ -264,7 +266,7 @@ def test_properties_survive_restore(mflux_version) -> None:
         skip_first_n_steps=2,
         skip_last_n_steps=3,
     )
-    names = ["variant_id", *_DEPRECATED_WRITES, *_GETTER_ONLY]
+    names = [*_DEPRECATED_WRITES, *_GETTER_ONLY]
     before = {name: getattr(h, name) for name in names}
     h.restore()
     after = {name: getattr(h, name) for name in names}

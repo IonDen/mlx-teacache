@@ -3,7 +3,7 @@
 and actual value; messages include remediation pointers where applicable."""
 
 import warnings
-from typing import Any
+from typing import Any, Literal
 
 
 def _rebuild(cls: type, kwargs: dict[str, Any]) -> Any:
@@ -204,6 +204,49 @@ class MissingGenerationContextError(TeaCacheError):
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (type(self), (self.detail,), self.__dict__)
+
+
+class RestoreRefusedError(TeaCacheError):
+    """Raised by `TeaCacheHandle.restore()` when undoing the patch now would break something; nothing is undone.
+
+    reason "generation-in-flight": a generation still has steps to run (`remaining_steps` of `active_num_steps`).
+    reason "patched-over": `flux.<attribute>` ("generate_image" or "_predict") was replaced after apply_teacache.
+    Either way the handle is unchanged and `restore()` can be called again once the cause is gone."""
+
+    def __init__(
+        self,
+        *,
+        reason: Literal["generation-in-flight", "patched-over"],
+        attribute: str | None = None,
+        remaining_steps: int | None = None,
+        active_num_steps: int | None = None,
+    ) -> None:
+        if reason == "generation-in-flight":
+            msg = (
+                f"restore() was called while a generation still had {remaining_steps} of {active_num_steps} steps "
+                "to run; call it after generate_image returns or from an after-loop callback. "
+                "The handle is unchanged."
+            )
+        else:
+            msg = (
+                f"flux.{attribute} was replaced after apply_teacache; restore() would remove that replacement. "
+                "Undo it first (restore in reverse order of patching), then call restore() again. "
+                "The handle is unchanged."
+            )
+        super().__init__(msg)
+        self.reason = reason
+        self.attribute = attribute
+        self.remaining_steps = remaining_steps
+        self.active_num_steps = active_num_steps
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        kwargs = {
+            "reason": self.reason,
+            "attribute": self.attribute,
+            "remaining_steps": self.remaining_steps,
+            "active_num_steps": self.active_num_steps,
+        }
+        return (_rebuild, (type(self), kwargs), self.__dict__)
 
 
 class InternalStateError(TeaCacheError):

@@ -22,6 +22,8 @@ CASES = [
     E.InvalidStepWindowError(skip_first=2, skip_last=2, nominal_num_inference_steps=4, active_num_steps=3),
     E.MissingGenerationContextError("callback gone"),
     E.MissingGenerationContextError(),
+    E.RestoreRefusedError(reason="generation-in-flight", remaining_steps=6, active_num_steps=10),
+    E.RestoreRefusedError(reason="patched-over", attribute="generate_image"),
     E.InternalStateError("x"),
     E.TeaCacheValueError("x"),
 ]

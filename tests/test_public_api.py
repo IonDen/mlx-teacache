@@ -34,6 +34,7 @@ EXPECTED_ALL = {
     "InternalStateError",
     "InvalidStepWindowError",
     "MissingGenerationContextError",
+    "RestoreRefusedError",
 }
 
 

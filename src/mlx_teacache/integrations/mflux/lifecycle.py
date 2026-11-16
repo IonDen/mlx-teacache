@@ -257,6 +257,7 @@ def wrap_generate_image(flux: Any, handle: InternalHandle) -> None:
             handle._pending_finalize = None
 
     flux.generate_image = wrapped
+    handle._wrapped_generate_image = wrapped
 
 
 _STEP_CACHE_RATIOS = ("step_cache_ratio", "teacache_ratio")

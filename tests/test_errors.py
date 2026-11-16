@@ -16,6 +16,7 @@ from mlx_teacache.errors import (
     InternalStateError,
     InvalidStepWindowError,
     MissingGenerationContextError,
+    RestoreRefusedError,
     TeaCacheDisabledWarning,
     TeaCacheError,
     TeaCacheNoBenefitWarning,
@@ -33,6 +34,7 @@ def test_all_subclass_teacache_error():
         TransformerShapeError,
         InvalidStepWindowError,
         MissingGenerationContextError,
+        RestoreRefusedError,
         InternalStateError,
         StatsFrozenError,
     ]:

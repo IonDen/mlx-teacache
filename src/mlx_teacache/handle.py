@@ -54,6 +54,10 @@ _WRITE_MESSAGES = {
         "Setting TeaCacheHandle.coefficients is deprecated and does not change what the gate uses; "
         f"pass coefficients= to apply_teacache. {_READ_ONLY_FROM_1_0}"
     ),
+    "variant_id": (
+        "Setting TeaCacheHandle.variant_id is deprecated and does not change which variant was patched. "
+        f"{_READ_ONLY_FROM_1_0}"
+    ),
 }
 
 
@@ -90,6 +94,8 @@ class TeaCacheHandle:
         self._decision_rule_revision: int = _decision_rule.DECISION_RULE_REVISION
         self._mflux_version: str | None = None
         self._torn_down = False
+        # Checks restore() runs before it undoes anything; each raises RestoreRefusedError to refuse.
+        self._preflight: list[Callable[[], None]] = []
         # Set by the integration that installed the patch; None on a handle that patches nothing.
         self._session: InternalHandle | None = None
         self._callback_instance: Any = None
@@ -131,8 +137,7 @@ class TeaCacheHandle:
 
     @variant_id.setter
     def variant_id(self, value: str) -> None:
-        # Silent on purpose: mflux-teacache's test fake builds a handle and then writes variant_id, under
-        # warnings-as-errors. The write starts warning once that fake has moved to mlx_teacache.testing.
+        _warn_handle_write("variant_id")
         self._variant_id = value
 
     @property
@@ -174,11 +179,18 @@ class TeaCacheHandle:
     def restore(self) -> None:
         """Undo every patch apply_teacache installed; a second call does nothing.
 
+        Raises RestoreRefusedError, before undoing anything, while a generation still has steps to run (call it
+        after generate_image returns or from an after-loop callback) and when flux.generate_image or flux._predict
+        was replaced after apply_teacache (undo that replacement first). The handle is unchanged, and restore() can
+        be called again once the cause is gone.
+
         If mflux's memory saver dropped the transformer after the denoising loop, the transformer slot stays empty
         (as with plain mflux) and the rest of the patch is still undone. On a teardown error the first error is
         re-raised and the handle can be restored again."""
         if self._torn_down:
             return
+        for check in self._preflight:
+            check()
         errors: list[BaseException] = []
         for rollback in reversed(self._patch.rollbacks):
             try:

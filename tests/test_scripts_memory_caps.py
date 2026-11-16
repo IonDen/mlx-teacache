@@ -196,6 +196,56 @@ def test_no_script_uses_the_deprecated_metal_namespace() -> None:
     assert offenders == [], offenders
 
 
+# ----- GPU sync: mx.synchronize(), never an eval of a fresh dummy array -----
+
+# Array constructors whose fresh result, passed straight to eval, flushes nothing already submitted.
+DUMMY_CONSTRUCTORS = frozenset({"zeros", "ones", "array", "full"})
+
+
+def dummy_eval_lines(source: str) -> list[int]:
+    """Lines where `eval` is called on nothing but freshly constructed arrays, e.g. `mx.eval(mx.zeros(1))`."""
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and _callee_name(node) == "eval" and node.args):
+            continue
+        if all(isinstance(a, ast.Call) and _callee_name(a) in DUMMY_CONSTRUCTORS for a in node.args):
+            lines.append(node.lineno)
+    return lines
+
+
+def test_dummy_eval_scanner_flags_a_fresh_array_and_accepts_real_evals_and_prose() -> None:
+    # bug caught: the scanner only matching one spelling, so `from mlx.core import eval, zeros` slips by
+    source = (
+        "import mlx.core as mx\n"
+        "from mlx.core import eval, ones\n"
+        "mx.eval(mx.zeros(1))\n"
+        "eval(ones((2, 2)))\n"
+        "mx.eval(latents)\n"
+        "mx.eval(model.parameters())\n"
+        "# mx.eval(mx.zeros(1)) in a comment\n"
+        "mx.synchronize()\n"
+    )
+    assert dummy_eval_lines(source) == [3, 4]
+
+
+def test_no_script_uses_a_dummy_eval_as_a_sync() -> None:
+    # bug caught: a script claims a GPU flush it does not perform; evaluating a new zeros(1)
+    # waits for that one tiny array, not for the work generate_image already submitted
+    offenders = [f"{p.name}:{line}" for p in _heavy_files() for line in dummy_eval_lines(p.read_text())]
+    assert offenders == [], offenders
+
+
+def test_bench_workers_read_one_peak_without_a_reset() -> None:
+    # bug caught: the reset after the load returns, so the run's peak no longer covers the weight
+    # materialisation that happens inside the first generation (schema 4 reads one lifetime peak)
+    offenders = [
+        name
+        for name in ("bench_speedup.py", "bench_klein_base_vs_distilled.py")
+        if "reset_peak_memory" in scan((SCRIPTS / name).read_text()).called
+    ]
+    assert offenders == [], offenders
+
+
 # ----- exit-code contract: 3 is PARTIAL only, the watchdog owns 4 -----
 
 EXIT_CALLEES = frozenset({"exit", "_exit", "SystemExit"})

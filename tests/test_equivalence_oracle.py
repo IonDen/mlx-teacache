@@ -312,3 +312,156 @@ def test_every_strategy_has_an_img2img_scenario(recorded: dict, strategy: str) -
     assert runs
     assert all(run["error"] is None and run["last_generation"]["num_steps"] == 6 for run in runs)
     assert any("skipped" in [d[4] for d in run["last_generation"]["decisions"]] for run in runs)
+
+
+# ---------- expected-diff mode (--expect) ----------
+
+_EXPECTED = {
+    "required": ["threshold_matrix/*/thresh=None,coeffs=caller/warnings*"],
+    "allowed": ["generations/*/restore-in-loop/*"],
+    "forbidden": ["*/rel_l1_thresh*"],
+}
+_R6_ROW = "threshold_matrix/flux1-dev/thresh=None,coeffs=caller/warnings"
+
+
+def test_expect_rejects_an_unlisted_difference() -> None:
+    """Bug: the expected-diff mode waves through any change, so a moved latent hides behind the intended warning."""
+    moved_latent = "generations/flux1-dev/default/runs[0]/final_latents/sha256_f32"
+    assert oracle.check_expected([_R6_ROW, moved_latent], _EXPECTED, allow_unmet=False) == (
+        [moved_latent],
+        [],
+    )
+
+
+def test_expect_rejects_a_forbidden_path_inside_an_allowed_glob() -> None:
+    """Bug: an allowed glob also lets a forbidden path through, so a moved threshold inside a restore scenario
+    passes as an intended R10 difference."""
+    moved_thresh = "generations/flux1-dev/restore-in-loop/handle/rel_l1_thresh"
+    refusal = "generations/flux1-dev/restore-in-loop/in_loop_restore"
+    assert oracle.check_expected([_R6_ROW, refusal, moved_thresh], _EXPECTED, allow_unmet=False) == (
+        [moved_thresh],
+        [],
+    )
+
+
+def test_expect_reports_an_unmet_required_glob() -> None:
+    """Bug: an intended change (the caller-coefficient FutureWarning row) is silently absent and the run still
+    passes."""
+    refusal = "generations/flux1-dev/restore-in-loop/in_loop_restore"
+    assert oracle.check_expected([refusal], _EXPECTED, allow_unmet=False) == (
+        [],
+        ["threshold_matrix/*/thresh=None,coeffs=caller/warnings*"],
+    )
+    assert oracle.check_expected([], _EXPECTED, allow_unmet=False)[1] == _EXPECTED["required"]
+
+
+def test_allow_unmet_still_rejects_unexpected() -> None:
+    """Bug: the per-task mode (--allow-unmet) hides a regression along with the not-yet-landed changes."""
+    moved_latent = "generations/qwen-image/default/runs[0]/final_latents/sha256_f32"
+    assert oracle.check_expected([moved_latent], _EXPECTED, allow_unmet=True) == ([moved_latent], [])
+    assert oracle.check_expected([], _EXPECTED, allow_unmet=True) == ([], [])
+
+
+def test_compare_cli_with_expect_exits_0_only_when_both_lists_are_empty(
+    recorded: dict, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bug: `compare --expect` exits 0 on an unexpected difference or an unmet required glob, so the 0.18 gate
+    never stops a task."""
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    expect = tmp_path / "expect.json"
+    a.write_text(json.dumps(recorded))
+    changed = copy.deepcopy(recorded)
+    changed["threshold_matrix"]["flux1-dev"]["thresh=None,coeffs=caller"]["warnings"].append(
+        ["FutureWarning", "pass rel_l1_thresh", "x.py", 1]
+    )
+    b.write_text(json.dumps(changed))
+    expect.write_text(json.dumps(_EXPECTED))
+    assert oracle.main(["compare", str(a), str(b), "--expect", str(expect)]) == 0
+    capsys.readouterr()
+    assert oracle.main(["compare", str(a), str(a), "--expect", str(expect)]) == 1
+    assert "threshold_matrix/*/thresh=None,coeffs=caller/warnings*" in capsys.readouterr().out
+    assert oracle.main(["compare", str(a), str(a), "--expect", str(expect), "--allow-unmet"]) == 0
+    capsys.readouterr()
+    changed["generations"]["flux1-dev/default"]["runs"][0]["final_latents"]["sha256_f32"] = "0" * 64
+    b.write_text(json.dumps(changed))
+    assert oracle.main(["compare", str(a), str(b), "--expect", str(expect), "--allow-unmet"]) == 1
+    assert "generations/flux1-dev/default/runs[0]/final_latents/sha256_f32" in capsys.readouterr().out
+
+
+# ---------- the 0.18 scenarios ----------
+
+
+def _strategies_named(recorded: dict, kind: str) -> set[str]:
+    return {s["strategy"] for name, s in recorded["generations"].items() if name.endswith(f"/{kind}")}
+
+
+def test_new_scenarios_cover_every_strategy(recorded: dict) -> None:
+    """Bug: restore() refusals are left unexercised on one patch strategy, so a refusal missing there (or a wrapper
+    still dropped) compares equal."""
+    assert _strategies_named(recorded, "restore-in-loop") == set(_STRATEGIES)
+    assert _strategies_named(recorded, "wrapper-over-generate-image") == set(_STRATEGIES)
+    assert _strategies_named(recorded, "wrapper-over-predict") == {"predict-flux2", "predict-z-image"}
+
+
+def test_caller_coefficient_and_uncalibrated_scenarios_cover_every_variant(recorded: dict) -> None:
+    """Bug: the caller-coefficient no-move witness or the uncalibrated-checkpoint probe skips a variant, so a moved
+    decision or a missing warning there is never compared."""
+    witnesses = {
+        s["handle"]["variant_id"]
+        for name, s in recorded["generations"].items()
+        if name.endswith("/caller-coeffs-default-thresh")
+    }
+    assert witnesses == set(_REGISTRY)
+    uncalibrated = {
+        cell["handle"]["variant_id"]
+        for name, cell in recorded["warning_attribution"].items()
+        if name.startswith("uncalibrated/")
+    }
+    assert uncalibrated == set(_REGISTRY)
+
+
+def test_the_witness_runs_caller_coefficients_without_a_threshold(recorded: dict) -> None:
+    """Bug: the witness passes a threshold (or no coefficients), so it never reaches the caller-coefficient default
+    it exists to pin."""
+    witnesses = {
+        name: s
+        for name, s in recorded["generations"].items()
+        if name.endswith("/caller-coeffs-default-thresh")
+    }
+    assert len(witnesses) == 10
+    for name, s in witnesses.items():
+        assert s["handle"]["coefficients"] == [x.hex() for x in (0.0, 0.0, 0.0, 0.0, 0.1)], name
+        assert s["handle"]["provenance"]["source"] == "user", name
+        # Caller coefficients and no threshold resolve to 0.30 on Krea and 0.20 on every other variant.
+        resolved = 0.30 if name.startswith("flux1-krea-dev/") else 0.20
+        assert s["handle"]["rel_l1_thresh"] == resolved.hex(), name
+        assert s["runs"][0]["error"] is None, name
+        assert s["runs"][0]["last_generation"]["num_steps"] == 10, name
+
+
+@pytest.mark.parametrize("strategy", _STRATEGIES)
+def test_the_restore_in_loop_probe_calls_restore_after_step_3(recorded: dict, strategy: str) -> None:
+    """Bug: the in-loop hook never fires (or fires at another step), so the R10 in-loop refusal is never exercised."""
+    (scenario,) = [
+        s
+        for name, s in recorded["generations"].items()
+        if name.endswith("/restore-in-loop") and s["strategy"] == strategy
+    ]
+    assert scenario["restore_called_at_step"] == 3
+    assert len(scenario["runs"][0]["steps"]) >= 4
+
+
+@pytest.mark.parametrize("kind", ["wrapper-over-generate-image", "wrapper-over-predict"])
+def test_a_wrapper_probe_either_refuses_or_drops_the_wrapper(recorded: dict, kind: str) -> None:
+    """Bug: the probe installs its wrapper on an attribute restore() never touches, so restore() succeeds and the
+    wrapper survives: the probe then shows neither the old overwrite nor the new refusal."""
+    probes = {name: s for name, s in recorded["generations"].items() if name.endswith(f"/{kind}")}
+    assert probes
+    for name, probe in probes.items():
+        refused = probe["restore"] is not None
+        assert probe["wrapper_kept"] is refused, name
+        assert probe["second_restore"] is None, name
+        # Torn down to the same attributes as an ordinary scenario on that variant: nothing left on the model.
+        ordinary = recorded["generations"][name.split("/")[0] + "/default"]["teardown"]
+        assert probe["teardown"] == ordinary, name

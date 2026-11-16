@@ -1,6 +1,18 @@
 {
   "decision_rule_revision": 1,
   "rule": {
+    "caller_coefficients_resolve_to": {
+      "flux1-dev": 0.2,
+      "flux1-krea-dev": 0.3,
+      "flux1-schnell": 0.2,
+      "flux2-klein-4b": 0.2,
+      "flux2-klein-9b": 0.2,
+      "flux2-klein-base-4b": 0.2,
+      "flux2-klein-base-9b": 0.2,
+      "qwen-image": 0.2,
+      "qwen-image-2512": 0.2,
+      "z-image-base": 0.2
+    },
     "default_thresh": {
       "flux1-dev": 0.2,
       "flux1-krea-dev": 0.3,

@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -264,18 +265,215 @@ def test_pending_chunks_are_rep_outer_so_conditions_interleave(tmp_path: Path) -
     ]
 
 
-def test_memory_fields_separate_load_and_loop_and_keep_the_legacy_peak() -> None:
-    # bug caught: reporting the process-lifetime peak as the loop peak
+def test_memory_fields_schema_4() -> None:
+    # bug caught: the ~0 load peak comes back (mflux materialises weights inside the first
+    # generation, so a peak read right after the load measured almost nothing)
     gib = 1024**3
-    f = bs._memory_fields(load_peak_bytes=20 * gib, loop_peak_bytes=26 * gib, cache_bytes=gib)
-    assert f == {
-        "peak_memory_gb": 26.0,
-        "load_peak_memory_gb": 20.0,
-        "loop_peak_memory_gb": 26.0,
-        "cache_memory_gb": 1.0,
+    f = bs._memory_fields(peak_bytes=26 * gib, cache_bytes=gib)
+    assert f == {"peak_memory_gb": 26.0, "cache_memory_gb": 1.0}
+    assert bs._memory_fields(peak_bytes=3 * gib // 2, cache_bytes=0) == {
+        "peak_memory_gb": 1.5,
+        "cache_memory_gb": 0.0,
     }
-    g = bs._memory_fields(load_peak_bytes=26 * gib, loop_peak_bytes=20 * gib, cache_bytes=0)
-    assert g["peak_memory_gb"] == 26.0  # legacy field is the max of the two
+
+
+def _schema4_chunk(condition: str, rep: int, elapsed: float, peak: float, cache: float) -> dict[str, object]:
+    return {
+        "variant": "flux1-dev",
+        "condition": condition,
+        "rep": rep,
+        "num_inference_steps": 25,
+        "guidance": 3.5,
+        "elapsed_s": elapsed,
+        "started_at": "2026-11-10T10:00:00+00:00",
+        "finished_at": "2026-11-10T10:01:00+00:00",
+        "peak_memory_gb": peak,
+        "cache_memory_gb": cache,
+        "stats_summary": (
+            {"skipped_count": 6, "computed_count": 19, "skip_pattern": "CCS", "max_consecutive_skips": 1}
+            if condition != "vanilla"
+            else {}
+        ),
+    }
+
+
+_NO_START_READING = {
+    "git_commit_at_start": None,
+    "git_dirty_at_start": None,
+    "git_dirty_files_at_start": None,
+}
+
+
+def _canned_report(
+    *,
+    three_way: bool,
+    hardware: dict[str, object] | None = None,
+    run_start: dict[str, object] | None = None,
+) -> dict[str, object]:
+    conditions = ["vanilla", "wrapper_nogate", "wrapper"] if three_way else ["vanilla", "wrapper"]
+    elapsed = {"vanilla": 100.0, "wrapper_nogate": 80.0, "wrapper": 50.0}
+    peak = {"vanilla": 20.0, "wrapper_nogate": 20.5, "wrapper": 21.0}
+    all_results = {
+        c: [_schema4_chunk(c, r, elapsed[c] + r, peak[c] + r / 10, 0.5 + r) for r in range(2)]
+        for c in conditions
+    }
+    return bs._build_report(
+        all_results=all_results,
+        variant="flux1-dev",
+        num_inference_steps=25,
+        guidance=3.5,
+        reps=2,
+        three_way=three_way,
+        bench_dir=bs.REPO_ROOT / "tests" / "_artifacts" / "bench_images" / "flux1-dev",
+        hardware=hardware if hardware is not None else {"chip": "test"},
+        run_start=run_start if run_start is not None else _NO_START_READING,
+    )
+
+
+def test_report_schema_version_is_4() -> None:
+    # bug caught: the report drops the load and loop peaks but still says schema 3,
+    # so a reader of schema 3 looks for fields that are no longer there
+    report = _canned_report(three_way=False)
+    assert report["schema_version"] == 4
+    assert {k for k in report if "memory_gb" in k} == {
+        "vanilla_peak_memory_gb",
+        "wrapper_peak_memory_gb",
+        "vanilla_cache_memory_gb",
+        "wrapper_cache_memory_gb",
+    }
+    assert report["vanilla_peak_memory_gb"] == [20.0, 20.1]
+    assert report["wrapper_cache_memory_gb"] == [0.5, 1.5]
+    assert report["vanilla_median"] == 100.5
+    assert report["speedup_median"] == 100.5 / 50.5
+
+
+def test_three_way_report_schema_4_memory_keys() -> None:
+    # bug caught: the no-gate condition keeps its load and loop peak arrays
+    report = _canned_report(three_way=True)
+    assert {k for k in report if "memory_gb" in k} == {
+        "vanilla_peak_memory_gb",
+        "wrapper_peak_memory_gb",
+        "nogate_peak_memory_gb",
+        "vanilla_cache_memory_gb",
+        "wrapper_cache_memory_gb",
+        "nogate_cache_memory_gb",
+    }
+    assert report["nogate_peak_memory_gb"] == [20.5, 20.6]
+    assert report["nogate_median"] == 80.5
+
+
+# --- the checkpoint each condition loaded ------------------------------------
+
+_QWEN_ORIGINAL = {
+    "model_name": "Qwen/Qwen-Image",
+    "base_model": "Qwen/Qwen-Image-2512",
+    "model_revision": None,
+}
+
+
+def _report_with_checkpoints(checkpoints: dict[tuple[str, int], dict[str, object]]) -> dict[str, object]:
+    """A three-way, two-rep report whose chunk (condition, rep) carries checkpoints[(condition, rep)]."""
+    all_results = {
+        c: [{**_schema4_chunk(c, r, 10.0 + r, 20.0, 0.5), **checkpoints[(c, r)]} for r in range(2)]
+        for c in _CONDITIONS
+    }
+    return bs._build_report(
+        all_results=all_results,
+        variant="qwen",
+        num_inference_steps=25,
+        guidance=3.5,
+        reps=2,
+        three_way=True,
+        bench_dir=bs.REPO_ROOT / "tests" / "_artifacts" / "bench_images" / "qwen",
+        hardware={"chip": "test"},
+        run_start=_NO_START_READING,
+    )
+
+
+def test_report_names_the_checkpoint_every_chunk_loaded() -> None:
+    # bug caught: the report drops the checkpoint, so a Qwen-Image record cannot say
+    # whether the original or the 2512 weights were measured
+    pinned = {
+        "model_name": "black-forest-labs/FLUX.1-dev",
+        "base_model": None,
+        "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    }
+    for checkpoint in (_QWEN_ORIGINAL, pinned):
+        report = _report_with_checkpoints({(c, r): checkpoint for c in _CONDITIONS for r in range(2)})
+        assert report["model_name"] == checkpoint["model_name"]
+        assert report["base_model"] == checkpoint["base_model"]
+        assert report["model_revision"] == checkpoint["model_revision"]
+
+
+@pytest.mark.parametrize(
+    "field, other",
+    [
+        ("model_name", "Qwen/Qwen-Image-2512"),
+        ("base_model", "Qwen/Qwen-Image"),
+        ("model_revision", "25468b98e3276ca6700de15c6628e51b7de54a26"),
+    ],
+)
+def test_report_refuses_chunks_that_loaded_different_checkpoints(field: str, other: str) -> None:
+    # bug caught: one report silently mixes timings from two checkpoints (a resumed run
+    # whose later chunks loaded other weights), or compares only some of the fields
+    checkpoints: dict[tuple[str, int], dict[str, object]] = {
+        (c, r): _QWEN_ORIGINAL for c in _CONDITIONS for r in range(2)
+    }
+    checkpoints[("wrapper", 1)] = {**_QWEN_ORIGINAL, field: other}
+    with pytest.raises(SystemExit, match="checkpoint") as excinfo:
+        _report_with_checkpoints(checkpoints)
+    assert other in str(excinfo.value)
+    assert "wrapper rep 1" in str(excinfo.value)
+
+
+@pytest.mark.mflux
+def test_checkpoint_fields_come_from_the_loaded_model_config() -> None:
+    # bug caught: the revision is looked up for the base model instead of the repo that was
+    # loaded (Qwen/Qwen-Image is unpinned on mflux 0.24; its base, Qwen-Image-2512, is pinned),
+    # or the name is taken from somewhere other than the loaded model's config
+    from types import SimpleNamespace
+
+    qwen = SimpleNamespace(
+        model_config=SimpleNamespace(model_name="Qwen/Qwen-Image", base_model="Qwen/Qwen-Image-2512")
+    )
+    assert bs._checkpoint_fields(qwen) == _QWEN_ORIGINAL
+    dev = SimpleNamespace(
+        model_config=SimpleNamespace(model_name="black-forest-labs/FLUX.1-dev", base_model=None)
+    )
+    assert bs._checkpoint_fields(dev) == {
+        "model_name": "black-forest-labs/FLUX.1-dev",
+        "base_model": None,
+        "model_revision": "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+    }
+
+
+def test_klein_report_schema_version_is_2() -> None:
+    # bug caught: Klein chunks drop the load and loop peaks but the report still says schema 1
+    import bench_klein_base_vs_distilled as bk
+
+    chunk = {
+        "condition": "base",
+        "rep": 0,
+        "elapsed_s": 500.0,
+        "num_inference_steps": 50,
+        "peak_memory_gb": 9.0,
+        "cache_memory_gb": 0.5,
+        "stats_summary": {},
+    }
+    report = bk._build_report(
+        size="4b",
+        quantize=4,
+        reps=1,
+        conditions=["base"],
+        loaded={"base": [chunk]},
+        ssim={},
+        images_dir=bk.REPO_ROOT / "tests" / "_artifacts" / "klein_images" / "4b",
+        hardware={},
+        height=512,
+        width=512,
+    )
+    assert report["schema_version"] == 2
+    assert report["conditions"]["base"]["peak_memory_gb"] == 9.0
 
 
 def test_abort_artifact_is_persisted_beside_the_chunk_and_never_counts_as_done(tmp_path: Path) -> None:
@@ -397,19 +595,13 @@ def test_git_revision_reports_commit_and_dirty_flag(tmp_path: Path, monkeypatch:
 
 def test_git_revision_outside_a_repo_is_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _drop_inherited_repo_location(monkeypatch)
-    assert bs._git_revision(tmp_path) == {"git_commit": None, "git_dirty": None}
+    assert bs._git_revision(tmp_path) == {"git_commit": None, "git_dirty": None, "git_dirty_files": None}
 
 
-def test_memory_arrays_fall_back_only_for_the_peak_keys() -> None:
+def test_memory_arrays_report_an_unknown_cache_pool_as_none() -> None:
     # bug caught: reporting a pre-v0.10.1 chunk's process peak as its cache-pool size
     old = {"peak_memory_gb": 26.0}
-    new = {
-        "peak_memory_gb": 26.2,
-        "load_peak_memory_gb": 20.0,
-        "loop_peak_memory_gb": 26.2,
-        "cache_memory_gb": 0.9,
-    }
-    assert bs._memory_arrays([old, new], "loop_peak_memory_gb") == [26.0, 26.2]
+    new = {"peak_memory_gb": 26.2, "cache_memory_gb": 0.9}
     assert bs._memory_arrays([old, new], "cache_memory_gb") == [None, 0.9]
 
 
@@ -449,3 +641,195 @@ def test_memory_saver_is_built_with_the_load_bearing_kwargs() -> None:
     flux = object()
     bs._make_memory_saver(flux, _FakeSaver)
     assert seen == dict(model=flux, keep_transformer=True, cache_limit_bytes=None, num_seeds=1)
+
+
+# --- complete bench records: dirty-file list, report date, commit at run start ---
+
+
+_STATUS_ARGV = ["status", "--porcelain", "--untracked-files=normal"]
+
+
+class _FakeGit:
+    """Stands in for ``subprocess.run`` at the process boundary: answers ``git rev-parse HEAD``
+    and ``git status --porcelain --untracked-files=normal`` from its fields, and fails every other
+    command the way a missing binary does (so sysctl reads in ``_detect_hardware`` fall back to None).
+    A status call without ``--untracked-files=normal`` is an error: its dirty flag would follow the
+    user's ``status.showUntrackedFiles`` setting."""
+
+    def __init__(self, *, head: str, porcelain: str) -> None:
+        self.head = head
+        self.porcelain = porcelain
+
+    def __call__(self, cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git" and cmd[-2:] == ["rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{self.head}\n", stderr="")
+        if cmd[0] == "git" and "status" in cmd:
+            assert cmd[-3:] == _STATUS_ARGV, f"git status must pin the untracked-files mode: {cmd}"
+            return subprocess.CompletedProcess(cmd, 0, stdout=self.porcelain, stderr="")
+        raise FileNotFoundError(cmd[0])
+
+
+_HEAD_A = "a" * 40
+_HEAD_B = "b" * 40
+
+
+def test_git_revision_lists_every_dirty_path_from_porcelain(monkeypatch: pytest.MonkeyPatch) -> None:
+    # bug caught: the porcelain output is thrown away after the bool (only `git_dirty` is kept),
+    # or the whole output is stripped first, so the leading space of " M path" is lost and the
+    # first path loses its first letter
+    porcelain = " M scripts/bench_speedup.py\n?? notes.txt\nR  old.py -> new.py\n"
+    monkeypatch.setattr(bs.subprocess, "run", _FakeGit(head=_HEAD_A, porcelain=porcelain))
+    assert bs._git_revision(bs.REPO_ROOT) == {
+        "git_commit": _HEAD_A,
+        "git_dirty": True,
+        "git_dirty_files": ["scripts/bench_speedup.py", "notes.txt", "old.py -> new.py"],
+    }
+
+
+def test_git_revision_dirty_files_are_an_empty_list_on_a_clean_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    # bug caught: a clean tree reports [""] (splitting the empty output on "\n") or None, which a
+    # reader cannot tell apart from "not a checkout"
+    monkeypatch.setattr(bs.subprocess, "run", _FakeGit(head=_HEAD_A, porcelain=""))
+    assert bs._git_revision(bs.REPO_ROOT) == {
+        "git_commit": _HEAD_A,
+        "git_dirty": False,
+        "git_dirty_files": [],
+    }
+
+
+def test_hardware_block_of_the_report_carries_the_dirty_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    # bug caught: `_detect_hardware` builds its git fields by hand and leaves the new list out,
+    # so the written report still has no dirty-file list
+    monkeypatch.setattr(bs.subprocess, "run", _FakeGit(head=_HEAD_A, porcelain="?? notes.txt\n"))
+    monkeypatch.setattr(bs, "_mlx_teacache_version", lambda: "x")
+    report = _canned_report(three_way=False, hardware=bs._detect_hardware(quantize=4))
+    hardware = report["hardware"]
+    assert isinstance(hardware, dict)
+    assert hardware["git_dirty_files"] == ["notes.txt"]
+    assert hardware["git_dirty"] is True
+
+
+def test_report_has_a_utc_generated_at_from_when_it_was_built() -> None:
+    # bug caught: no report-level date, a naive local time, or a date copied from a chunk
+    # (the canned chunks started on 2026-11-10) instead of the moment the report is written
+    before = datetime.now(UTC)
+    report = _canned_report(three_way=False)
+    after = datetime.now(UTC)
+    generated = datetime.fromisoformat(str(report["generated_at"]))
+    assert generated.utcoffset() == timedelta(0)
+    assert before <= generated <= after
+
+
+def test_start_reading_survives_a_resume_after_head_moved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # bug caught: the start reading is taken again on every invocation (a resume overwrites it
+    # with the later HEAD), or the report writes the report-time reading as the start one
+    git = _FakeGit(head=_HEAD_A, porcelain=" M src/mlx_teacache/x.py\n")
+    monkeypatch.setattr(bs.subprocess, "run", git)
+    first = bs._run_start_reading(tmp_path, resumed=False)
+    assert first == {
+        "git_commit_at_start": _HEAD_A,
+        "git_dirty_at_start": True,
+        "git_dirty_files_at_start": ["src/mlx_teacache/x.py"],
+    }
+
+    git.head, git.porcelain = _HEAD_B, ""  # a commit landed between two invocations
+    resumed = bs._run_start_reading(tmp_path, resumed=True)
+    assert resumed == first
+
+    report = _canned_report(three_way=False, hardware=bs._git_revision(bs.REPO_ROOT), run_start=resumed)
+    hardware = report["hardware"]
+    assert isinstance(hardware, dict)
+    assert (hardware["git_commit_at_start"], hardware["git_commit"]) == (_HEAD_A, _HEAD_B)
+    assert (hardware["git_dirty_at_start"], hardware["git_dirty"]) == (True, False)
+    assert (hardware["git_dirty_files_at_start"], hardware["git_dirty_files"]) == (
+        ["src/mlx_teacache/x.py"],
+        [],
+    )
+
+
+def test_a_fresh_run_replaces_a_start_reading_left_by_a_run_with_no_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # bug caught: the stored reading is reused whenever the file exists, so a run whose first
+    # worker aborted (no chunk kept) stamps every later chunk with that older HEAD
+    git = _FakeGit(head=_HEAD_A, porcelain="")
+    monkeypatch.setattr(bs.subprocess, "run", git)
+    bs._run_start_reading(tmp_path, resumed=False)
+    git.head = _HEAD_B
+    assert bs._run_start_reading(tmp_path, resumed=False)["git_commit_at_start"] == _HEAD_B
+
+
+def test_a_resume_with_no_stored_start_reading_says_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # bug caught: chunks persisted before the start reading existed get the current HEAD written
+    # as their start commit, which is a claim the record cannot back
+    monkeypatch.setattr(bs.subprocess, "run", _FakeGit(head=_HEAD_B, porcelain=""))
+    assert bs._run_start_reading(tmp_path, resumed=True) == _NO_START_READING
+
+
+def test_a_resumed_start_reading_cannot_override_measured_hardware_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # bug caught: the resume returns run_start.json verbatim, so a stale or edited file that carries
+    # report-time keys (git_commit, mlx_version) replaces the measured values in the hardware block
+    monkeypatch.setattr(bs.subprocess, "run", _FakeGit(head=_HEAD_B, porcelain=""))
+    stored = {
+        "git_commit_at_start": _HEAD_A,
+        "git_dirty_at_start": False,
+        "git_dirty_files_at_start": [],
+        "git_commit": _HEAD_A,
+        "mlx_version": "0.0.1",
+    }
+    (tmp_path / "run_start.json").write_text(json.dumps(stored))
+    resumed = bs._run_start_reading(tmp_path, resumed=True)
+    assert resumed == {
+        "git_commit_at_start": _HEAD_A,
+        "git_dirty_at_start": False,
+        "git_dirty_files_at_start": [],
+    }
+    measured = {"chip": "test", "mlx_version": "0.32.2", "git_commit": _HEAD_B}
+    hardware = _canned_report(three_way=False, hardware=measured, run_start=resumed)["hardware"]
+    assert isinstance(hardware, dict)
+    assert (hardware["git_commit"], hardware["mlx_version"]) == (_HEAD_B, "0.32.2")
+    assert hardware["git_commit_at_start"] == _HEAD_A
+
+
+def test_a_resumed_start_reading_missing_a_field_reports_it_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # bug caught: filtering to the stored keys drops a start field an older or edited file lacks,
+    # so the report's hardware block loses the key instead of saying unknown (None)
+    monkeypatch.setattr(bs.subprocess, "run", _FakeGit(head=_HEAD_B, porcelain=""))
+    (tmp_path / "run_start.json").write_text(json.dumps({"git_commit_at_start": _HEAD_A}))
+    assert bs._run_start_reading(tmp_path, resumed=True) == {
+        "git_commit_at_start": _HEAD_A,
+        "git_dirty_at_start": None,
+        "git_dirty_files_at_start": None,
+    }
+
+
+class _HangingGit:
+    """``subprocess.run`` where one git subcommand hangs: with a timeout it raises the
+    ``TimeoutExpired`` the real call raises when the timeout runs out; without one it fails the test,
+    since the real call would block the bench forever. Other git calls answer as ``_FakeGit``."""
+
+    def __init__(self, hangs: str) -> None:
+        self.hangs = hangs
+        self.answer = _FakeGit(head=_HEAD_A, porcelain="")
+
+    def __call__(self, cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git" and self.hangs in cmd:
+            assert kwargs.get("timeout") == 5, f"git {self.hangs} has no 5 s timeout: {kwargs}"
+            raise subprocess.TimeoutExpired(cmd, 5)
+        return self.answer(cmd, **kwargs)
+
+
+@pytest.mark.parametrize("hangs", ["rev-parse", "status"])
+def test_git_revision_gives_up_on_a_hung_git_call(hangs: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    # bug caught: a git call without a timeout blocks the bench forever, or the TimeoutExpired is not
+    # caught (only FileNotFoundError / CalledProcessError are) and aborts the report
+    monkeypatch.setattr(bs.subprocess, "run", _HangingGit(hangs))
+    assert bs._git_revision(bs.REPO_ROOT) == {"git_commit": None, "git_dirty": None, "git_dirty_files": None}

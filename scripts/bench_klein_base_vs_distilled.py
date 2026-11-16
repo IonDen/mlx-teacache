@@ -438,8 +438,6 @@ def _worker_main(args: argparse.Namespace) -> None:
     save_path = Path(args.save_to) if args.save_to else None
 
     flux = _load_klein(recipe.model_config_name, quantize)
-    load_peak = int(mx.get_peak_memory())
-    mx.reset_peak_memory()
 
     stats_summary: dict[str, Any] = {}
     if recipe.use_teacache:
@@ -480,7 +478,8 @@ def _worker_main(args: argparse.Namespace) -> None:
             flush=True,
         )
 
-    loop_peak = int(mx.get_peak_memory())
+    # One lifetime peak read after the generation: mflux materialises the weights lazily inside it.
+    peak = int(mx.get_peak_memory())
     result: dict[str, Any] = {
         "size": size,
         "condition": condition,
@@ -491,9 +490,7 @@ def _worker_main(args: argparse.Namespace) -> None:
         "num_inference_steps": recipe.num_inference_steps,
         "guidance": recipe.guidance,
         "elapsed_s": elapsed,
-        "peak_memory_gb": max(load_peak, loop_peak) / 1024**3,
-        "load_peak_memory_gb": load_peak / 1024**3,
-        "loop_peak_memory_gb": loop_peak / 1024**3,
+        "peak_memory_gb": peak / 1024**3,
         "cache_memory_gb": int(mx.get_cache_memory()) / 1024**3,
         "stats_summary": stats_summary,
         "started_at": started_at,
@@ -722,7 +719,7 @@ def _build_report(
     width: int,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ"),
         "size": size,
         "quantize": quantize_label(quantize),

@@ -5,6 +5,17 @@ in a uniform 4-bit build and removing it at the cost of additional memory*
 
 > 📄 [Read on the website](https://ineshin.space/papers/qwen-image-mixed-precision-on-a-32-gb-mac/) — same paper, formatted for reading.
 
+## Update, 2026-11-16: the three memory peaks restored
+
+The 2026-11-15 note below withheld the three 768×768 peak-memory figures because none of their
+records names its MLX version and no run's code can be pinned to one commit. Both are gaps in the
+records. A record that lacks a field still records its number, so the figures return with their
+gaps beside them. Section 5 gives the three peaks again, each with what its record leaves out. The
+paper's text still gives no memory cost for the mixed build, because no committed record measures
+the two builds as a pair; the figures quoted in the notes below are what earlier versions said. The
+[previous version](https://github.com/IonDen/mlx-teacache/blob/41adef7b380d138dc03cc3845f620149afcd4a1b/docs/papers/qwen-image-mixed-precision-on-a-32-gb-mac.md)
+keeps the earlier text.
+
 ## Update, 2026-11-15: the stock-q4 comparison
 
 The [previous version](https://github.com/IonDen/mlx-teacache/blob/bc02ac3475665327dea91a35da999a794a581906/docs/papers/qwen-image-mixed-precision-on-a-32-gb-mac.md)
@@ -49,9 +60,10 @@ that one-prompt, one-seed result and does not claim a general Qwen-Image sensiti
   [mflux](https://github.com/filipstrand/mflux) on Apple Silicon.
 - Machine: Apple M1 Max with 32 GB of unified memory.
 - Software: the recipe targets the mflux 0.17.5 API, and the committed 768×768 run of the mixed
-  build used mflux 0.17.5 (the 768×768 stock-q4 records used mflux 0.18.0); the mflux version of
-  the 512×512 pair was not recorded. Section 4 explains why
-  the recipe does not carry over unchanged to the mflux releases mlx-teacache supports today.
+  build used mflux 0.17.5, by a stamp added by hand and by the lock file (section 5); the 768×768
+  stock-q4 records name mflux 0.18.0. The mflux version of the 512×512 pair was not recorded.
+  Section 4 explains why the recipe does not carry over unchanged to the mflux releases
+  mlx-teacache supports today.
 - Project context: the investigation took place in June 2026 during the `mlx-teacache`
   Qwen-Image integration. The public
   [variant page](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/variants/qwen-image.md)
@@ -281,10 +293,14 @@ reticulation, not a texture-only repair.*
 The project's separate 768×768 showcase used the same mixed predicate and completed on the test
 machine. Its
 [committed comparison report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/comparison_report.json)
-records the run's peak in the `peak_memory_gb` field of the vanilla arm of its `qwen-image` row.
-That row was first committed on 2026-06-18, shortly before the 0.9.0 release; the run used mflux
-0.17.5, 50 steps, `guidance=4.0`, seed 42 and the portrait prompt printed in the report. No public image pair
-compares uniform q4 and the mixed build at 768×768, so the visual improvement at this size has no
+records the run's peak, 30.43 GiB, in the `peak_memory_gb` field of the vanilla arm of its
+`qwen-image` row. Its 768×768 figures were first committed on 2026-06-18, shortly before the 0.9.0
+release; the run used 50 steps, `guidance=4.0`, seed 42 and the portrait prompt printed in the
+report. The row's date, build label and version stamps (mlx-teacache 0.9.0, mflux 0.17.5) were
+added by hand two commits later, the same day; the run date itself is not recorded. The
+[lock file at the commit that first held these figures](https://github.com/IonDen/mlx-teacache/blob/06d634bcec4c10e09a33aeeba9f8af1044d84ab4/uv.lock)
+resolves mflux 0.17.5 and MLX 0.31.2 (macOS entry); the report does not name an MLX version. No
+public image pair compares uniform q4 and the mixed build at 768×768, so the visual improvement at this size has no
 published record.
 
 Two committed stock-q4 records exist at this size, in the
@@ -298,14 +314,36 @@ in its own subprocess. The v0.11.0 record comes from
 [variant page at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/variants/qwen-image.md)
 gives the command; it was not rerun for this paper, and the other two records do not record their
 commands. Neither stock-q4 record pairs with the mixed build, which ran on mflux 0.17.5 with a
-different prompt. The v0.11.0 run used a later harness and recorded the lower of the two peaks.
-That harness frees the text encoders once the prompt is encoded (`memory_saver: true` in the
+different prompt. The v0.11.0 run used a later harness and recorded the lower of the two stock-q4
+peaks. That harness frees the text encoders once the prompt is encoded (`memory_saver: true` in the
 report), but the change arrived together with others: a bound on MLX's cache pool, a new chunk
 order and a later mlx-teacache build. No record isolates which change accounts for the lower
-peak. The v0.11.0 run's working tree was not clean (`git_dirty: true`). Both stock-q4 peaks sit
-below the mixed build's, but the size of the mixed build's memory cost is not on record. This
-paper gives none of the three peaks as a figure: no record names the MLX version it ran on, and no
-run's code can be pinned to one commit.
+peak. The v0.11.0 run's working tree was not clean (`git_dirty: true`). The two stock-q4 peaks, with
+what each record leaves out:
+
+- 26.16 GiB in the v0.10.0 record. The report has no date, no commit field and no MLX version. The
+  [README at the v0.10.0 release](https://github.com/IonDen/mlx-teacache/blob/v0.10.0/README.md?plain=1#L238)
+  dates the run 2026-09-01. The benchmark's Qwen-Image support was committed 24 seconds before the
+  report, both on the same [pull request](https://github.com/IonDen/mlx-teacache/pull/33), and the
+  report's own timings add up to about 95 minutes, so the code that ran was not yet
+  committed when the run began. MLX 0.31.2 per the
+  [lock file at v0.10.0](https://github.com/IonDen/mlx-teacache/blob/v0.10.0/uv.lock) (macOS entry);
+  the report does not say it.
+- 24.08 GiB in the v0.11.0 record, the peak during generation: the harness resets the counter after
+  model load, and the load phase read near zero, so it is also the whole-run peak. The report names
+  a commit made during the run and does not list the uncommitted files. The committed `scripts/` and `src/` are the same before and after that run, but an edit that
+  was never committed cannot be ruled out. MLX 0.31.2 per the
+  [lock file at v0.11.0](https://github.com/IonDen/mlx-teacache/blob/v0.11.0/uv.lock) (macOS entry);
+  the report does not say it.
+
+Each report also carries a package version string (0.9.4.dev8+g90fca33c9 and
+0.10.1.dev13+g05c05a1d9.d20260905). It is fixed when the package is installed and names an earlier
+commit, not the code that ran.
+
+Both stock-q4 peaks sit below the mixed build's 30.43 GiB, but the differences between the three
+figures are not a measured memory cost. The mixed run differs from both stock-q4 runs in prompt and
+mflux version, the three runs used different harnesses and did not all read the peak the same way,
+and no committed record pairs the two builds.
 
 All three records hold MLX's peak allocation in the benchmarking process, not total process or
 system memory: [`bench_comparison.py` at v0.9.0](https://github.com/IonDen/mlx-teacache/blob/v0.9.0/scripts/bench_comparison.py#L245),
@@ -367,10 +405,12 @@ The study is narrow, so the claims need the following limits:
 - In one pair, from one prompt and one seed, the reticulation went away when the construction
   predicate changed. One pair cannot show that the recipe removes it in general, and it does not
   show which protected layer matters most. Fewer 8-bit blocks might be enough.
-- No memory record of the 512² pair was kept. The three 768² peaks come from committed reports of
-  separate runs, none of which pairs the mixed build with stock q4. The reports name no MLX version
-  and no run's code is pinned to one commit, so this paper gives the peaks in words. They are MLX's
-  peak allocation, not total process or system memory, and none was re-measured for this paper.
+- No memory record of the 512² pair was kept. The three 768² peaks (30.43 GiB for the mixed build,
+  26.16 and 24.08 GiB for stock q4) come from committed reports of separate runs, none of which
+  pairs the mixed build with stock q4. The reports name no MLX version (the lock file at each
+  record's commit resolves MLX 0.31.2 on macOS) and no run's code is pinned to one commit;
+  section 5 gives each peak with the gaps its record leaves. They are MLX's peak allocation, not
+  total process or system memory, and none was re-measured for this paper.
 - The recipe was tested on mflux 0.17.5 only. On the mflux releases mlx-teacache now supports, the
   alias loads a different checkpoint and stock q4 is a different baseline (section 4), and the
   recipe has not been tested there.
@@ -383,8 +423,8 @@ With `quantize=4`, mflux 0.17.5 treated every quantizable module of the transfor
 identically; from mflux 0.19 its 4-bit build already keeps the `img_mod_linear` modulation layers
 at 8 bits. Analogous literature and community builds motivated a concentrated protection set. In
 this case it produced the author's preferred result for the tested portrait. The mixed build's
-recorded peak sits above both 768×768 stock-q4 records; by how much is not on record, because no
-committed report pairs the two builds.
+recorded peak sits above both 768×768 stock-q4 records; what the recipe itself costs in memory is
+not on record, because no committed report pairs the two builds.
 
 ### Check cheap hypotheses in source
 
@@ -416,7 +456,7 @@ working protection set or show that the same layers matter for other prompts.
 |---|---|---|
 | With `quantize=4`, the tested Qwen-Image portrait showed visible skin reticulation on this hardware and these settings | the author's observation, shown in Figures 2 and 3; also observed across the tested resolutions and step counts in unpublished test images | [variant page at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/variants/qwen-image.md); [changelog at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/CHANGELOG.md) |
 | The mixed recipe removed the visible reticulation and produced the author's preferred 512² output | one controlled prompt/seed pair; subjective assessment; no high-precision reference (Figures 2 and 3) | this paper's figures |
-| At 768², the mixed build's recorded peak (portrait prompt, mflux 0.17.5, committed 2026-06-18) sits above those of two separate stock-q4 runs (red-apple prompt, mflux 0.18.0, the second under a later harness), in the reports' `peak_memory_gb` and `vanilla_peak_memory_gb` fields | three committed records of different runs; no committed record pairs the mixed build with stock q4, so the size of the cost is not on record; peaks given in words because no record names its MLX version and no run's code is pinned to one commit; peak MLX allocation, not total system use; no memory record of the 512² pair | [comparison report at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/comparison_report.json); [v0.10.0 Qwen-Image benchmark at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.10.0_bench_qwen_image.json); [v0.11.0 Qwen-Image benchmark at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.11.0_bench_qwen_image.json) |
+| At 768², the mixed build's recorded peak (portrait prompt, mflux 0.17.5, committed 2026-06-18) sits above those of two separate stock-q4 runs (red-apple prompt, mflux 0.18.0, the second under a later harness), in the reports' `peak_memory_gb` and `vanilla_peak_memory_gb` fields | three committed records of different runs; no committed record pairs the mixed build with stock q4, so the size of the cost is not on record; peaks 30.43 GiB (mixed; date, build label and version stamps added by hand), 26.16 GiB (v0.10.0) and 24.08 GiB (v0.11.0), peaks given with their gaps in section 5; no record names its MLX version, and the lock file at each record's commit resolves MLX 0.31.2 on macOS; peak MLX allocation, not total system use; no memory record of the 512² pair | [comparison report at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/comparison_report.json); [v0.10.0 Qwen-Image benchmark at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.10.0_bench_qwen_image.json); [v0.11.0 Qwen-Image benchmark at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.11.0_bench_qwen_image.json) |
 | Protecting edge blocks and selected input, conditioning, and output modules is a plausible mixed-precision heuristic | motivated by analogous literature and community practice; not a measured Qwen-Image sensitivity map | [SQ-DM](https://arxiv.org/abs/2501.15448); [Qua²SeDiMo](https://arxiv.org/abs/2412.14628); [SVDQuant](https://arxiv.org/abs/2411.05007); [city96 GGUF builds](https://huggingface.co/city96/Qwen-Image-gguf) |
 | TeaCache coefficients calibrated on stock q4 transferred to the mixed build under the 0.9.x gate | a June 2026 threshold sweep on the mixed build, summarized on the variant page and since superseded; the mixed build was not re-swept under the current gate | [variant page at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/variants/qwen-image.md) |
 | mflux 0.17.5 exposes the predicate as a class attribute rather than a per-instance constructor option | source inspection of the version used | [`qwen_weight_definition.py` at v.0.17.5](https://github.com/filipstrand/mflux/blob/v.0.17.5/src/mflux/models/qwen/weights/qwen_weight_definition.py) |
@@ -456,4 +496,4 @@ working protection set or show that the same layers matter for other prompts.
 
 ---
 
-*Prepared 2026-07-20. Last updated 2026-11-15. Denis Ineshin.*
+*Prepared 2026-07-20. Last updated 2026-11-16. Denis Ineshin.*

@@ -25,6 +25,7 @@ from mlx_teacache import (
     InvalidStepWindowError,
     MissingGenerationContextError,
     Provenance,
+    RestoreRefusedError,
     StatsFrozenError,
     TeaCacheDisabledWarning,
     TeaCacheError,
@@ -230,6 +231,13 @@ _OWN_CONSTRUCTORS: dict[type, list[tuple[str, object, object]]] = {
         ("self", POK, EMPTY),
         ("detail", POK, None),
     ],
+    RestoreRefusedError: [
+        ("self", POK, EMPTY),
+        ("reason", KW, EMPTY),
+        ("attribute", KW, None),
+        ("remaining_steps", KW, None),
+        ("active_num_steps", KW, None),
+    ],
 }
 
 # These four keep Exception's constructor: one positional message, nothing else of their own.
@@ -252,6 +260,7 @@ def test_exception_bases_and_constructor_signatures() -> None:
         TransformerShapeError: (TeaCacheError,),
         InvalidStepWindowError: (TeaCacheError,),
         MissingGenerationContextError: (TeaCacheError,),
+        RestoreRefusedError: (TeaCacheError,),
     }
     for cls, expected in _OWN_CONSTRUCTORS.items():
         assert "__init__" in vars(cls), cls.__name__

@@ -5,9 +5,9 @@
 state, the staged stats, the generation context and the CFG branch pairer. It is never returned to the user; the
 public `TeaCacheHandle` keeps a reference to it so `restore()` can release the cached arrays.
 
-Imports only `_kernel`. Of the three runner-hook slots, `_generate_image_was_instance_attr` and
-`_original_generate_image` are written by the runner's lifecycle module; `_callback_instance` is written by its patch
-module.
+Imports only `_kernel`. Of the four runner-hook slots, `_generate_image_was_instance_attr`,
+`_original_generate_image` and `_wrapped_generate_image` are written by the runner's lifecycle module;
+`_callback_instance` is written by its patch module.
 """
 
 from dataclasses import dataclass, field
@@ -105,6 +105,8 @@ class InternalHandle:
         # Fields set by wrap_generate_image
         self._generate_image_was_instance_attr: bool = False
         self._original_generate_image: Any = None
+        # TeaCache's own wrapper, so restore() can tell it apart from one installed over it later.
+        self._wrapped_generate_image: Any = None
         self._pending_finalize: PendingFinalize | None = None
         # Field set by GenerationContextCallback registration
         self._callback_instance: Any = None

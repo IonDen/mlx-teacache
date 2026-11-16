@@ -59,6 +59,7 @@ from mlx_teacache.errors import (
     InternalStateError,
     InvalidStepWindowError,
     MissingGenerationContextError,
+    RestoreRefusedError,
     TeaCacheDisabledWarning,
     TeaCacheError,
     TeaCacheNoBenefitWarning,
@@ -97,4 +98,5 @@ __all__ = [
     "InternalStateError",
     "InvalidStepWindowError",
     "MissingGenerationContextError",
+    "RestoreRefusedError",
 ]

@@ -82,6 +82,8 @@ Three parity tests ran on real Qwen-Image-2512 weights (`-k 2512`, mflux 0.23.0,
 - At the 0.25 default the image keeps SSIM at or above 0.95 against plain mflux, and the skip count falls inside the 24–34 band the test allows (the sweep counted 29 at this recipe).
 - The high-threshold skip path gives a finite latent.
 
+On 2026-11-16 the same three tests passed again on mflux 0.24.0.
+
 The original checkpoint's parity tests (`-k original`) were not run for this release.
 
 ## Reproduce

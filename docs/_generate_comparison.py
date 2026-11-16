@@ -23,6 +23,16 @@ GIB = 1024**3
 _MARKER = re.compile(
     r"<!-- COMPARISON:(?P<key>[\w:.-]+) START -->\n.*?<!-- COMPARISON:(?P=key) END -->", re.DOTALL
 )
+# Multi-run bench records that a later record replaced: the pages link the current one.
+_SUPERSEDED_BENCH_REPORTS = {
+    "_artifacts/v0.10.0_bench_flux1_dev.json": "_artifacts/v0.18.0_bench_flux1_dev.json",
+}
+
+
+def _bench_report(v: dict[str, Any]) -> str:
+    """The multi-run bench record a page links for this entry: the one the run named, or its replacement."""
+    named = str(v["bench_report"])
+    return _SUPERSEDED_BENCH_REPORTS.get(named, named)
 
 
 def _s(x: float) -> str:
@@ -49,7 +59,7 @@ def _summary(slug: str, v: dict[str, Any]) -> str:
             f"{b['skipped']} of {v['steps']} steps skipped |",
             "",
             f"On this run: {_x(v['speedup_wall'])} faster ({_x(v['speedup_preview_subtracted'])} with preview decoding "
-            f"left out) · SSIM {v['ssim']:.2f} · multi-run measurement: [bench report]({v['bench_report']}) · "
+            f"left out) · SSIM {v['ssim']:.2f} · multi-run measurement: [bench report]({_bench_report(v)}) · "
             f"[More details →](docs/comparison/{slug}.md)",
         ]
     )
@@ -170,7 +180,7 @@ def _details(slug: str, v: dict[str, Any], seed: int) -> str:
         f"{', text encoder freed once the prompt is encoded' if v['free_encoders'] else ''}. Checkpoint "
         f"`{v['checkpoint']}`; preview decoder `{v['decoder']}`. {library_line(p)}, "
         f"mflux {p.get('version_mflux')}, MLX {p.get('version_mlx')}, mlx-taef {p.get('version_mlx_taef')}. "
-        f"Multi-run measurement of this model: [bench report](../../{v['bench_report']})."
+        f"Multi-run measurement of this model: [bench report](../../{_bench_report(v)})."
     )
     return "\n".join(table) + footer
 

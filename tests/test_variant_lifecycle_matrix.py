@@ -1,18 +1,16 @@
 """Apply, restore and provenance on every registered variant (fake pipelines, no weights)."""
 
-import contextlib
 from typing import Any
 
 import pytest
 
 from mlx_teacache import apply_teacache
-from mlx_teacache.errors import TeaCacheNoBenefitWarning
 from mlx_teacache.variants import _REGISTRY
 from tests._variant_fakes import fake_for_variant
+from tests.conftest import expect_distilled_warning
 
 pytestmark = pytest.mark.mflux
 
-_DISTILLED = {"flux2-klein-4b", "flux2-klein-9b"}
 _PREDICT_FAMILIES = {
     "flux2-klein-4b",
     "flux2-klein-9b",
@@ -26,11 +24,7 @@ _IDS = sorted(_REGISTRY)
 
 def _apply(variant_id: str, flux: Any, **kw: Any) -> Any:
     """apply_teacache, expecting the distilled no-benefit warning on a builtin-coefficient apply."""
-    if variant_id in _DISTILLED and "coefficients" not in kw:
-        ctx: Any = pytest.warns(TeaCacheNoBenefitWarning)
-    else:
-        ctx = contextlib.nullcontext()
-    with ctx:
+    with expect_distilled_warning(variant_id, coefficients=kw.get("coefficients")):
         return apply_teacache(flux, **kw)
 
 
@@ -66,7 +60,9 @@ def test_builtin_apply_records_builtin_provenance(variant_id: str) -> None:
 def test_custom_coefficients_record_user_provenance(variant_id: str) -> None:
     """Bug: caller coefficients are labelled builtin (or replaced) in the handle's provenance."""
     flux = fake_for_variant(variant_id)
-    handle = _apply(variant_id, flux, coefficients=_CUSTOM)
+    handle = _apply(
+        variant_id, flux, coefficients=_CUSTOM, rel_l1_thresh=0.3 if variant_id == "flux1-krea-dev" else 0.2
+    )
     try:
         assert handle.provenance.source == "user"
         assert handle.coefficients == (0.5, 1.5, 2.5, 3.5, 4.5)

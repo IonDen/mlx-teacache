@@ -75,6 +75,7 @@ def test_apply_records_variant_window_coefficients_revision_and_mflux_version(mf
     h = apply_teacache(
         _fake_flux1_dev(),
         coefficients=(0.1, 0.2, 0.3, 0.4, 0.5),
+        rel_l1_thresh=0.2,
         skip_first_n_steps=2,
         skip_last_n_steps=3,
     )
@@ -166,7 +167,9 @@ def test_every_integration_that_builds_a_handle_writes_its_coefficients() -> Non
 def test_each_family_records_caller_supplied_coefficients(mflux_version, variant_id: str) -> None:
     """Bug: a family's integration records its built-in tuple even when the caller passed coefficients=."""
     mflux_version("0.24.0")
-    with apply_teacache(_fake_model(variant_id), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5)) as h:
+    with apply_teacache(
+        _fake_model(variant_id), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5), rel_l1_thresh=0.2
+    ) as h:
         assert h.variant_id == variant_id
         assert h.coefficients == (0.1, 0.2, 0.3, 0.4, 0.5)
 

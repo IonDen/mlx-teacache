@@ -44,6 +44,7 @@ MFLUX_FILES = build_allowlist(
         "test_comparison_qwen_config.py",
         "test_predict_closure_release.py",  # FLUX.2 cases call a forward that imports mflux inside the function
         "test_equivalence_oracle.py",  # tiny real mflux transformers and the real-class FLUX.1 fake
+        "test_caller_threshold_warning.py",  # builds models through the variant fakes (real-class FLUX.1 fake needs mflux)
         "variants/flux1_dev/test_integration_smoke.py",  # imports mflux and the variant integration
     ]
 )

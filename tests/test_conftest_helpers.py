@@ -37,7 +37,7 @@ def test_expect_distilled_warning_expects_nothing_when_coefficients_given(
         expect_distilled_warning("flux2-klein-4b", coefficients=coeffs),
         pytest.raises(_StopAtIntegration),
     ):
-        apply_teacache(_fake_distilled_klein_4b(), coefficients=coeffs)
+        apply_teacache(_fake_distilled_klein_4b(), coefficients=coeffs, rel_l1_thresh=0.2)
 
 
 def test_expect_distilled_warning_still_requires_warning_on_builtin_coefficients(

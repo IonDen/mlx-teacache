@@ -10,7 +10,6 @@
 Imports no mflux: the forward only calls the transformer it wraps.
 """
 
-import warnings
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -29,14 +28,10 @@ from mlx_teacache._kernel.step import (
     step_decision,
     validate_window_once,
 )
-from mlx_teacache.errors import (
-    InternalStateError,
-    TeaCacheUncalibratedCheckpointWarning,
-)
+from mlx_teacache.errors import InternalStateError
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.integrations.mflux.lifecycle import resolve_active_num_steps
 from mlx_teacache.integrations.mflux.patch import install_proxy_patch
-from mlx_teacache.variants._qwen_checkpoint import is_calibrated_checkpoint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -337,31 +332,7 @@ def apply_qwen(
         builtin=builtin,
         policy="fallback-for-caller-coefficients",
     )
-    if coefficients is None:
-        # The built-in polynomial was fitted on calibration.hf_model_id. mflux 0.19
-        # resolves the `qwen-image` alias to Qwen/Qwen-Image-2512, a newer
-        # checkpoint with the same aliases, so the detector still matches and
-        # the user would otherwise get an unverified operating point silently.
-        # mflux resolves a local path or a pre-quantized mirror by copying the base
-        # config and recording the base's model_name in base_model, so a mirror
-        # declared through --base-model counts as the calibrated checkpoint.
-        model_config = getattr(flux, "model_config", None)
-        loaded = getattr(model_config, "model_name", None)
-        calibrated = calibration.hf_model_id
-        if not is_calibrated_checkpoint(model_config, calibrated):
-            # stacklevel 4: apply_qwen -> variant apply -> apply_teacache -> the caller.
-            warnings.warn(
-                TeaCacheUncalibratedCheckpointWarning(
-                    f"variant {calibration.variant_id!r} loaded {loaded!r}, but its coefficients were "
-                    f"calibrated on {calibrated!r}; skip counts and image quality on this "
-                    "checkpoint are not verified. If this is a mirror of the calibrated "
-                    "checkpoint, load it with that base model declared or filter this "
-                    "category; otherwise pass coefficients= from your own calibration "
-                    "(scripts/calibrate_qwen.py)."
-                ),
-                stacklevel=4,
-            )
-
+    # The uncalibrated-checkpoint warning is apply_teacache's (the same check runs for every variant).
     return install_proxy_patch(
         flux,
         make_proxy=ProxyQwenTransformer,

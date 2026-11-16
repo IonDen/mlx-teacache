@@ -2,9 +2,10 @@
 
 import pytest
 
-from mlx_teacache import TeaCacheNoBenefitWarning, apply_teacache
+from mlx_teacache import apply_teacache
 from mlx_teacache.variants import _REGISTRY
 from tests._variant_fakes import fake_for_variant
+from tests.conftest import expect_distilled_warning
 
 pytestmark = pytest.mark.mflux
 
@@ -13,10 +14,7 @@ pytestmark = pytest.mark.mflux
 def test_provenance_default_thresh_equals_registry_default(variant_id: str) -> None:
     """Bug caught: Provenance.default_thresh None for dev/schnell/krea; literal 0.17 drifting from DEFAULT_THRESH."""
     fake = fake_for_variant(variant_id)
-    if _REGISTRY[variant_id]["default_thresh"] is None:
-        with pytest.warns(TeaCacheNoBenefitWarning):
-            handle = apply_teacache(fake)
-    else:
+    with expect_distilled_warning(variant_id):
         handle = apply_teacache(fake)
     try:
         assert handle.variant_id == variant_id
@@ -43,10 +41,7 @@ def test_provenance_default_thresh_equals_registry_default(variant_id: str) -> N
 def test_provenance_default_thresh_literal_values(variant_id: str, expected: float | None) -> None:
     """Bug caught: registry and provenance agree on a wrong value (both edited, or both None)."""
     fake = fake_for_variant(variant_id)
-    if expected is None:
-        with pytest.warns(TeaCacheNoBenefitWarning):
-            handle = apply_teacache(fake)
-    else:
+    with expect_distilled_warning(variant_id):
         handle = apply_teacache(fake)
     try:
         assert handle.provenance.default_thresh == expected

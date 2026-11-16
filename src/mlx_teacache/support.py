@@ -7,7 +7,7 @@ loaded model because both run each variant's detect.matches_config."""
 from dataclasses import dataclass
 
 from mlx_teacache.errors import TeaCacheValueError
-from mlx_teacache.variants import _REGISTRY
+from mlx_teacache.variants import _REGISTRY, checkpoint_is_calibrated
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -16,17 +16,21 @@ class VariantInfo:
 
     variant_id: the id apply_teacache reports as handle.variant_id.
     display_name: a readable model name.
-    default_thresh: the per-variant default rel_l1_thresh, or None for the distilled
-        few-step models where the gate skips nothing (apply_teacache falls back to 0.20 and warns).
+    default_thresh: the per-variant default rel_l1_thresh. None on FLUX.2 Klein 4B and 9B, the
+        distilled few-step models where the gate skips nothing (apply_teacache falls back to 0.20
+        and warns that TeaCache cannot help them); FLUX.1 schnell reports 0.20 and also warns that
+        TeaCache cannot help it.
     model_names: the mflux model aliases this variant is detected by. mflux accepts more
         aliases for some models (for example klein-base-4b); they resolve to the same config.
     calibrated: whether the config names the checkpoint the variant's coefficients were fitted
-        on or declares it as its base model. Only the two Qwen-Image variants check this; every
-        other match is True. mflux records the base model in every config it resolves (a local
-        directory, a mirror, a finetune loaded under an alias), so calibrated is True for all of
-        them: it cannot tell a finetune or a mirror from the checkpoint itself. Only a config
-        that names neither the checkpoint nor its base reports False; apply_teacache still
-        patches such a model and warns, unless the caller passes `coefficients=`. On mflux 0.19
+        on or declares it as its base model (repo ids compared case-insensitively; a config with
+        no model_name counts as calibrated). Every variant checks this, with the same rule
+        apply_teacache uses for its TeaCacheUncalibratedCheckpointWarning. mflux records the base
+        model in every config it resolves (a local directory, a mirror, a finetune loaded under an
+        alias), so calibrated is True for all of them: it cannot tell a finetune or a mirror from
+        the checkpoint itself. Only a config that names neither the checkpoint nor its base
+        reports False; apply_teacache still patches such a model and warns, unless the caller
+        passes `coefficients=`. On mflux 0.19
         and later custom or mirrored Qwen weights resolve against the Qwen-Image-2512 config,
         so they match the qwen-image-2512 variant whatever weights they hold.
     """
@@ -52,17 +56,11 @@ def match_variant(model_config: object, pipeline_class: type) -> VariantInfo | N
         )
     for variant_id, entry in _REGISTRY.items():
         if entry["matches_config"](model_config, pipeline_class):
-            checkpoint_check = entry["is_calibrated_checkpoint"]
-            calibrated = (
-                True
-                if checkpoint_check is None
-                else bool(checkpoint_check(model_config, str(entry["META"]["hf_model_id"])))
-            )
             return VariantInfo(
                 variant_id=variant_id,
                 display_name=str(entry["META"]["display_name"]),
                 default_thresh=entry["default_thresh"],
                 model_names=entry["model_names"],
-                calibrated=calibrated,
+                calibrated=checkpoint_is_calibrated(entry, model_config),
             )
     return None

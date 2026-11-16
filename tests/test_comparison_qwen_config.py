@@ -29,13 +29,17 @@ def test_original_config_counts_as_calibrated_and_2512_does_not() -> None:
 
 
 def test_apply_on_the_original_config_emits_no_uncalibrated_warning() -> None:
-    """Bug: the page's Qwen row would carry TeaCacheUncalibratedCheckpointWarning (filterwarnings=error)."""
-    from mlx_teacache.variants.qwen_image.integration import apply
+    """Bug: apply_teacache warns TeaCacheUncalibratedCheckpointWarning on the original Qwen-Image config (the
+    check stops matching the calibrated id, or routes it to the 2512 variant), so the page's Qwen row carries
+    it (filterwarnings=error turns it into a failure here)."""
+    from mlx_teacache import apply_teacache
     from tests.test_qwen_checkpoint_warning import _fake_flux
 
     config = models.qwen_original_config()
     flux = _fake_flux(config.model_name, config.base_model)
-    apply(flux, rel_l1_thresh=0.25).restore()
+    handle = apply_teacache(flux, rel_l1_thresh=0.25)
+    handle.restore()
+    assert handle.variant_id == "qwen-image"
 
 
 def test_overridden_encoder_methods_take_the_keys_the_harness_uses() -> None:

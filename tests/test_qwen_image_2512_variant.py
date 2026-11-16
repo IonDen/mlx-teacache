@@ -191,7 +191,8 @@ def test_caller_coefficients_on_2512_get_user_provenance_and_no_clamp() -> None:
     """Bug: the 2512 range clamps a caller's own polynomial, or a caller fit is labelled with the built-in
     provenance."""
     flux = fake_for_variant("qwen-image-2512")
-    handle = apply_teacache(flux, coefficients=(0.5, 1.5, 2.5, 3.5, 0.0))
+    with pytest.warns(FutureWarning, match=r"rel_l1_thresh=0\.20"):
+        handle = apply_teacache(flux, coefficients=(0.5, 1.5, 2.5, 3.5, 0.0))
     try:
         assert handle.provenance.source == "user"
         assert _gate_handle(flux).calibrated_range is None

@@ -115,3 +115,36 @@ def test_qwen_image_alias_picks_the_variant_of_the_checkpoint_mflux_resolves() -
     expected = "qwen-image-2512" if _qwen_alias_is_2512() else "qwen-image"
     info = match_variant(_config("qwen-image"), _pipeline("qwen"))
     assert info is not None and info.variant_id == expected
+
+
+class _LocalPipeline:
+    """A pipeline class defined outside mflux: match_variant decides from the config's aliases alone."""
+
+
+def _configs_mflux_resolves() -> list[tuple[str, object]]:
+    """Every root config of the installed mflux, and a finetune loaded under each alias a variant lists (mflux copies
+    the alias's config and records its model_name as base_model)."""
+    from mflux.models.common.config.model_config import AVAILABLE_MODELS, ModelConfig
+
+    roots = [(f"root:{key}", config) for key, config in AVAILABLE_MODELS.items()]
+    finetunes = [
+        (f"finetune:{alias}", ModelConfig.from_name(f"someone/finetune-{alias}", base_model=alias))
+        for entry in _REGISTRY.values()
+        for alias in entry["model_names"]
+    ]
+    return roots + finetunes
+
+
+def test_no_config_mflux_resolves_is_uncalibrated() -> None:
+    """Bug: the shared checkpoint check ignores base_model (or compares repo ids case-sensitively), so apply_teacache
+    starts warning on every FLUX.1, Klein or Z-Image finetune the mflux CLI loads under an alias."""
+    matched = []
+    for label, config in _configs_mflux_resolves():
+        info = match_variant(config, _LocalPipeline)
+        if info is None:
+            continue
+        matched.append(info.variant_id)
+        assert info.calibrated is True, (label, info.variant_id, config.model_name, config.base_model)  # type: ignore[attr-defined]
+    # On mflux 0.19+ every Qwen-Image alias resolves to the 2512 checkpoint, so no resolved config reaches qwen-image.
+    expected = set(_REGISTRY) - {"qwen-image"} if _qwen_alias_is_2512() else set(_REGISTRY)
+    assert set(matched) >= expected

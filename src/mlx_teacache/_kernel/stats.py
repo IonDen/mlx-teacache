@@ -4,7 +4,7 @@
 Public stats with a private staging buffer.
 
 Public counters (computed_count, forced_count, skipped_count, numerical_miss_count,
-cfg_fallback_steps, generations, last_generation) reflect only committed
+generations, last_generation) reflect only committed
 generations. record() updates a staging buffer; finalize_last_generation()
 commits + snapshots; discard_current_generation() zeroes the staging buffer
 (called by the generate_image try/finally when a run does not complete naturally).
@@ -15,10 +15,14 @@ _Staging.cfg_was_active (bool) is set directly by the predict closure on first
 CFG branch entry; the lifecycle reads it at after_loop time to populate
 GenerationStats.cfg_was_active.
 
-cfg_fallback_steps is deprecated and always 0 (the cfg-fallback decision kind
-no longer exists). Use GenerationStats.cfg_was_active instead. Slated for
-removal in v1.0."""
+TeaCacheStats.cfg_fallback_steps (the attribute and the constructor argument)
+is deprecated and removed in 1.0: nothing records a cfg-fallback step any more,
+so it stays 0. Use GenerationStats.cfg_was_active instead. Reading or writing it
+warns. TeaCacheStats.total_steps_seen is deprecated and removed in 1.0 as well;
+use total_active_steps, which gives the same number. Internal bookkeeping uses
+the private _cfg_fallback_steps field and never warns."""
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -68,6 +72,16 @@ class _Staging:
         self.decisions.clear()
 
 
+_CFG_FALLBACK_STEPS_MESSAGE = (
+    "TeaCacheStats.cfg_fallback_steps is deprecated and will be removed in 1.0; no step is counted "
+    "there any more. Use GenerationStats.cfg_was_active instead."
+)
+_TOTAL_STEPS_SEEN_MESSAGE = (
+    "TeaCacheStats.total_steps_seen is deprecated and will be removed in 1.0. "
+    "Use TeaCacheStats.total_active_steps instead."
+)
+
+
 @dataclass
 class TeaCacheStats:
     """Public aggregate counters (committed). Failed/interrupted generations
@@ -79,11 +93,52 @@ class TeaCacheStats:
     forced_count: int = 0
     skipped_count: int = 0
     numerical_miss_count: int = 0
-    # Deprecated; always 0. Use GenerationStats.cfg_was_active. Slated for removal in v1.0.
-    cfg_fallback_steps: int = 0
+    # Storage behind the deprecated cfg_fallback_steps property; removed in 1.0.
+    _cfg_fallback_steps: int = field(default=0, repr=False)
     last_generation: GenerationStats | None = None
     _staging: _Staging = field(default_factory=_Staging)
     _frozen: bool = False
+
+    # Written by hand so the deprecated cfg_fallback_steps argument keeps its 0.15 position and
+    # warns only when passed. The dataclass decorator keeps an __init__ defined in the class body,
+    # and dataclasses.replace passes _cfg_fallback_steps, so copies keep the count without a warning.
+    def __init__(
+        self,
+        generations: int = 0,
+        computed_count: int = 0,
+        forced_count: int = 0,
+        skipped_count: int = 0,
+        numerical_miss_count: int = 0,
+        cfg_fallback_steps: int | None = None,
+        last_generation: GenerationStats | None = None,
+        _staging: _Staging | None = None,
+        _frozen: bool = False,
+        *,
+        _cfg_fallback_steps: int = 0,
+    ) -> None:
+        if cfg_fallback_steps is not None:
+            warnings.warn(_CFG_FALLBACK_STEPS_MESSAGE, DeprecationWarning, stacklevel=2)
+            _cfg_fallback_steps = cfg_fallback_steps
+        self.generations = generations
+        self.computed_count = computed_count
+        self.forced_count = forced_count
+        self.skipped_count = skipped_count
+        self.numerical_miss_count = numerical_miss_count
+        self._cfg_fallback_steps = _cfg_fallback_steps
+        self.last_generation = last_generation
+        self._staging = _Staging() if _staging is None else _staging
+        self._frozen = _frozen
+
+    @property
+    def cfg_fallback_steps(self) -> int:
+        """Deprecated, removed in 1.0; no step is counted here. Use GenerationStats.cfg_was_active."""
+        warnings.warn(_CFG_FALLBACK_STEPS_MESSAGE, DeprecationWarning, stacklevel=2)
+        return self._cfg_fallback_steps
+
+    @cfg_fallback_steps.setter
+    def cfg_fallback_steps(self, value: int) -> None:
+        warnings.warn(_CFG_FALLBACK_STEPS_MESSAGE, DeprecationWarning, stacklevel=2)
+        self._cfg_fallback_steps = value
 
     @property
     def total_active_steps(self) -> int:
@@ -93,8 +148,9 @@ class TeaCacheStats:
 
     @property
     def total_steps_seen(self) -> int:
-        """All committed steps across all generations, including CFG fallbacks."""
-        return self.total_active_steps + self.cfg_fallback_steps
+        """Deprecated, removed in 1.0. Use total_active_steps, which gives the same number."""
+        warnings.warn(_TOTAL_STEPS_SEEN_MESSAGE, DeprecationWarning, stacklevel=2)
+        return self.total_active_steps + self._cfg_fallback_steps
 
     @property
     def speedup_estimate(self) -> float:
@@ -154,7 +210,7 @@ class TeaCacheStats:
         self.forced_count += st.forced
         self.skipped_count += st.skipped
         self.numerical_miss_count += st.numerical_miss
-        self.cfg_fallback_steps += st.cfg_fallback
+        self._cfg_fallback_steps += st.cfg_fallback
         self.last_generation = GenerationStats(
             num_steps=num_inference_steps,
             cfg_was_active=cfg_was_active,

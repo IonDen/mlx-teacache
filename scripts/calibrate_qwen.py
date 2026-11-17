@@ -91,7 +91,7 @@ from _mlx_watchdog import WATCHDOG_EXIT_CODE
 from _qwen_config import QWEN_2512, QWEN_ORIGINAL, qwen_config
 
 from mlx_teacache._kernel.gate import mean_abs_rel_l1  # reuse the RUNTIME signal fn
-from mlx_teacache.variants.qwen_image.integration import (
+from mlx_teacache.integrations.mflux.forward_qwen import (
     _Prelude,
     _qwen_prelude,
     _qwen_run_body,

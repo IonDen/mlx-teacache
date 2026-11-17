@@ -74,8 +74,12 @@ def test_reset_signature_takes_num_steps():
 
 
 def test_shim_re_exports_state_identity():
-    """Old import path still works."""
+    """Old import path still works, with a deprecation warning."""
+    import pytest
+
     from mlx_teacache._kernel.cache import TeaCacheState as KernelState
-    from mlx_teacache.cache import TeaCacheState as LegacyState
+
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.cache import TeaCacheState as LegacyState
 
     assert LegacyState is KernelState

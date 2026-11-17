@@ -1,8 +1,9 @@
 """Canonical home for the Provenance dataclass and coefficient utilities.
 
 The per-variant coefficient tuples live in each variant's config.py.
-src/mlx_teacache/coefficients.py re-exports Provenance and validate_custom
-from here.
+The deprecated mlx_teacache.coefficients module still resolves Provenance and
+validate_custom from here, with a DeprecationWarning; the package root exports
+Provenance.
 """
 
 import math

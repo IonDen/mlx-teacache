@@ -15,7 +15,8 @@ import mlx.core as mx
 import pytest
 
 from mlx_teacache.errors import InvalidStepWindowError
-from mlx_teacache.variants.flux1_dev.integration import _InternalHandle, flux1_forward_with_gate
+from mlx_teacache.integrations._session import InternalHandle
+from mlx_teacache.integrations.mflux.forward_flux1 import flux1_forward_with_gate
 
 
 class _SentinelInner:
@@ -30,8 +31,8 @@ class _SentinelInner:
         )
 
 
-def _handle() -> _InternalHandle:
-    return _InternalHandle(
+def _handle() -> InternalHandle:
+    return InternalHandle(
         rel_l1_thresh=0.25,
         coefficients=(1.0, 0.0, 0.0, 0.0, 0.0),
         skip_first_n_steps=1,

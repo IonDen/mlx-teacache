@@ -50,6 +50,7 @@ from mlx_teacache import (
     apply_teacache,
 )
 from mlx_teacache.errors import InvalidStepWindowError, TeaCacheDisabledWarning
+from tests.conftest import expect_distilled_warning
 
 pytestmark = pytest.mark.parity
 
@@ -142,6 +143,7 @@ def _paired_parity(
     flux: Any,
     gen_kwargs: dict[str, Any],
     *,
+    variant_id: str,
     rel_l1_thresh: float = 0.0,
     **apply_kwargs: Any,
 ) -> tuple[mx.array, mx.array, mx.array, int]:
@@ -155,7 +157,8 @@ def _paired_parity(
         # the filterwarnings=error regime fully live inside the block.
         if rel_l1_thresh == 0.0:
             _w.simplefilter("ignore", TeaCacheDisabledWarning)
-        ctx = apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs)
+        with expect_distilled_warning(variant_id, coefficients=apply_kwargs.get("coefficients")):
+            ctx = apply_teacache(flux, rel_l1_thresh=rel_l1_thresh, **apply_kwargs)
     with ctx as h:
         wrapper = _capture(flux, **gen_kwargs)
         skipped = h.stats.skipped_count
@@ -200,7 +203,7 @@ def test_paired_parity_dev_pr_gate(flux1_dev: Any) -> None:
     apply_teacache.
     """
     kw = _gen_kwargs_dev(PR_TIME_PROMPT)
-    vb, w, va, skipped = _paired_parity(flux1_dev, kw)
+    vb, w, va, skipped = _paired_parity(flux1_dev, kw, variant_id="flux1-dev")
     assert mx.array_equal(vb, w), "wrapper at rel_l1_thresh=0 must match same-process vanilla math"
     assert mx.array_equal(vb, va), (
         "restore() left a trace; vanilla_after differs from vanilla_before "
@@ -235,7 +238,7 @@ def test_paired_parity_at_threshold_zero_dev(flux1_dev: Any, image_strength: flo
 def test_paired_parity_dev_full(flux1_dev: Any, prompt: str) -> None:
     """Nightly correctness gate. All 5 reference prompts."""
     kw = _gen_kwargs_dev(prompt)
-    vb, w, va, skipped = _paired_parity(flux1_dev, kw)
+    vb, w, va, skipped = _paired_parity(flux1_dev, kw, variant_id="flux1-dev")
     assert mx.array_equal(vb, w)
     assert mx.array_equal(vb, va)
     assert skipped == 0
@@ -265,7 +268,7 @@ def test_paired_parity_reverse_order_dev(flux1_dev: Any) -> None:
 def test_paired_parity_schnell_full(flux1_schnell: Any, prompt: str) -> None:
     """Nightly correctness gate for schnell (guidance=0.0 path)."""
     kw = _gen_kwargs_schnell(prompt)
-    vb, w, va, skipped = _paired_parity(flux1_schnell, kw)
+    vb, w, va, skipped = _paired_parity(flux1_schnell, kw, variant_id="flux1-schnell")
     assert mx.array_equal(vb, w)
     assert mx.array_equal(vb, va)
     assert skipped == 0
@@ -318,9 +321,9 @@ def test_default_threshold_skips_and_stays_close_to_vanilla(flux1_dev: Any) -> N
 def test_failed_generation_retry_no_stale_cache(flux1_dev: Any) -> None:
     """A mid-loop crash must not leak state into a retry. Retry output
     must remain close to a same-process vanilla baseline."""
-    # v0.6.0: _flux1_run_body moved from integrations/mflux/forward.py to
-    # variants/flux1_dev/integration.py (verbatim port).
-    import mlx_teacache.variants.flux1_dev.integration as fwd
+    # The FLUX.1 forward looks _flux1_run_body up in its own module's globals, so the
+    # patch goes on that module (pinned weight-free in tests/test_forward_flux1.py).
+    import mlx_teacache.integrations.mflux.forward_flux1 as fwd
 
     orig = fwd._flux1_run_body
     call_count = [0]
@@ -353,15 +356,14 @@ def test_failed_generation_retry_no_stale_cache(flux1_dev: Any) -> None:
 
 def test_short_schedule_raises_invalid_step_window(flux1_schnell: Any) -> None:
     """skip_first=1 + skip_last=1 with num_steps=2 must raise at t==0."""
-    with (
-        apply_teacache(
+    with expect_distilled_warning("flux1-schnell"):
+        handle = apply_teacache(
             flux1_schnell,
             rel_l1_thresh=0.25,
             skip_first_n_steps=1,
             skip_last_n_steps=1,
-        ),
-        pytest.raises(InvalidStepWindowError),
-    ):
+        )
+    with handle, pytest.raises(InvalidStepWindowError):
         flux1_schnell.generate_image(
             seed=42,
             prompt="test",

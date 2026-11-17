@@ -29,7 +29,7 @@ One property of the fit matters for users: its intercept is about 0.40, and the 
 | 0.60 | 16 | 2 | 0.866 | 2.47× |
 | 0.80 | 18 | 3 | 0.863 | 3.12× |
 
-The knee is sharp: 0.30 holds SSIM 0.99 while skipping 10 of the 26 active steps in a strict alternation, and 0.35 already drops under the 0.90 bar the FLUX.1 quality gate uses. Raising the threshold buys speed at a visible cost on this model, so 0.30 ships and the parity lane pins a 9–11 skip band with an SSIM floor of 0.95 at that default.
+No record of this sweep was committed. The knee is sharp: 0.30 holds SSIM 0.99 while skipping 10 of the 26 active steps in a strict alternation, and 0.35 already drops under the 0.90 bar the FLUX.1 quality gate uses. Raising the threshold buys speed at a visible cost on this model, so 0.30 ships and the parity lane pins a 9–11 skip band with an SSIM floor of 0.95 at that default.
 
 ## Benchmark
 
@@ -41,7 +41,9 @@ The knee is sharp: 0.30 holds SSIM 0.99 while skipping 10 of the 26 active steps
 | wrapper, no gate (`rel_l1_thresh=0.0`) | 121.4 / 127.1 / 119.5 | 121.4 s | 0 |
 | wrapper, default 0.30 | 77.2 / 79.6 / 66.5 | 77.2 s | 10 in every rep, longest streak 1 |
 
-**1.62× combined** against vanilla, of which **1.57×** is gating (no-gate 121.4 s → gated 77.2 s). The no-gate wrapper's 1.03× over vanilla is run-to-run noise: mflux does not `mx.compile` the FLUX.1 predict step, so there is no compiled path for the eager proxy to avoid. Every rep produced the same skip pattern (`CCCSCSCSCSCSCSCSCSCSCSCCCCCC`: the forced first step, the seed step, then a strict alternation until the trailing forced steps). Peak memory 11.1 GB in every condition; the report's load-time peak reads 0 because mflux materialises weights on first use, so the loop peak is the whole story here.
+The record names commit 040056a, notes uncommitted changes in the working tree without listing files, and has no MLX version field; MLX 0.31.2 per the lock file at 040056a (macOS entry). The date comes from the record's chunk timestamps. The run started 43 seconds before that commit was made, and the commit before the run still had FLUX.1-dev's coefficients and a 0.20 default, so this variant's own coefficients and 0.30 default were not committed when the run started. `scripts/` and `src/` are identical at 040056a and at e5bd1da, the commit that added the record, on the pull-request branch (public in [PR #35](https://github.com/IonDen/mlx-teacache/pull/35)). Measured on mflux 0.18.0; mflux 0.22.0 loads the bias of FLUX.1's last normalization layer again, which changes its images slightly, so the figure holds for mflux 0.18.0.
+
+**1.62× combined** against vanilla, of which **1.57×** is gating (no-gate 121.4 s → gated 77.2 s). The no-gate wrapper's 1.03× over vanilla is within the spread between runs: mflux does not `mx.compile` the FLUX.1 predict step, so there is no compiled path for the eager proxy to avoid. Ten skipped steps out of 28 can give at most about 1.56× (28/18). Each figure is above that limit. One of the three gated reps was much faster than the other two (66.5 s against 77.2 and 79.6 s), and this will be measured again. Every rep produced the same skip pattern (`CCCSCSCSCSCSCSCSCSCSCSCCCCCC`: the forced first step, the seed step, then a strict alternation until the trailing forced steps). Peak memory 11.1 GiB in every condition; the report's load-time peak reads 0 because mflux materialises weights on first use, so the loop peak is the whole story here.
 
 ## Reproduce
 

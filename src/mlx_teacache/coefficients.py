@@ -1,9 +1,24 @@
-"""Compatibility shim. Re-exports Provenance and validate_custom from _kernel.coefficients.
+"""Deprecated. Import Provenance from mlx_teacache instead; validate_custom has no public
+replacement. The module is removed in 2.0.
 
-The per-variant coefficient tuples live in
-src/mlx_teacache/variants/<name>/config.py.
+Every attribute access warns with a DeprecationWarning at the caller's line.
 """
 
-from mlx_teacache._kernel.coefficients import Provenance, validate_custom
+from typing import TYPE_CHECKING
+
+from mlx_teacache._deprecation import shim_getattr
+
+if TYPE_CHECKING:
+    from mlx_teacache._kernel.coefficients import Provenance, validate_custom
 
 __all__ = ["Provenance", "validate_custom"]
+
+_SOURCES = dict.fromkeys(__all__, "mlx_teacache._kernel.coefficients")
+
+
+def __getattr__(name: str) -> object:
+    return shim_getattr(__name__, name, _SOURCES)
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)

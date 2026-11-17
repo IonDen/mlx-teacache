@@ -55,7 +55,6 @@ META: dict[str, Any] = {
     "display_name": "Z-Image base",
     "hf_model_id": "Tongyi-MAI/Z-Image",
     "non_distilled": True,
-    "memory_cap_hint_gb": 22,
     "recipes": RECIPES,
     "license": LICENSE,
     "license_url": "https://huggingface.co/Tongyi-MAI/Z-Image",

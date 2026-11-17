@@ -11,6 +11,7 @@ _PUBLIC_DOCS = [
     "CHANGELOG.md",
     "COMPARISON.md",
     "ROADMAP.md",
+    "docs/stability.md",
     "docs/variants/flux2-klein-base-4b.md",
     "docs/variants/flux2-klein-base-9b.md",
     "docs/variants/z-image-base.md",

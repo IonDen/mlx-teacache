@@ -12,6 +12,10 @@ from typing import Literal
 import mlx.core as mx
 
 from mlx_teacache._kernel.cache import TeaCacheState
+
+# Re-exported: the revision lives in the mlx-free decision_rule module; existing imports from here keep working.
+from mlx_teacache._kernel.decision_rule import DECISION_RULE_HISTORY as DECISION_RULE_HISTORY
+from mlx_teacache._kernel.decision_rule import DECISION_RULE_REVISION as DECISION_RULE_REVISION
 from mlx_teacache.errors import TeaCacheValueError
 
 GateKind = Literal["computed", "forced", "skipped", "numerical-miss"]

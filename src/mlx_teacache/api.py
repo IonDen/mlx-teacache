@@ -11,7 +11,9 @@ import warnings
 from collections.abc import Sequence
 from typing import Any
 
+from mlx_teacache import _mflux_versions
 from mlx_teacache._kernel.coefficients import validate_custom
+from mlx_teacache._kernel.resolve import resolve_thresh
 from mlx_teacache._kernel.window import validate_step_count
 from mlx_teacache._mflux_versions import warn_if_untested_mflux
 from mlx_teacache.errors import (
@@ -19,22 +21,19 @@ from mlx_teacache.errors import (
     IncompatibleModelError,
     TeaCacheDisabledWarning,
     TeaCacheNoBenefitWarning,
+    TeaCacheUncalibratedCheckpointWarning,
     TeaCacheValueError,
 )
 from mlx_teacache.handle import TeaCacheHandle
-from mlx_teacache.variants import _REGISTRY
+from mlx_teacache.variants import _REGISTRY, checkpoint_is_calibrated
 
 
-def _release_cache_arrays(handle: Any) -> None:
+def _release_cache_arrays(handle: TeaCacheHandle) -> None:
     """Drop the cached arrays a torn-down handle would otherwise keep alive
-    through its finalizer closure (handle -> callback -> internal handle ->
-    state). Best-effort by construction: a variant without the chain is left
-    alone."""
-    cb = getattr(handle, "_callback_instance", None)
-    cache = getattr(getattr(getattr(cb, "_handle", None), "_state", None), "cache", None)
-    release = getattr(cache, "release_arrays", None)
-    if callable(release):
-        release()
+    through its session. A handle with no session patches nothing and holds
+    no arrays."""
+    if handle._session is not None:
+        handle._session.release_arrays()
 
 
 def _validate_thresh(value: object) -> float:
@@ -70,9 +69,9 @@ def apply_teacache(
       - flux2-klein-4b, flux2-klein-9b ... no per-variant default; fall back to
         0.20 (these distilled 4-8 step schedules skip 0 steps at any reasonable
         threshold — see the "When to use" section of the README).
-    When you pass your own `coefficients`, the FLUX.2, Z-Image and Qwen-Image variants use
-    0.20 unless you also pass `rel_l1_thresh`; the FLUX.1 variants keep their per-variant
-    default (0.30 for flux1-krea-dev).
+    When you pass your own `coefficients` without `rel_l1_thresh`, `flux1-krea-dev` uses
+    0.30 and every other variant 0.20, and a `FutureWarning` says so; mlx-teacache 1.0 will
+    require `rel_l1_thresh` with `coefficients`.
     Pass rel_l1_thresh=<float> to override. The resolved effective threshold is
     available afterwards as handle.rel_l1_thresh.
 
@@ -117,14 +116,46 @@ def apply_teacache(
             # The warning describes the *builtin* polynomial on a few-step
             # schedule; a caller supplying coefficients is experimenting on
             # purpose and must not be blocked under filterwarnings=error.
-            if entry["default_thresh"] is None and coefficients is None:
+            if entry["non_distilled"] is False and coefficients is None:
                 warnings.warn(
                     TeaCacheNoBenefitWarning(
                         f"variant {variant_id!r} runs a distilled few-step schedule where the "
-                        "polynomial gate does not engage; apply_teacache adds per-step gate "
-                        "overhead, and any wall-clock difference comes from bypassing mx.compile "
-                        "on Macs where mflux compiles the prediction step (not base or Pro M1/M2), "
-                        "not from step-skipping"
+                        "polynomial gate skips nothing; apply_teacache adds per-step overhead "
+                        "and gives no speedup from step-skipping"
+                    ),
+                    stacklevel=2,
+                )
+            # Raised before the integration loads, so a refusal under an error filter
+            # leaves the model unpatched and a retry with a threshold works.
+            if coefficients is not None and rel_l1_thresh is None:
+                resolved = resolve_thresh(
+                    caller=None,
+                    default=entry["default_thresh"],
+                    coefficients=coefficients,
+                    policy=entry["thresh_policy"],
+                )
+                warnings.warn(
+                    f"apply_teacache got coefficients without rel_l1_thresh, so variant {variant_id!r} uses "
+                    f"rel_l1_thresh={resolved:.2f}. A threshold is tuned for one polynomial; mlx-teacache 1.0 "
+                    "will raise an error here. Pass rel_l1_thresh together with your coefficients (the "
+                    "threshold-sweep scripts at https://github.com/IonDen/mlx-teacache/tree/main/scripts "
+                    "find one).",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+            # The built-in polynomial was fitted on one checkpoint (META["hf_model_id"]). A config that names
+            # another one without declaring it as its base gets that polynomial unverified, so say so; raised
+            # before the integration loads, like the warnings above.
+            model_config = getattr(flux, "model_config", None)
+            if coefficients is None and not checkpoint_is_calibrated(entry, model_config):
+                warnings.warn(
+                    TeaCacheUncalibratedCheckpointWarning(
+                        f"variant {variant_id!r} loaded {getattr(model_config, 'model_name', None)!r}, but its "
+                        f"coefficients were calibrated on {entry['hf_model_id']!r}; skip counts and image quality "
+                        "on this checkpoint are not verified. If this is a mirror of the calibrated checkpoint, "
+                        "load it with that base model declared, or silence it with warnings.filterwarnings("
+                        '"ignore", category=TeaCacheUncalibratedCheckpointWarning); otherwise pass '
+                        "coefficients= from your own calibration."
                     ),
                     stacklevel=2,
                 )
@@ -136,9 +167,13 @@ def apply_teacache(
                 skip_first_n_steps=skip_first_n_steps,
                 skip_last_n_steps=skip_last_n_steps,
             )
-            # Attach dispatcher-level metadata. TeaCacheHandle is a regular
-            # class, so dynamic attributes can be set without modifying handle.py.
-            handle.variant_id = variant_id  # type: ignore[attr-defined]
+            # Record dispatcher-level facts in the handle's private storage (the
+            # public properties are read-only or warn on write). The integration
+            # already recorded the coefficients it resolved.
+            handle._variant_id = variant_id
+            handle._skip_first_n_steps = skip_first_n_steps
+            handle._skip_last_n_steps = skip_last_n_steps
+            handle._mflux_version = _mflux_versions.installed_mflux_version()
 
             # Set the sentinel so AlreadyPatchedError fires on double-apply.
             # Clear it only after every teardown action succeeds, preventing a
@@ -149,7 +184,7 @@ def apply_teacache(
                 if getattr(_flux, "_teacache_handle", None) is _handle:
                     delattr(_flux, "_teacache_handle")
 
-            def _release_arrays(_handle: Any = handle) -> None:
+            def _release_arrays(_handle: TeaCacheHandle = handle) -> None:
                 _release_cache_arrays(_handle)
 
             handle._patch.on_restored.append(_release_arrays)

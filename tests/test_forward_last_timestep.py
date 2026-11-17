@@ -21,7 +21,7 @@ import pytest
 
 from mlx_teacache._kernel.cache import TeaCacheState
 from mlx_teacache._kernel.stats import TeaCacheStats
-from mlx_teacache.variants.flux2_klein_base_4b.integration import (
+from mlx_teacache.integrations.mflux.forward_flux2 import (
     flux2_cfg_forward_with_gate,
     flux2_forward_with_gate,
 )

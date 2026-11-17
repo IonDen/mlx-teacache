@@ -16,6 +16,7 @@ from mlx_teacache import (
 )
 from mlx_teacache.errors import TeaCacheDisabledWarning, TeaCacheValueError
 from tests._fakes import FaithfulCallbackRegistry
+from tests.conftest import expect_distilled_warning
 
 
 class _FakeTransformer(nn.Module):
@@ -156,7 +157,8 @@ def test_unsupported_model_raises_incompatible():
 def test_stats_initially_empty():
     flux = _make_fake_flux1()
     h = apply_teacache(flux)
-    assert h.stats.total_steps_seen == 0
+    with pytest.warns(DeprecationWarning, match="total_steps_seen"):
+        assert h.stats.total_steps_seen == 0
     assert h.stats.generations == 0
     assert h.stats.speedup_estimate == 1.0
     h.restore()
@@ -177,7 +179,7 @@ def test_apply_teacache_rejects_nonfinite_coefficients_at_call_time():
 
 def test_apply_teacache_coerces_list_coefficients_to_tuple():
     flux = _make_fake_flux1()
-    h = apply_teacache(flux, coefficients=[1.0, -0.5, 0.1, 0.0, 0.0])
+    h = apply_teacache(flux, coefficients=[1.0, -0.5, 0.1, 0.0, 0.0], rel_l1_thresh=0.2)
     try:
         assert h.coefficients == (1.0, -0.5, 0.1, 0.0, 0.0)
         assert isinstance(h.coefficients, tuple)
@@ -186,40 +188,29 @@ def test_apply_teacache_coerces_list_coefficients_to_tuple():
         h.restore()
 
 
-@pytest.mark.parametrize(
-    "alias,patch_module",
-    [
-        # dev calls wrap_generate_image via the module object (deliberately
-        # monkeypatchable) — patch the lifecycle module itself.
-        ("dev", "mlx_teacache.integrations.mflux.lifecycle"),
-        # schnell calls wrap_generate_image via its module-level imported name —
-        # patch the VARIANT module's copy; patching lifecycle would not
-        # intercept the call and the test would become an always-green no-op.
-        ("schnell", "mlx_teacache.variants.flux1_schnell.integration"),
-    ],
-)
-def test_apply_rollback_on_failure_flux1(alias, patch_module, monkeypatch):
+@pytest.mark.parametrize("alias", ["dev", "schnell"])
+def test_apply_rollback_on_failure_flux1(alias, monkeypatch):
     """Per audit medium #3: if wrap_generate_image raises mid-apply, the
     transactional guard must roll back fully — no leftover callback, no proxy
     transformer, no sentinel.
 
-    dev   → patches the lifecycle module (dev calls via the module object).
-    schnell → patches the variant module's imported-name binding.
+    Every variant calls wrap_generate_image through the lifecycle module (the
+    one seam), so patching that module intercepts the call for both aliases; a
+    variant that bound the name at import would not raise here.
     """
-    import importlib
+    from mlx_teacache.integrations.mflux import lifecycle
 
     flux = _make_fake_flux1(alias)
     before = list(flux.callbacks.before_loop)
     original_transformer = flux.transformer
-    target = importlib.import_module(patch_module)
     monkeypatch.setattr(
-        target,
+        lifecycle,
         "wrap_generate_image",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError), expect_distilled_warning(f"flux1-{alias}"):
         apply_teacache(flux)
-    # Pristine-state asserts — schnell is the RED signal (dangling state IS the bug):
+    # Pristine-state asserts (dangling state IS the bug):
     assert flux.callbacks.before_loop == before, "callback left registered"
     assert flux.transformer is original_transformer, "proxy transformer left installed"
     assert "_teacache_handle" not in vars(flux), "sentinel left behind"
@@ -239,7 +230,7 @@ def test_apply_rollback_on_register_failure_flux1(alias, monkeypatch):
         raise RuntimeError("register boom")
 
     monkeypatch.setattr(flux.callbacks, "register", _partially_register_then_boom)
-    with pytest.raises(RuntimeError, match="register boom"):
+    with pytest.raises(RuntimeError, match="register boom"), expect_distilled_warning(f"flux1-{alias}"):
         apply_teacache(flux)
     assert flux.transformer is original_transformer, "proxy transformer left installed"
     assert "_teacache_handle" not in vars(flux), "sentinel left behind"
@@ -335,7 +326,8 @@ def test_apply_teacache_user_coefficients_skip_per_variant_default():
     flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_4b())
     flux.freeze()
     custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
-    handle = apply_teacache(flux, coefficients=custom_coeffs)
+    with pytest.warns(FutureWarning, match=r"rel_l1_thresh=0\.20"):
+        handle = apply_teacache(flux, coefficients=custom_coeffs)
     try:
         assert handle.rel_l1_thresh == 0.20
         assert handle.provenance.source == "user"
@@ -402,11 +394,10 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
 
 @pytest.mark.parity
 @pytest.mark.parametrize(
-    "variant_id,patch_module,make_flux",
+    "variant_id,make_flux",
     [
         (
             "flux2-klein-4b",
-            "mlx_teacache.variants.flux2_klein_4b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -418,7 +409,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "flux2-klein-9b",
-            "mlx_teacache.variants.flux2_klein_9b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -430,7 +420,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "flux2-klein-base-4b",
-            "mlx_teacache.variants.flux2_klein_base_4b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -442,7 +431,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "flux2-klein-base-9b",
-            "mlx_teacache.variants.flux2_klein_base_9b.integration",
             lambda: __import__(
                 "mflux.models.flux2.variants.txt2img.flux2_klein", fromlist=["Flux2Klein"]
             ).Flux2Klein(
@@ -454,7 +442,6 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
         (
             "z-image-base",
-            "mlx_teacache.variants.z_image_base.integration",
             lambda: __import__("mflux.models.z_image.variants.z_image", fromlist=["ZImage"]).ZImage(
                 quantize=8,
                 model_config=__import__(
@@ -464,12 +451,13 @@ def test_invalid_skip_window_raises_under_cfg_klein_base_4b():
         ),
     ],
 )
-def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, make_flux, monkeypatch) -> None:
+def test_apply_rollback_on_failure_flux2(variant_id: str, make_flux, monkeypatch) -> None:
     """Per audit medium #3: if wrap_generate_image raises mid-apply on a FLUX.2/Z-Image
     variant, the transactional guard must restore pristine state — no dangling _predict,
     no leftover callback, no instance-level generate_image.
 
-    Each variant patches ITS OWN module's local wrap_generate_image binding.
+    Every variant calls wrap_generate_image through the lifecycle module (the one
+    seam), so the test patches that module.
 
     Distilled Kleins (flux2-klein-4b/9b) warn TeaCacheNoBenefitWarning at
     apply time, before load_integration()/wrap_generate_image ever run — under
@@ -478,16 +466,14 @@ def test_apply_rollback_on_failure_flux2(variant_id: str, patch_module: str, mak
     expect_distilled_warning inside the pytest.raises(RuntimeError) block
     (pytest.warns resets the filter to "always" for its scope, letting
     execution continue to the real failure)."""
-    import importlib
-
+    from mlx_teacache.integrations.mflux import lifecycle
     from tests.conftest import expect_distilled_warning
 
     flux = make_flux()
     flux.freeze()
     before_callback_count = len(flux.callbacks.before_loop)
-    target = importlib.import_module(patch_module)
     monkeypatch.setattr(
-        target,
+        lifecycle,
         "wrap_generate_image",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
@@ -582,7 +568,7 @@ def test_user_coefficients_provenance_all_variants(variant_id: str, make_flux) -
     flux.freeze()
     custom_coeffs = (1.0, -0.5, 0.1, 0.0, 0.0)
     with expect_distilled_warning(variant_id, coefficients=custom_coeffs):
-        handle = apply_teacache(flux, coefficients=custom_coeffs)
+        handle = apply_teacache(flux, coefficients=custom_coeffs, rel_l1_thresh=0.2)
     try:
         assert handle.variant_id == variant_id
         assert handle.provenance.source == "user"
@@ -635,7 +621,41 @@ def test_distilled_variant_does_not_warn_when_caller_supplies_coefficients(monke
     with warnings.catch_warnings():
         warnings.simplefilter("error", TeaCacheNoBenefitWarning)
         with pytest.raises(_StopAtIntegration):
-            apply_teacache(_fake_distilled_klein_4b(), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5))
+            apply_teacache(
+                _fake_distilled_klein_4b(), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5), rel_l1_thresh=0.2
+            )
+
+
+def test_schnell_warns_at_apply_with_builtin_coefficients(monkeypatch):
+    """Bug: the at-apply trigger reads `default_thresh is None`, and schnell's 0.20 default keeps it silent although
+    its distilled few-step schedule skips nothing."""
+    from mlx_teacache.errors import TeaCacheNoBenefitWarning
+    from mlx_teacache.variants import _REGISTRY
+
+    monkeypatch.setitem(_REGISTRY["flux1-schnell"], "load_integration", _raise_stop_at_integration)
+    with pytest.warns(TeaCacheNoBenefitWarning, match="distilled"), pytest.raises(_StopAtIntegration):
+        apply_teacache(_make_fake_flux1(alias="schnell"))
+
+
+def test_schnell_with_caller_coefficients_does_not_warn(monkeypatch):
+    """Bug: the schnell trigger ignores `coefficients`, so a caller calibrating their own polynomial on schnell
+    cannot apply under filterwarnings=error. rel_l1_thresh is passed so the threshold FutureWarning stays out."""
+    import warnings
+
+    from mlx_teacache.errors import TeaCacheNoBenefitWarning
+    from mlx_teacache.variants import _REGISTRY
+
+    monkeypatch.setitem(_REGISTRY["flux1-schnell"], "load_integration", _raise_stop_at_integration)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TeaCacheNoBenefitWarning)
+        with pytest.raises(_StopAtIntegration):
+            apply_teacache(
+                _make_fake_flux1(alias="schnell"), coefficients=(0.1, 0.2, 0.3, 0.4, 0.5), rel_l1_thresh=0.2
+            )
+
+
+def _raise_stop_at_integration():
+    raise _StopAtIntegration
 
 
 def test_restore_releases_cached_arrays_through_the_public_handle():
@@ -651,3 +671,20 @@ def test_restore_releases_cached_arrays_through_the_public_handle():
     handle.restore()
     assert state.cached_residual is None
     assert state.previous_mod_input is None
+
+
+def test_restore_releases_arrays_through_the_session_not_the_callback():
+    """bug caught: the release hook walks the callback chain and silently does nothing once that chain changes."""
+    import mlx.core as mx
+
+    flux = _make_fake_flux1("dev")
+    handle = apply_teacache(flux)
+    handle._callback_instance = None
+    cache = handle._session._state.cache
+    cache.previous_mod_input = mx.zeros((4,))
+    cache.cached_residual = mx.zeros((4,))
+    cache.cached_residual_neg = mx.zeros((4,))
+    handle.restore()
+    assert cache.previous_mod_input is None
+    assert cache.cached_residual is None
+    assert cache.cached_residual_neg is None

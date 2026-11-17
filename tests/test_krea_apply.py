@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from mlx_teacache.integrations.mflux.forward_flux1 import ProxyFlux1Transformer
 from mlx_teacache.variants import _REGISTRY
-from mlx_teacache.variants.flux1_dev.integration import ProxyFlux1Transformer
 from mlx_teacache.variants.flux1_krea_dev import config
 from mlx_teacache.variants.flux1_krea_dev.integration import apply
 from tests._fakes import FaithfulCallbackRegistry

@@ -221,7 +221,7 @@ def test_qwen_image_frees_the_transformer_after_gated_forward_steps() -> None:
     "module",
     [
         "mlx_teacache.variants.z_image_base.integration",
-        "mlx_teacache.variants.flux2_klein_base_4b.integration",
+        "mlx_teacache.integrations.mflux.forward_flux2",
     ],
 )
 def test_the_predict_factory_keeps_no_reference_to_the_transformer(module: str) -> None:

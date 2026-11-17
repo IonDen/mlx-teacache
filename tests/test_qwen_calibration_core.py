@@ -5,12 +5,10 @@ import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from mlx_teacache import apply_teacache
 from mlx_teacache._kernel.coefficients import Provenance
 from mlx_teacache.errors import TeaCacheUncalibratedCheckpointWarning
-from mlx_teacache.variants.qwen_image.integration import QwenCalibration, apply_qwen
+from mlx_teacache.integrations.mflux.forward_qwen import QwenCalibration, apply_qwen
 from tests._fakes import FaithfulCallbackRegistry
 from tests._variant_fakes import fake_for_variant
 
@@ -71,23 +69,10 @@ def _loaded(model_name: str) -> SimpleNamespace:
     )
 
 
-def test_the_uncalibrated_warning_names_the_calibrations_variant_and_checkpoint():
-    """Bug: the warning text keeps the hard-coded 'qwen-image' / Qwen-Image names for another variant."""
-    with pytest.warns(TeaCacheUncalibratedCheckpointWarning) as record:
-        apply_qwen(
-            _loaded("Qwen/Qwen-Image"), _calibration("Qwen/Qwen-Image-2512"), rel_l1_thresh=0.25
-        ).restore()
-    message = str(record[0].message)
-    assert "variant 'qwen-test'" in message
-    assert "'Qwen/Qwen-Image-2512'" in message
-
-
-def test_a_matching_checkpoint_is_silent_for_the_calibrations_own_id():
-    """Bug: the check still compares against the original variant's checkpoint, so a second variant warns
-    on its own checkpoint (filterwarnings = error turns any warning into a failure)."""
-    apply_qwen(
-        _loaded("Qwen/Qwen-Image-2512"), _calibration("Qwen/Qwen-Image-2512"), rel_l1_thresh=0.25
-    ).restore()
+def test_apply_qwen_leaves_the_checkpoint_check_to_apply_teacache():
+    """Bug: the Qwen-only check stays in apply_qwen after apply_teacache took it over for every variant, so a Qwen
+    model on another checkpoint warns twice (filterwarnings = error turns this one into a failure)."""
+    apply_qwen(_loaded("Qwen/Qwen-Image"), _calibration("Qwen/Qwen-Image-2512"), rel_l1_thresh=0.25).restore()
 
 
 def test_the_warning_points_at_the_caller_of_apply_teacache():

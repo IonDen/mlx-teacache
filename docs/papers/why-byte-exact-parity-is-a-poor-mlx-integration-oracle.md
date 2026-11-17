@@ -5,11 +5,32 @@ bit-exactness gate*
 
 > 📄 [Read on the website](https://ineshin.space/papers/why-byte-exact-parity-is-a-poor-mlx-integration-oracle/) — same paper, formatted for reading.
 
+## Update, 2026-11-13: what changed in this paper
+
+The [previous version](https://github.com/IonDen/mlx-teacache/blob/d2d46fb/docs/papers/why-byte-exact-parity-is-a-poor-mlx-integration-oracle.md)
+said the FLUX.2 threshold-zero result came from an M1 Max, where mflux runs its prediction step
+without compiling it, and concluded that compiled-versus-eager execution could not explain it.
+That premise was wrong. Mflux compiles its prediction step on M1 Max, as the repository's
+[chip table](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/m3-plus-tradeoff.md) and
+its FLUX.2 parity test both say. For that run, compiled-versus-eager execution is one candidate
+cause alongside the re-walked forward pass, and no published control separates them. Section 4
+and the claims table now say this.
+
+The May 2026 incident is now described without figures: its failure counts, cosine and
+absolute-difference ranges and digest came from runs whose logs were not published. The paper
+also drops three things: the machine and library versions it gave for those runs, which were not
+recorded; the FLUX.2 cosine figure and a parity-test timing ratio, which rest on code comments;
+and the overhead claim quoted from another project's README. It now claims the bit-exact restore control for FLUX.2 only, where the
+test file records it. The Diffusers link points at Diffusers v0.43.0, and survey findings are
+dated to July 2026. The argument is unchanged.
+
+---
+
 Byte-exact fixtures looked like the safest way to test `mlx-teacache`. They were not.
 One day before the library's first release in May 2026, its threshold-zero wrapper failed against
-stored vanilla [mflux](https://github.com/filipstrand/mflux) output on **5 of 5** FLUX.1-dev
-prompts. The same test passed on 5 of 5 FLUX.1-schnell prompts. Yet wrapper and vanilla matched
-at all 25 denoising steps when compared inside one Python process.
+stored vanilla [mflux](https://github.com/filipstrand/mflux) output on every FLUX.1-dev prompt in
+the fixture set. The same test passed on every FLUX.1-schnell prompt. Yet wrapper and vanilla
+matched at every denoising step when compared inside one Python process.
 
 That result supported the wrapper's math and exposed a bad oracle. The stored fixture captured the
 script as well as the output. This paper explains the failure and separates four jobs: artifact
@@ -19,11 +40,17 @@ framework's numerical path on a lazy, GPU-dispatched runtime.
 
 ## Evidence scope
 
-- The May 2026 divergence measurements are author-reported results from 14 and 15 May. The raw
-  logs are not public, and nothing was rerun for this paper.
+- The May 2026 incident results are author-reported, from 14 and 15 May. The logs of those runs
+  were not published, so this paper describes what they showed and quotes no figures from them.
+  Nothing was rerun for this paper.
 - Present-state claims about the test suite were checked against the public repository at v0.9.2.
-- The incident ran on an M1 Max with 32 GB unified memory, using mflux 0.17.5, FLUX.1 at 4-bit
-  quantization, 512×512 output, 25 steps, and fixed prompts and seeds.
+  The two parity test files at that tag open with docstring text that later releases corrected
+  (an `allclose` gate for FLUX.2, a statement that MLX is deterministic for FLUX.1); the
+  assertions and the gate comment cited here are unchanged at v0.17.0.
+- The configuration under test is the one in the published
+  [FLUX.1 parity test](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/tests/test_parity_flux1.py):
+  FLUX.1 at 4-bit quantization, 512×512 output, 25 steps, seed 42, and a fixed set of prompts. The
+  machine and the MLX and mflux versions of the incident runs were not recorded with them.
 - MLX source citations are pinned to the commit inspected during the investigation:
   [`046217b`](https://github.com/ml-explore/mlx/tree/046217bcae7347aa814665f39a8f0e404029ddb0).
 
@@ -42,11 +69,10 @@ the field used for variant detection. The callback registry exposed methods wher
 expected lists. A normalization layer also received an invalid keyword argument. All three were
 fixed before release, so exact comparisons were useful during debugging.
 
-It made a poor shipped oracle. After the real bugs were fixed, the dev-variant divergence remained.
-Across five prompts, cosine similarity between the wrapper's final latent and the committed
-fixture ranged from **0.105 to 0.256**. Maximum absolute differences ranged from **5.31 to 5.82**
-on fp32 latents. A gate loose enough to accept a difference near 5.8 would no longer constrain
-useful similarity.
+It made a poor shipped oracle. After the real bugs were fixed, the dev-variant divergence remained
+on every prompt. The wrapper's final latents and the committed fixtures were far apart: by cosine
+similarity they were close to uncorrelated, with large differences in individual elements. A gate
+loose enough to accept differences that size would no longer constrain useful similarity.
 
 The schnell fixtures still matched byte-for-byte. That inconsistency made the test more dangerous:
 it could pass long enough to ship, then fail after an unrelated change.
@@ -59,11 +85,11 @@ the decisive author-reported rows from 14 May 2026:
 | Setup (same model, prompt, seed, config) | Final latent digest |
 |---|---|
 | Original fixture-generation script (vanilla mflux, one after-loop callback) | `45471c34…` (the fixture) |
-| Same script re-run days later | `45471c34…` (reproducible) |
-| Wrapper at `rel_l1_thresh=0` | `0db096b2…` |
-| Wrapper, forced skips vs. no skips at threshold 0 | both `0db096b2…` |
-| **Vanilla mflux, no wrapper, callback class also defining an in-loop method** | `0db096b2…` |
-| Vanilla vs. wrapper, same process, per-step comparison, all 25 steps | bit-exact |
+| Same script re-run later | the fixture's digest (reproducible) |
+| Wrapper at `rel_l1_thresh=0` | a second digest, different from the fixture's |
+| Wrapper, forced skips vs. no skips at threshold 0 | both the second digest |
+| **Vanilla mflux, no wrapper, callback class also defining an in-loop method** | the second digest |
+| Vanilla vs. wrapper, same process, per-step comparison, every step | bit-exact |
 
 The fifth row matters most. Vanilla mflux, with no TeaCache code on the model at all,
 reproduced the *wrapper's* bytes once the registered callback object's class shape changed. This
@@ -101,7 +127,7 @@ claim. The official material documents several relevant building blocks:
   [random-number docs](https://ml-explore.github.io/mlx/build/html/python/random.html) give
   deterministic keyed sampling; they promise nothing about kernel reduction order.
 
-There is no MLX analogue of
+As of July 2026, MLX had no analogue of
 [`torch.use_deterministic_algorithms()`](https://docs.pytorch.org/docs/stable/notes/randomness.html).
 PyTorch ships such a switch. Its documentation still warns that reproducibility is not guaranteed
 across releases, commits, or platforms. It also warns that identical seeds do not guarantee the
@@ -135,7 +161,7 @@ was concrete enough to act on. The project shipped a threshold-zero fast path th
 of those tensors. The result falsified donation as the dominant cause: divergence against the
 committed fixtures did not shrink at all. The fast path stayed because it removes unused work.
 
-The current
+At v0.9.2,
 [`_kernel/gate.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/src/mlx_teacache/_kernel/gate.py)
 still short-circuits when `rel_l1_thresh <= 0`, but the original causal account did not survive
 its test. Buffer donation remains a
@@ -180,7 +206,7 @@ control catches restore leakage (a callback, a proxy, a sentinel left behind).
 
 A reverse-order
 variant (wrapper first, then vanilla) checks whether running vanilla first warms the process into
-a favorable state. Each paired case takes roughly 3× one generation. One prompt is the designated
+a favorable state. Each paired case takes several times a single generation. One prompt is the designated
 fast parity case, and the five-prompt sweep carries a slow marker. Because the real weights require
 gated access and credentials, the repository runs the
 parity job manually as release-quality validation rather than on every pull request.
@@ -195,27 +221,39 @@ body and tail. That re-walk measured bit-exact against vanilla within one proces
 therefore keep the `mx.array_equal` oracle above.
 
 FLUX.2 and Z-Image replace mflux's predict function with an eager closure so the gate can run
-between body and tail. Mflux compiles the vanilla predict function on most hardware, but skips
-compilation on base and Pro M1/M2 chips. The source-reported FLUX.2 result came from an M1 Max,
-where mflux skips compilation. Compiled-versus-eager execution therefore cannot explain that
-measurement. Only the changed forward walk is common to both hardware paths.
+between body and tail. Mflux compiles the vanilla predict function on most Apple Silicon and runs
+it eagerly only on base and Pro M1/M2 chips
+([chip table](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/m3-plus-tradeoff.md)).
+The FLUX.2 measurement came from an M1 Max, where the vanilla path is compiled. That comparison
+therefore changed two things at once: compiled versus eager execution, and the re-walked forward
+pass. The repository's notes attribute the FLUX.2 difference to compiled-versus-eager dispatch
+([`tests/test_parity_flux2.py` at v0.17.0](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/tests/test_parity_flux2.py)).
+For Z-Image, which uses the same replacement, the
+[variant page](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/variants/z-image-base.md)
+states that a threshold-zero run is bit-identical to plain mflux when mflux's prediction step is
+on its eager path; the page gives no results file for that run. No such control is published for
+FLUX.2, so for that run the two candidates stay unseparated.
 
 Qwen-Image does not use compilation. Mflux calls its transformer directly twice per step, while
 the integration installs an eager proxy that re-walks `QwenTransformer.__call__` in stages. Its
 threshold-zero test is not byte-exact. A separate first-step self-check measures cosine ≥ 0.999
 between the re-walk and the unwrapped transformer.
 
-The resulting oracles reflect this evidence. FLUX.2 recorded ULP-level per-step divergence and
-about 0.99 full-generation cosine, so its gate is cosine ≥ 0.97
+The resulting oracles reflect this evidence. For FLUX.2, the gate comment in the test file
+records a measurement of 15 May 2026 on an M1 Max (FLUX.2 Klein 4B, 8 steps, the threshold-zero
+wrapper against same-process vanilla). It describes per-operation dispatch noise at the ULP level
+that compounds over the eight steps into element differences too large for an element-wise
+tolerance, while the final latents as a whole stay closely aligned by cosine similarity. The gate
+is cosine ≥ 0.97, set just below that measurement
 ([`tests/test_parity_flux2.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/tests/test_parity_flux2.py)).
 Qwen-Image and Z-Image use cosine ≥ 0.99 threshold-zero gates. Their published basis is a
 first-step ≥ 0.999 faithful-port check, not a multi-prompt full-generation distribution
 ([Qwen-Image](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/docs/variants/qwen-image.md),
 [Z-Image](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/docs/variants/z-image-base.md)).
 
-The `vanilla_before` / `vanilla_after` restore control remains bit-exact across these variants.
-Both vanilla runs use the same untouched mflux path in one process. Each comparison now uses the
-strongest oracle that its boundary supports.
+For FLUX.2, the test file records that the `vanilla_before` / `vanilla_after` restore control
+stays bit-exact: both vanilla runs go through the same compiled mflux path in one process. Each
+comparison now uses the oracle its boundary can support.
 
 ### Is intentionally approximate output acceptable?
 
@@ -236,12 +274,13 @@ the procedure the project aims to apply to each MLX integration:
    prompts on the target hardware. For image models, also record SSIM after decode.
 2. **Check that a separation exists.** A tolerance is only an oracle if measured noise and the
    smallest bug worth catching live on opposite sides of it. The May incident is the negative
-   example: passing the fixture comparison would have needed an absolute tolerance above 5.8.
+   example: passing the fixture comparison would have needed an absolute tolerance as large as the
+   differences themselves.
    Such a gate would no longer separate numerical drift from many meaningful failures, so the
    correct move was to change the comparison, not the constant.
 3. **Set the gate just below the measured floor**, leaving margin only for known variance
-   sources. The FLUX.2 cosine gate is 0.97 against a measured full-generation result of about
-   0.99. Qwen-Image and Z-Image expose the limit of the current record: their 0.99 gates are
+   sources. The FLUX.2 cosine gate of 0.97 sits just below the full-generation result that its
+   test file's gate comment records. Qwen-Image and Z-Image expose the limit of the current record: their 0.99 gates are
    supported by a ≥ 0.999 first-step faithful-port check, not by a published multi-prompt
    full-generation distribution. Those gates are useful regression guards, but they should remain
    provisional and be tightened or revised when that distribution is recorded.
@@ -255,45 +294,46 @@ catch the failures it was meant to catch.
 ## 6. How other caching projects test correctness
 
 The project surveyed how other diffusion-caching layers validate correctness (survey of May 2026,
-re-checked against the public repositories at drafting time):
+re-checked against the public repositories in July 2026):
 
-- [ali-vilab/TeaCache](https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py),
-  the reference implementation, patches `FluxTransformer2DModel.forward` at class level. It ships
-  no parity tests; validation is visual side-by-side.
+- [ali-vilab/TeaCache](https://github.com/ali-vilab/TeaCache/blob/7c10efc4702c6b619f47805f7abe4a7a08085aa0/TeaCache4FLUX/teacache_flux.py),
+  the reference implementation, patches `FluxTransformer2DModel.forward` at class level. As of
+  July 2026 it shipped no parity tests; validation was visual side-by-side.
 - [ComfyUI-TeaCache](https://github.com/welltop-cn/ComfyUI-TeaCache) integrates through ComfyUI's
   patch nodes; the May 2026 survey found no pytest-style correctness suite.
-- Hugging Face Diffusers includes a stronger automated check. Its
-  [`FirstBlockCacheTesterMixin`](https://github.com/huggingface/diffusers/blob/main/tests/pipelines/test_pipelines_common.py)
-  runs a four-step dummy pipeline on CPU. It uses `np.allclose` with a default `atol=0.1` while
-  caching is enabled and `atol=1e-4` after disabling it. The comparison is tolerant, runs in one
-  process, and does not use a committed real-model artifact
+- Hugging Face Diffusers includes a stronger automated check. In Diffusers v0.43.0, its
+  [`FirstBlockCacheTesterMixin`](https://github.com/huggingface/diffusers/blob/v0.43.0/tests/pipelines/testing_utils/cache.py#L300)
+  runs a small dummy pipeline on CPU for four steps: once without the cache, once with it, and
+  once after disabling it. It compares a slice of the output against the uncached run with a
+  default `expected_atol=0.1` while caching is enabled and `atol=1e-4` after disabling it. Its
+  cache threshold of 0.8 is set high on purpose, because the dummy models are random and
+  unconverged. The comparison is tolerant, runs in one process, and does not use a committed real-model artifact
   ([caching API docs](https://huggingface.co/docs/diffusers/api/cache)).
 
-No surveyed project uses byte-exact comparison against committed real-model outputs as a
-correctness gate. PyTorch's reproducibility notes disclaim cross-release and cross-platform
+As of July 2026, no surveyed project used byte-exact comparison against committed real-model
+outputs as a correctness gate. PyTorch's reproducibility notes disclaim cross-release and cross-platform
 bitwise stability. Work on batch-invariant inference treats bitwise stability as an engineering
 goal that requires purpose-built kernels, not as a default property. On MLX,
-[`mlx-deterministic`](https://github.com/ProbioticFarmer/mlx-deterministic) provides
-batch-invariant RMSNorm, matmul, attention, and softmax kernels. Its README reports measured
-overhead of roughly **7%** for RMSNorm and **27 to 32%** for matmul. Its
-scope is batch-size invariance for LLM inference rather than the script-structure sensitivity
-observed here. It shows that bitwise determinism on Metal is possible when a project pays for it.
-For a performance library such as `mlx-teacache`, that cost is hard to justify merely to preserve
-one convenient assertion.
+[`mlx-deterministic`](https://github.com/ProbioticFarmer/mlx-deterministic/tree/61647b4117120c13d03063dbd9403395c717cbeb)
+provides batch-invariant RMSNorm, matmul, attention, and softmax kernels. Its scope is batch-size
+invariance for LLM inference rather than the script-structure sensitivity observed here. It shows
+that bitwise determinism on Metal is possible when a project writes its own kernels for it. For a
+performance library such as `mlx-teacache`, replacing MLX's kernels merely to preserve one
+convenient assertion is hard to justify.
 
 ## 7. Claims and their status
 
 | Claim | Status | Source |
 |---|---|---|
-| Threshold-zero wrapper vs. committed fixture: 5/5 dev failures, cosine 0.105 to 0.256, max_abs 5.31 to 5.82; 5/5 schnell passes | author-reported measurement from May 2026; raw logs not public | method and limitations summarized in sections 1 and 2 |
-| Same-process wrapper vs. vanilla, per-step, 25 steps: bit-exact | author-reported May 2026 diagnostic; raw logs not public | method summarized in section 2 |
+| Threshold-zero wrapper vs. committed fixture: every dev prompt failed, far apart and close to uncorrelated; every schnell prompt passed | author-reported, May 2026; logs not published, so described without figures | method and limitations summarized in sections 1 and 2 |
+| Same-process wrapper vs. vanilla, per-step, every step: bit-exact | author-reported, May 2026; logs not published | method summarized in section 2 |
 | Current FLUX.1 paired test asserts byte-exact final latents and zero skips | verified against the v0.9.2 public test | [`tests/test_parity_flux1.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/tests/test_parity_flux1.py) |
-| Vanilla mflux with a changed callback shape reproduces the wrapper's digest, not the fixture's | author-reported single-variable experiment from May 2026; raw logs not public | method summarized in section 2 |
-| Threshold-zero fast path did not reduce cross-process divergence | author-reported measurement that falsified the donation hypothesis as dominant cause | result summarized in section 3; fast path public in [`_kernel/gate.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/src/mlx_teacache/_kernel/gate.py) |
-| FLUX.2 changed forward path: ULP-level divergence and about 0.99 full-generation cosine at threshold 0 on an M1 Max | source-reported measurement; because mflux skips compilation on this chip, it is not evidence for a compiled-vs-eager cause | [`tests/test_parity_flux2.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/tests/test_parity_flux2.py) |
+| Vanilla mflux with a changed callback shape reproduces the wrapper's digest, not the fixture's | author-reported single-variable experiment, May 2026; logs not published | method summarized in section 2 |
+| Threshold-zero fast path did not reduce cross-process divergence | author-reported May 2026 finding that falsified the donation hypothesis as dominant cause | result summarized in section 3; fast path public in [`_kernel/gate.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/src/mlx_teacache/_kernel/gate.py) |
+| FLUX.2 threshold-zero wrapper vs. same-process vanilla on an M1 Max (Klein 4B, 8 steps, 15 May 2026): per-operation dispatch noise compounds over the steps beyond an element-wise tolerance, while the full-generation cosine stays above the 0.97 gate | recorded in the test file's gate comment, given here without its figures; mflux compiles the vanilla path on this chip, so compiled-vs-eager execution and the re-walked forward pass are both candidate causes. The repository's notes attribute the difference to the first; no control is published for this run, while the Z-Image variant page states one for Z-Image | [`tests/test_parity_flux2.py`](https://github.com/IonDen/mlx-teacache/blob/v0.9.2/tests/test_parity_flux2.py); [chip table](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/m3-plus-tradeoff.md); [Z-Image variant page](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/docs/variants/z-image-base.md) |
 | Qwen-Image/Z-Image threshold-zero gate is cosine ≥ 0.99; separate first-step re-walk check is ≥ 0.999 | verified as the documented public gate and faithful-port check; not a published multi-prompt full-generation floor | [variant pages](https://github.com/IonDen/mlx-teacache/tree/v0.9.2/docs/variants) |
-| MLX documents lazy graphs, output-rooted eval, donation, and dispatch heuristics, but not nondeterminism; no deterministic-mode API found | verified against docs and pinned source at drafting time | links in section 3 |
-| No surveyed caching project gates on committed real-model bytes | verified against public repositories at drafting time | links in section 6 |
+| MLX documents lazy graphs, output-rooted eval, donation, and dispatch heuristics, but not nondeterminism; no deterministic-mode API found | verified against docs and pinned source in July 2026 | links in section 3 |
+| No surveyed caching project gates on committed real-model bytes | verified against public repositories in July 2026 | links in section 6 |
 | Root cause of the cross-process byte difference | unisolated; donation hypothesis failed its discriminating experiment | this note, section 3 |
 
 ## 8. Lessons
@@ -315,7 +355,7 @@ not depend on finding it.
 
 - MLX documentation and pinned source (commit
   [`046217b`](https://github.com/ml-explore/mlx/tree/046217bcae7347aa814665f39a8f0e404029ddb0),
-  inspected 2026-05-14, links re-verified at drafting time):
+  inspected 2026-05-14, links re-checked in July 2026):
   [lazy evaluation](https://ml-explore.github.io/mlx/build/html/usage/lazy_evaluation.html),
   [random keys](https://ml-explore.github.io/mlx/build/html/python/random.html),
   [`transforms.cpp` (`eval_impl`)](https://github.com/ml-explore/mlx/blob/046217bcae7347aa814665f39a8f0e404029ddb0/mlx/transforms.cpp#L74),
@@ -331,15 +371,15 @@ not depend on finding it.
 - mflux per-step evaluation boundary:
   [`flux.py` at v0.18.0](https://github.com/filipstrand/mflux/blob/v.0.18.0/src/mflux/models/flux/variants/txt2img/flux.py#L122).
 - TeaCache: [arXiv:2411.19108](https://arxiv.org/abs/2411.19108);
-  [ali-vilab/TeaCache reference implementation](https://github.com/ali-vilab/TeaCache/blob/main/TeaCache4FLUX/teacache_flux.py);
+  [ali-vilab/TeaCache reference implementation](https://github.com/ali-vilab/TeaCache/blob/7c10efc4702c6b619f47805f7abe4a7a08085aa0/TeaCache4FLUX/teacache_flux.py);
   [ComfyUI-TeaCache](https://github.com/welltop-cn/ComfyUI-TeaCache).
 - Hugging Face Diffusers: [caching API](https://huggingface.co/docs/diffusers/api/cache);
-  [`FirstBlockCacheTesterMixin`](https://github.com/huggingface/diffusers/blob/main/tests/pipelines/test_pipelines_common.py).
+  [`FirstBlockCacheTesterMixin` at v0.43.0](https://github.com/huggingface/diffusers/blob/v0.43.0/tests/pipelines/testing_utils/cache.py#L300).
 - Reproducibility prior art:
   [PyTorch randomness notes](https://docs.pytorch.org/docs/stable/notes/randomness.html);
   [Thinking Machines, "Defeating Nondeterminism in LLM Inference" (September 2025)](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/);
-  [`mlx-deterministic` (batch-invariant Metal kernels)](https://github.com/ProbioticFarmer/mlx-deterministic).
+  [`mlx-deterministic` (batch-invariant Metal kernels)](https://github.com/ProbioticFarmer/mlx-deterministic/tree/61647b4117120c13d03063dbd9403395c717cbeb).
 
 ---
 
-*Prepared 2026-07-24. Last updated 2026-07-25. Denis Ineshin.*
+*Prepared 2026-07-24. Last updated 2026-11-13. Denis Ineshin.*

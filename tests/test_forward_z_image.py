@@ -57,7 +57,6 @@ def test_config_meta_identifies_variant():
 
     assert config.META["variant_id"] == "z-image-base"
     assert config.META["non_distilled"] is True
-    assert config.META["memory_cap_hint_gb"] == 22  # findings 2026-05-31
 
 
 def test_config_coefficients_are_signal_b_origin_fit():

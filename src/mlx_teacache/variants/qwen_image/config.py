@@ -63,7 +63,6 @@ META: dict[str, Any] = {
     "display_name": "Qwen-Image",
     "hf_model_id": "Qwen/Qwen-Image",
     "non_distilled": True,
-    "memory_cap_hint_gb": 22,
     "recipes": RECIPES,
     "license": LICENSE,
     "license_url": "https://huggingface.co/Qwen/Qwen-Image",

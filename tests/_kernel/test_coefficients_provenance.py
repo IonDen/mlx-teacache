@@ -1,5 +1,5 @@
-"""T5 discipline: Provenance lives in _kernel.coefficients now; the legacy
-mlx_teacache.coefficients path re-exports it for compat."""
+"""Provenance lives in _kernel.coefficients; the deprecated
+mlx_teacache.coefficients path still resolves to it, with a warning."""
 
 from __future__ import annotations
 
@@ -29,8 +29,12 @@ def test_provenance_field_set_matches_v05():
 
 
 def test_legacy_coefficients_re_exports_provenance_identity():
+    import pytest
+
     from mlx_teacache._kernel.coefficients import Provenance as KP
-    from mlx_teacache.coefficients import Provenance as LP
+
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.coefficients import Provenance as LP
 
     assert LP is KP
 

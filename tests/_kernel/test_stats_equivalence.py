@@ -31,6 +31,8 @@ def test_decision_literal_includes_cfg_fallback():
 
 
 def test_teacachestats_public_counter_fields():
+    import pytest
+
     from mlx_teacache._kernel.stats import TeaCacheStats
 
     s = TeaCacheStats()
@@ -39,7 +41,8 @@ def test_teacachestats_public_counter_fields():
     assert s.forced_count == 0
     assert s.skipped_count == 0
     assert s.numerical_miss_count == 0
-    assert s.cfg_fallback_steps == 0
+    with pytest.warns(DeprecationWarning, match="cfg_fallback_steps"):
+        assert s.cfg_fallback_steps == 0
     assert s.last_generation is None
     assert s.speedup_estimate == 1.0
 
@@ -89,12 +92,18 @@ def test_finalize_commits_to_public_counters():
 
 
 def test_shim_re_exports_identity():
+    import pytest
+
     from mlx_teacache._kernel.stats import TeaCacheStats as KS
-    from mlx_teacache.stats import TeaCacheStats as LS
+
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.stats import TeaCacheStats as LS
 
     assert LS is KS
     from mlx_teacache._kernel.stats import StatsFrozenError as KSE
-    from mlx_teacache.stats import StatsFrozenError as LSE
+
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        from mlx_teacache.stats import StatsFrozenError as LSE
 
     assert LSE is KSE
 

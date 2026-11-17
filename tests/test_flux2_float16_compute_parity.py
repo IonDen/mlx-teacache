@@ -9,7 +9,7 @@ import mlx.core as mx
 import pytest
 from mlx.utils import tree_map
 
-from mlx_teacache.variants.flux2_klein_base_4b.integration import (
+from mlx_teacache.integrations.mflux.forward_flux2 import (
     flux2_cfg_forward_with_gate,
     flux2_forward_with_gate,
 )

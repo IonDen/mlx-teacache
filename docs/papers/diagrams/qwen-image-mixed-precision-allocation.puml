@@ -39,10 +39,10 @@ inputs -down-> first
 last -down-> output
 
 note right of transformer
-  Load report for the complete build:
-  bf16: 6 quantizable modules
-  8-bit: 168 modules
-  4-bit: 672 modules
+  Load report at build time (not kept):
+  named input and output modules in bf16,
+  the twelve edge blocks in 8-bit,
+  the middle forty-eight blocks in 4-bit
 end note
 
 caption Conceptual precision map. This is not a sensitivity measurement or ablation result, and it is not to scale.

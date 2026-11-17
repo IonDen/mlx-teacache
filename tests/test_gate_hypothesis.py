@@ -3,8 +3,8 @@ import mlx.core as mx
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from mlx_teacache.cache import TeaCacheState
-from mlx_teacache.gate import gate_step
+from mlx_teacache._kernel.cache import TeaCacheState
+from mlx_teacache._kernel.gate import gate_step
 
 _FINITE_FLOATS = st.floats(min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False)
 _COEFFS = st.tuples(_FINITE_FLOATS, _FINITE_FLOATS, _FINITE_FLOATS, _FINITE_FLOATS, _FINITE_FLOATS)

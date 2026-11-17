@@ -15,17 +15,19 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_base_9b())
 
 - Default recipe: 50 steps, `guidance=4.0` (canonical CFG, matches upstream)
 - Alternative recipe `low_step`: 25 steps, `guidance=1.0`
-- Default `rel_l1_thresh`: **0.17** (cross-import from `flux2_klein_base_4b`)
+- Default `rel_l1_thresh`: **0.17** (reuses `flux2_klein_base_4b`'s)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
-- `memory_cap_hint_gb: 24` — 32 GB unified memory headroom
+- Memory cap for the bench and calibration scripts: 24 GB soft cap, set in the scripts (`scripts/_memory_cap_hints.py`), not in the variant config. It leaves headroom on a 32 GB Mac.
 
 At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps interleaved rep-outer, bf16, q4, mflux 0.18.0, v0.12.0 bench, 2026-09-28):
 
 | Condition | Median wall-clock | Peak memory |
 |---|---|---|
-| vanilla | 517.3 s | ~22 GB |
-| wrapper, no gate (compile-avoidance only) | 508.3 s | ~9.8 GB |
-| wrapper, gated (full TeaCache) | 377.5 s | ~9.8 GB |
+| vanilla | 517.3 s | ~22 GiB |
+| wrapper, no gate (compile-avoidance only) | 508.3 s | ~9.8 GiB |
+| wrapper, gated (full TeaCache) | 377.5 s | ~9.8 GiB |
+
+The record (`_artifacts/v0.12.0_bench_klein_base_9b.json`) names commit ec4d110 with a clean tree and has no MLX version field; MLX 0.31.2 per the lock file at ec4d110 (macOS entry). The date comes from the record's chunk timestamps, and `scripts/` and `src/` are identical at ec4d110 and at 1290c01, the commit that added the record, on the pull-request branch (public in [PR #42](https://github.com/IonDen/mlx-teacache/pull/42), squashed into main as 0a3482c; that merge also added to `gate.py` the rule that a change above the calibrated range always computes). The record stores the Darwin kernel version, 27.0.0, which maps to macOS 27.0. Measured on mflux 0.18.0; mflux 0.24.0 changed the default VAE decode to bfloat16 strips, so the figure holds for mflux 0.18.0.
 
 - **Combined speedup: 1.37×** (v0.10.0 measured 1.37× and v0.6.0 1.36× at the same recipe)
 - **Gating contribution (v0.4.1 effect): 1.35×**
@@ -33,13 +35,15 @@ At the canonical 50-step CFG recipe on M1 Max 32 GB (subprocess-per-rep, 3 reps 
 - Skip count stable across reps: 13 of 48 active steps skipped at `rel_l1_thresh=0.17`, never two in a row (max consecutive-skip streak 1), the same steps as before 0.12.0's calibrated-range clamp, which changes nothing at this recipe (the bench ran before the rule that always computes a change above the range was added; that rule was not traced on 9B)
 - SSIM 0.993 vs vanilla at this recipe (`_artifacts/v0.12.0_klein_base_ssim.json`)
 
-> **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. That measurement was inflated by same-process MLX state leakage in the v0.5.x bench harness: vanilla ran cold while the wrapper inherited warm MLX allocator state from it, so the wall-clock difference conflated the variant difference with the cold-vs-warm gap. v0.6.0's subprocess-per-rep harness makes every condition cold and exposes the honest 1.36×; the v0.10.0 and v0.12.0 re-measurements land at 1.37×.
+> **Correction to v0.5.0.** v0.5.0 reported 2.68× combined on this variant. It came from one run of each condition, plain mflux and the wrapper, each in its own process, at 768×1024 (`_artifacts/validation_klein_base_9b.json`). Plain mflux took 2743.9 s and the wrapper 1025.3 s. Plain mflux peaked at 25.21 GiB, above the 24 GiB cap the run set and above the 24.96 GiB recommended working set of a 32 GB Mac. The wrapper peaked at 13.17 GiB. That fits a slowdown from memory pressure in the plain run. The run did not test whether memory pressure caused it, and nobody repeated it. The 1.36× at v0.6.0 and the 1.37× at v0.10.0 and v0.12.0 are a different recipe: 512×512, a different prompt, three reps. No other tracked 768×1024 timing of this model exists. The 2.68× stays withdrawn, and 1.37× stands at its own recipe.
+>
+> (Corrected 2026-11-13: an earlier version of this note said the two runs shared one Python process, so the wrapper inherited a warm allocator. The record shows each ran in its own process. That explanation was wrong.)
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.12.0_bench_klein_base_9b.json` (v0.10.0's and v0.6.0's sit alongside it); regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 ## Coefficient provenance — intentional reuse
 
-Coefficients are **cross-imported from `flux2_klein_base_4b`** (object-identity-equal — `BASE_9B is BASE_4B`). The reuse is justified by:
+Coefficients are **reused from `flux2_klein_base_4b`'s config** (object-identity-equal — `BASE_9B is BASE_4B`). The reuse is justified by:
 - Same architecture family (FLUX.2 Klein, non-distilled).
 - Same calibration recipe (25-step, guidance=1.0, origin-constrained polyfit).
 - Validated empirically before each release: `tests/variants/flux2_klein_base_9b/test_shared_coefficients.py` enforces the identity invariant.
@@ -52,15 +56,15 @@ If a future release recalibrates 9B-specific coefficients, that test will need t
 
 ## Quirks
 
-- **Memory cap hint = 24 GB.** `META["memory_cap_hint_gb"]` is the advisory soft cap the heavy workers pass to `scripts/_mlx_caps.py::install_caps` before model load. `install_caps` sets three limits: a device-clamped wired cap (the request, capped at 0.85× the machine's recommended working set, so it can never exceed the system wired limit and still works on a 16/24 GB Mac), the 24 GB advisory soft limit, and a bounded MLX cache pool. On a 32 GB M1 Max the clamp puts the wired cap near 21 GB regardless of the request. Lower the hint if you have less than 32 GB or are competing with other memory-heavy processes; see [Memory guardrails](#memory-guardrails) below.
-- Default threshold 0.17 (cross-imported from base-4b), not the package fallback 0.20.
+- **Memory cap hint = 24 GB.** The advisory soft cap the bench and calibration scripts look up for this variant in `scripts/_memory_cap_hints.py` (it is not a config field). The heavy workers pass it to `scripts/_mlx_caps.py::install_caps` before model load. `install_caps` sets three limits: a device-clamped wired cap (the request, capped at 0.85× the machine's recommended working set, so it can never exceed the system wired limit and still works on a 16/24 GB Mac), the 24 GB advisory soft limit, and a bounded MLX cache pool. On a 32 GB M1 Max the clamp puts the wired cap near 21 GB regardless of the request. Lower the hint if you have less than 32 GB or are competing with other memory-heavy processes; see [Memory guardrails](#memory-guardrails) below.
+- Default threshold 0.17 (reuses base-4b's), not the package fallback 0.20.
 - The 1.37× headline number is reproducible via `scripts/bench_speedup.py --variant klein-base-9b --three-way --reps 3`.
 
 ## Memory guardrails
 
 On 32 GB Apple Silicon running the canonical 50-step + g=4.0 recipe, peak memory has crossed the system limit twice (2026-05-17 jetsam, 2026-05-19 kernel watchdog panic). The current mitigations:
 
-1. Every heavy worker calls `scripts/_mlx_caps.py::install_caps` before model load — a device-clamped wired cap, an advisory soft cap (this variant's `memory_cap_hint_gb`, 24 GB), and a bounded MLX cache pool (dropped buffers pool there instead of returning to the OS, and MLX's default pool sits near physical RAM).
+1. Every heavy worker calls `scripts/_mlx_caps.py::install_caps` before model load — a device-clamped wired cap, an advisory soft cap (24 GB for this variant, from the scripts' cap table), and a bounded MLX cache pool (dropped buffers pool there instead of returning to the OS, and MLX's default pool sits near physical RAM).
 2. The same worker arms `scripts/_mlx_watchdog.py::arm_mlx_watchdog`, a daemon thread that aborts the run — writing an artifact that says why — the moment `active + cache` memory exceeds physical memory minus a headroom (4 GiB by default).
 3. `tests/conftest.py` installs the same device-derived caps and bounds the cache pool for the test session.
 

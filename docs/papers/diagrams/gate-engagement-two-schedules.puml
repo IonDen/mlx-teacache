@@ -23,8 +23,8 @@ rectangle "Accumulated prediction under\nrel_l1_thresh (default 0.20)?" as gate 
 rectangle "Skip the transformer body\nReuse the cached residual; prelude + tail only" as skip #DCFCE7
 rectangle "Compute the step in full\nRefresh the cache; reset the accumulator to 0" as compute #F8FAFC
 
-rectangle "FLUX.1-dev, 25-step schedule\nPredicted changes stay small for stretches,\nso the accumulator crawls toward 0.20\nMeasured: 6 of 25 steps skipped" as dev #DCFCE7
-rectangle "FLUX.2 Klein 4B / 9B, 8-step distilled schedules\nThe shipped fit predicts above 0.20 across the\nobserved signal range (0.1316-0.4498 for 9B)\nMeasured: 0 of 8 steps skipped, every repetition" as klein #FECACA
+rectangle "FLUX.1-dev, 25-step schedule\nPredicted changes stay small for stretches,\nso the accumulator crawls toward 0.20\nMeasured (v0.6.3 report): 6 of 25 steps skipped" as dev #DCFCE7
+rectangle "FLUX.2 Klein 4B / 9B, 8-step distilled schedules\nFor 9B, the shipped fit predicts above 0.20 across\nthe observed signal range 0.1316-0.4498 (lowest about 0.27)\nThe v0.3.0 release notes report no skipped step" as klein #FECACA
 
 signal -down-> poly
 poly -down-> acc
@@ -32,7 +32,7 @@ acc -down-> gate
 gate -down-> skip : yes
 gate -down-> compute : no
 skip -down-> dev : reached repeatedly
-compute -down-> klein : the only branch ever reached
+compute -down-> klein : the only branch reached in the reported runs
 
-caption The decision flow is conceptual structure; the two skip counts are measured, repetition-stable results. The Klein branch summarizes the calibration finding, not a separate measurement.
+caption The decision flow is conceptual structure. Only the FLUX.1-dev skip count is measured (v0.6.3 report). The Klein branch combines the 9B calibration finding with the zero skips the v0.3.0 release notes report; it is not a separate measurement.
 @enduml

@@ -4,6 +4,20 @@
 
 > 📄 [Read on the website](https://ineshin.space/papers/why-teacache-does-not-engage-on-short-distilled-schedules/) — same paper, formatted for reading.
 
+## Update, 2026-11-21 (second): skip count, compile scope, v0.3.0 changelog and dates
+
+Section 4 and the claims table now give the skip count of the withdrawn 2.68× run, 12 of 50 steps,
+and the limit that count allows, 50/38. Section 4 also narrows the compile effect to the compiled
+predict function, leaving Klein's scheduler step out. Section 1 now says what mflux leaves
+uncompiled on the FLUX.1-dev path: the transformer call and FLUX.1's default scheduler step.
+Section 2 now says the v0.3.0 changelog printed ratios that no committed results file holds, and
+why the paper does not quote them. The footer gives both dates. The figures already in the paper
+keep their values. The
+[previous version](https://github.com/IonDen/mlx-teacache/blob/3f49e5d503775ed668d0f908cd9b0ddb05642f73/docs/papers/why-teacache-does-not-engage-on-short-distilled-schedules.md)
+keeps the earlier text.
+
+---
+
 ## Update, 2026-11-21: units, record gaps and the diagram label
 
 Two memory figures of the withdrawn Klein base 9B run in section 4 are now given in GiB, the unit
@@ -141,13 +155,16 @@ The v0.10.0 run (mflux 0.18.0;
 [`_artifacts/v0.10.0_bench_flux1_dev.json`](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.10.0_bench_flux1_dev.json))
 measured 1.57×, with 1.41× in the gated part, so both combined figures and both gated parts are
 above the 25/19 limit. Its vanilla mflux repetitions spread from 104.7 s to 119.8 s. Its no-gate
-part of 1.11× cannot be the eager-versus-compiled difference of section 4: mflux compiles no
-FLUX.1 step at any of the three versions these runs used, as its source at those release tags
-shows and the repository's
+part of 1.11× cannot be the eager-versus-compiled difference of section 4. mflux compiles neither
+the FLUX.1 transformer call nor, with the default linear scheduler these runs used, the scheduler
+step, at any of the three mflux versions named above, as its source at those release tags shows;
+the repository's
 [README](https://github.com/IonDen/mlx-teacache/blob/v0.18.0/README.md#how-the-speedup-happens)
-notes. Paired by repetition, vanilla mflux against the no-gate wrapper gives 1.03× to 1.13× in
-that run, while in the other two FLUX.1-dev runs no pair reaches 1.03×. What produced that gap
-is not isolated.
+notes that FLUX.1 has no compiled predict step. Another mflux scheduler, flow-match Euler, which is
+not FLUX.1's default, does compile its update. These runs did not use it, and the wrapper does not
+touch the scheduler, so every arm ran the same scheduler step. Paired by repetition, vanilla mflux
+against the no-gate wrapper gives 1.03× to 1.13× in that run, while in the other two FLUX.1-dev
+runs no pair reaches 1.03×. What produced that gap is not isolated.
 
 Neither older record has a field for the MLX version, the date, the commit or the tree state. Each
 carries only a package version string, fixed when the package was installed, so it need not name
@@ -186,8 +203,14 @@ While preparing v0.3.0 (FLUX.2 Klein 9B support), the project committed a reprod
 dimensions, and step count, and reports per-repetition skip counts next to the timings. Its first
 runs across the supported variants showed the split the rest of this note explains: FLUX.1-dev
 skipped steps, while both distilled Klein variants skipped none and still finished ahead of
-vanilla mflux. The v0.3.0 release notes report the result that way. The raw report of those runs
-is not public, so this note quotes no timings or ratios from them.
+vanilla mflux. The v0.3.0 release notes (the v0.3.0 entry of the
+[changelog](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/CHANGELOG.md)) report the result
+that way and also print ratios from those runs: one for FLUX.1-dev and, for the Klein variants,
+one range at 8 steps with no step skipped and a second, approximate one, both of which they credit
+to compile avoidance. No committed results file holds any of them, and the runs were
+single-interpreter and confounded (next paragraph), so this note quotes none of them. The
+changelog gives that FLUX.1-dev ratio the skip count of section 1's runs, and the ratio sits above
+the 25/19 limit section 1 explains for it.
 
 The wall-clock side of that result deserves less trust than the skip side. All vanilla
 repetitions ran first, then all wrapper repetitions, in one Python interpreter, so thermal state,
@@ -270,8 +293,8 @@ To keep the gate's per-step decision live, `mlx-teacache` replaces that compiled
 eager Python closure (today built by
 [`make_teacache_predict_factory`](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/src/mlx_teacache/integrations/mflux/forward_flux2.py#L395)):
 a compiled function would bake the first step's gate decision into the trace. On chips where
-mflux compiles, the side effect is that the wrapper also sidesteps the compiled execution path
-entirely. In the v0.3.0 runs (4-bit quantization, 8-step schedule, on the M1 Max the release
+mflux compiles, the side effect is that the wrapper also sidesteps the compiled predict function.
+In the v0.3.0 runs (4-bit quantization, 8-step schedule, on the M1 Max the release
 notes name) the wrapper's eager path finished ahead of vanilla mflux's compiled path. Zero skips
 rules out caching as the cause. Source inspection makes the eager-versus-compiled execution-path
 difference the leading explanation, but the 8-step benchmark did not isolate that effect from
@@ -302,15 +325,17 @@ portrait prompt, with a 24 GiB memory-cap setting recorded next to a vanilla pea
 [its script](https://github.com/IonDen/mlx-teacache/blob/v0.5.0/scripts/validate_klein_base_9b.py)
 sets the cap and computes the peak in GiB). It records the Darwin kernel release but not the
 mflux version, the MLX version, the quantization setting, a package version string, the commit or
-the state of the working tree. The later 1.36× measurement ran at 512 × 512 on a different
-prompt, three cold repetitions per condition (`v0.6.0_bench_klein_base_9b.json`, above, whose
-gaps are stated there), and the v0.12.0 rerun of that recipe measured
-1.37×
+the state of the working tree. It counts 12 skipped and 36 gate-computed steps of 50. With the
+first and last steps, which always run, 38 steps ran in full, so skipping alone could make that run
+at most about 1.32× faster (50/38); the 2.68× is far above that limit. The later 1.36× measurement
+ran at 512 × 512 on a different prompt, three cold repetitions per condition
+(`v0.6.0_bench_klein_base_9b.json`, above, whose gaps are stated there), and the v0.12.0 rerun of
+that recipe measured 1.37×
 ([`_artifacts/v0.12.0_bench_klein_base_9b.json`](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.12.0_bench_klein_base_9b.json)).
 Resolution, prompt, repetition count, harness and the memory-cap setting all differ between the
 2.68× and the 1.36×, the 2.68× run's mflux version is unknown, and the cause of the difference
-was not isolated. The record supports only that the 2.68× was not reproduced at a different,
-smaller recipe.
+was not isolated. Apart from that skip limit, the record supports only that the 2.68× was not
+reproduced at a different, smaller recipe.
 
 The corrected pieces establish a narrower picture. In the v0.6.0 three-way runs of the
 non-distilled Klein base recipes (mflux 0.17.5), step-skipping is the dominant mechanism where it
@@ -398,7 +423,7 @@ trajectory did not produce a skip.
 | Klein 4B empirical output-change range 0.261–1.008 | committed summary; raw per-pair arrays are not public | [`scripts/_calibration_flux2_klein_4b.json`](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/scripts/_calibration_flux2_klein_4b.json) |
 | Distilled-row wall-clock results | wrapper faster in the v0.3.0 runs; single-interpreter and confounded; no ratio quoted | [changelog](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/CHANGELOG.md) |
 | Execution-path contribution 1.01–1.02× at 50 steps | v0.6.0 and v0.12.0 runs, cold subprocess per repetition; the v0.6.0 reports record no MLX version, date, commit or tree state, and their package version string, 0.1.0, was fixed at install time and does not name the code that ran | [v0.6.0 Klein base 9B report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.6.0_bench_klein_base_9b.json); [v0.12.0 Klein base 9B report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.12.0_bench_klein_base_9b.json) |
-| Withdrawn 2.68× on Klein base 9B and the later 1.36× measurement | single run at 768 × 1024 on another prompt, with a memory-cap setting recorded and no mflux version, MLX version, quantization setting, package version string, commit or tree state, against three cold runs at 512 × 512; cause not isolated | [`validation_klein_base_9b.json`](https://github.com/IonDen/mlx-teacache/blob/v0.5.0/_artifacts/validation_klein_base_9b.json); [v0.6.0 report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.6.0_bench_klein_base_9b.json) |
+| Withdrawn 2.68× on Klein base 9B and the later 1.36× measurement | single run at 768 × 1024 on another prompt, with a memory-cap setting recorded and no mflux version, MLX version, quantization setting, package version string, commit or tree state, against three cold runs at 512 × 512; the 2.68× run skipped 12 of 50 steps, which allows at most 50/38, about 1.32×, from skipping alone; cause not isolated | [`validation_klein_base_9b.json`](https://github.com/IonDen/mlx-teacache/blob/v0.5.0/_artifacts/validation_klein_base_9b.json); [v0.6.0 report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.6.0_bench_klein_base_9b.json) |
 | FLUX.1-dev at 6 of 25 skips: 1.30× (2026-11-16), 1.46× (v0.6.3) and 1.57× (v0.10.0) | 1.30× on mflux 0.24.0 and MLX 0.32.2, a pre-release commit and a clean tree recorded, under the roughly 1.32× limit (25/19) that 6 skipped steps allow; 1.46× (mflux 0.17.5) and 1.57× (mflux 0.18.0), and their gated parts of 1.47× and 1.41×, are above it, from records with no MLX version, date or commit field (each carries only a package version string fixed at install time; the v0.6.3 one carries the marker of uncommitted changes); cause of the excess not isolated | [v0.18.0 report](https://github.com/IonDen/mlx-teacache/blob/v0.18.0/_artifacts/v0.18.0_bench_flux1_dev.json); [v0.6.3 report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.6.3_bench_flux1_dev.json); [v0.10.0 report](https://github.com/IonDen/mlx-teacache/blob/v0.17.0/_artifacts/v0.10.0_bench_flux1_dev.json) |
 | Short distilled schedules intrinsically defeat step-level caching | hypothesis consistent with these observations; not established by this study | bounded evidence above |
 
@@ -414,7 +439,7 @@ correction.
 
 **An engagement count also sets a limit.** When S of N equally costly steps are skipped, skipping
 alone can make a run at most N/(N−S) times faster, and less once the work that is never skipped is
-counted; this is the limit sections 1, 4 and 6 apply. Whatever a figure shows above that limit did not
+counted; this is the limit sections 1, 2, 4 and 6 apply. Whatever a figure shows above that limit did not
 come from the skipped steps. Either a second mechanism added to it, which then has to be named and
 measured on its own, or something else moved between the runs being compared. Checking takes only
 the count and one division: 6 skipped steps out of 25 allow at most 25/19, about 1.32×.
@@ -471,4 +496,4 @@ is worth more than a quiet fix.
 
 ---
 
-*Prepared 2026-07-19. Last updated 2026-11-21. Denis Ineshin.*
+*Prepared 2026-07-19, published 2026-07-24. Last updated 2026-11-21. Denis Ineshin.*

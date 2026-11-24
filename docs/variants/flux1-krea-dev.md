@@ -15,11 +15,11 @@ FLUX.1 Krea [dev] (Black Forest Labs with Krea) — a FLUX.1-dev-architecture fi
 
 `scripts/calibrate_flux1.py --model krea-dev` captured per-step pairs of gate-signal change and body-output change for ten calibration prompts at the recipe above (270 pairs). Scored on those pairs, FLUX.1-dev's vendored tuple gives **R² −496**: its dominant 499·x⁴ term, fit on dev's small per-step changes (relative L1 around 0.1–0.25), explodes at Krea's (0.06–0.66). A fresh degree-4 fit on Krea's own pairs gives **R² 0.68** (free fit; the origin-constrained fit gives 0.66 and was not chosen). That is between the FLUX.2 family (0.11–0.65) and Qwen-Image (0.85), and the sweep, not the R², sets the quality bar. The fit and the score are committed in `scripts/_calibration_flux1_krea_dev.json`, and a test pins the config tuple to it.
 
-One property of the fit matters for users: its intercept is about 0.40, and the smallest predicted change per step over the calibration trajectories is about 0.26. The package fallback `rel_l1_thresh=0.20` would therefore never skip on Krea; the per-variant default exists because of that.
+One property of the fit matters for users: its intercept is about 0.40, and the smallest predicted change per step over the calibration trajectories is about 0.26. The package fallback `rel_l1_thresh=0.20` would therefore never skip on Krea; the per-variant default exists because of that. This follows from the fit; no run at 0.20 was recorded, because the sweep below starts at 0.30.
 
 ## Threshold sweep
 
-`scripts/calibrate_flux1.py --model krea-dev --sweep 0.30,0.35,0.40,0.60,0.80`, red-apple prompt, seed 42, 28 steps, guidance 4.5, 512×512, q4, one gated generation per threshold against a vanilla reference (M1 Max 32 GB, 2026-09-05; single-rep timings are thermal noise, the multi-rep bench below is the headline):
+`scripts/calibrate_flux1.py --model krea-dev --sweep 0.30,0.35,0.40,0.60,0.80`, red-apple prompt, seed 42, 28 steps, guidance 4.5, 512×512, q4, one gated generation per threshold against a vanilla reference. The record is `_artifacts/sweeps/flux1-krea-dev_2026-09-05.json`:
 
 | `rel_l1_thresh` | Skipped (of 26 active) | Longest streak | SSIM vs vanilla | Single-rep speedup |
 |---|---|---|---|---|
@@ -29,7 +29,13 @@ One property of the fit matters for users: its intercept is about 0.40, and the 
 | 0.60 | 16 | 2 | 0.866 | 2.47× |
 | 0.80 | 18 | 3 | 0.863 | 3.12× |
 
-No record of this sweep was committed. The knee is sharp: 0.30 holds SSIM 0.99 while skipping 10 of the 26 active steps in a strict alternation, and 0.35 already drops under the 0.90 bar the FLUX.1 quality gate uses. Raising the threshold buys speed at a visible cost on this model, so 0.30 ships and the parity lane pins a 9–11 skip band with an SSIM floor of 0.95 at that default.
+The speed column is one gated run per threshold against one plain run of 129 s; the three-rep bench below has a plain median of 125 s. Several rows sit above what their skipped steps allow (for example 3.12× at 0.80, where 18 skipped steps out of 28 give at most 2.80×), so read the column as single timings. The bench below is the headline.
+
+What the record leaves out: its date, 2026-09-05, is the file time on the machine when the record was made, and the file name carries it (git keeps no file times). It holds no MLX or mflux version, hardware, commit or uncommitted-changes flag; `uv.lock` at 3b86c8b pins mflux 0.18.0 and MLX 0.31.2 (macOS entry). mflux 0.22.0 loads the bias of FLUX.1's last normalization layer again, which changes its images slightly, so these scores hold for mflux 0.18.0. The script was committed on a working branch before the run and reached main in 3b86c8b; whether the working tree matched that commit is not recorded. The images behind the SSIM scores are not published. [`docs/calibration.md`](../calibration.md#threshold-sweep-records) lists the gaps for all four sweep records.
+
+The Krea fit and its 0.30 default were committed about two minutes after the sweep's last run, and the sweep's 0.30 skip pattern equals the shipped bench's in all three reps, so the sweep most likely ran with that fit.
+
+The knee is sharp: 0.30 holds SSIM 0.99 while skipping 10 of the 26 active steps in a strict alternation, and 0.35 already drops under the 0.90 bar the FLUX.1 quality gate uses. Raising the threshold buys speed at a visible cost on this model, so 0.30 ships and the parity lane pins a 9–11 skip band with an SSIM floor of 0.95 at that default.
 
 ## Benchmark
 

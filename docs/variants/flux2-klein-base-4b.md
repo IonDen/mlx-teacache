@@ -43,11 +43,11 @@ Until 0.12.0 the gate also skipped step 6 here (9 of 48, one run of 2). That ste
 Reproduce with `uv run python scripts/bench_speedup.py --variant klein-base-4b --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.12.0_bench_klein_base_4b.json` (v0.10.0's and v0.6.0's sit alongside it); regenerate side-by-side images with `scripts/bench_comparison.py`.
 
 The 0.17 default was chosen because the polynomial R² is low (0.106) and the engagement window is narrow. The v0.4.0 sweep (before the 0.10 gate change) at 25 steps showed it:
-- At 0.20 (package default): 19/25 skips, SSIM ~0.76 — visibly degraded.
-- At **0.17**: 3/25 skips, SSIM 0.99 — indistinguishable from vanilla.
-- At 0.175: 14/25 skips, SSIM ~0.78 — sharp cliff.
+- At 0.20 (package default) the image was visibly degraded.
+- At **0.17** the image was indistinguishable from vanilla.
+- Just above 0.17 (0.175) the quality fell off sharply.
 
-See `scripts/sweep_threshold_klein_base_4b.py` for the sweep methodology.
+No record of that sweep was committed, so its skip counts and SSIM scores are not given here. See `scripts/sweep_threshold_klein_base_4b.py` for the sweep methodology.
 
 ## CFG (guidance > 1.0)
 

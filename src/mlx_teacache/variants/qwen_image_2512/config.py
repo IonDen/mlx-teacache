@@ -12,8 +12,9 @@ fit R^2 0.8183, held-out 0.7852).
 
 DEFAULT_THRESH = 0.25 is set from scripts/sweep_threshold_qwen.py --model Qwen/Qwen-Image-2512 --plain-q4 at the
 calibration recipe (red-apple prompt, seed 42, 768x768, 50 steps, guidance 4.0, stock q4, text encoders freed after
-prompt encoding; mflux 0.23.0, MLX 0.32.2, M1 Max 32 GB, 2026-10-20; 48 active steps). Skipped steps / SSIM against
-the vanilla image / longest skip run:
+prompt encoding; 48 active steps). The record is _artifacts/sweeps/qwen-image-2512_plain-q4_2026-10-20.json. It holds
+no versions, hardware or date: mflux 0.23.0 and MLX 0.32.2 per the lock file, hardware not recorded, file time
+2026-10-20. Skipped steps / SSIM against the vanilla image / longest skip run:
 
     0.15 -> 22 / 0.9914 / 3
     0.20 -> 27 / 0.9777 / 4

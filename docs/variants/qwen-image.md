@@ -59,11 +59,11 @@ QwenWeightDefinition.quantization_predicate = staticmethod(_mixed)
 flux = QwenImage(quantize=4, model_config=ModelConfig.qwen_image())
 ```
 
-The gate signal (Signal A) is unaffected enough by this that the shipped coefficients — calibrated on stock q4 — transfer cleanly to the mixed-precision build (the threshold sweep confirmed a sensible skip ramp at high SSIM on it).
+The gate signal (Signal A) is unaffected enough by this that the shipped coefficients — calibrated on stock q4 — are expected to transfer to the mixed-precision build. No record of a sweep on that build was committed, so this rests on the stock-q4 calibration alone (see [Threshold sweep](#threshold-sweep)).
 
 ## Threshold sweep
 
-`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe (red-apple prompt, seed 42, guidance 4.0, stock q4) and records skip count, longest skip streak and SSIM against a vanilla reference per threshold, one subprocess per threshold with the text encoders freed once the prompt is encoded. Re-run on 2026-09-06 under the current gate (M1 Max 32 GB, mflux 0.18.0; single-rep timings are thermal noise, the multi-rep bench above is the headline):
+`scripts/sweep_threshold_qwen.py` sweeps `rel_l1_thresh` at the 768×768/50-step recipe (red-apple prompt, seed 42, guidance 4.0, stock q4) and records skip count, longest skip streak and SSIM against a vanilla reference per threshold, one subprocess per threshold; some run freed the text encoders once the prompt was encoded (the committed record's `memory_saver` flag says so; which runs is not in it). Re-run under the current gate, recorded in `_artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json`:
 
 | `rel_l1_thresh` | Skipped (of 48 active) | Longest streak | SSIM vs vanilla | Single-rep speedup |
 |---|---|---|---|---|
@@ -72,7 +72,11 @@ The gate signal (Signal A) is unaffected enough by this that the shipped coeffic
 | 0.25 | 30 | 3 | 0.976 | 2.55× |
 | 0.30 | 33 | 4 | 0.967 | 3.01× |
 
-No record of this sweep was committed. SSIM still degrades gracefully, with no cliff, and every point clears the 0.95 floor the parity gate enforces. 0.30 stays the default: it is the fastest point on the curve that holds visual equivalence, and the 0.9.x quality point (SSIM 0.978 at 24 skips) is one setting away at `rel_l1_thresh=0.20`, which now gives 26 skips at 0.980. The 2026-06 sweep that first set the default ran on the mixed-precision build under the 0.9.x gate (0.9951 at 0.20, 0.9883 at 0.25, 0.9873 at 0.30, 0.9809 at 0.40, 0.9783 at 0.50; 24 of 48 skipped at 0.30) and is superseded by the table above.
+The speed column is one run per threshold against one plain run of 920 s. The three-rep bench below has a plain median of 643 s, so the 0.25 and 0.30 rows sit above what their skipped steps allow (50 steps over 20 computed gives 2.50×, over 17 gives 2.94×). Read the column as single timings; the bench below is the headline.
+
+What the record leaves out: its date, 2026-09-06, is the file time on the machine when the record was made, and the file name carries it (git keeps no file times). It holds no MLX or mflux version, hardware, commit or uncommitted-changes flag; `uv.lock` at 3b86c8b pins mflux 0.18.0 and MLX 0.31.2 (macOS entry). mflux 0.22.0 loads the bias of Qwen-Image's last normalization layer again, and its release notes say the images change visibly, so these scores hold for mflux 0.18.0. The plain-mflux reference image comes from a first attempt that was stopped when the host ran out of memory (see the 0.10.1 notes in the CHANGELOG), and the gated runs followed hours later. The script has been in the repository since June 2026. The version that frees the text encoders was committed during the run and reached main in 3b86c8b, so the reference and the 0.15 run predate it, and the record's `memory_saver: true` flag says only that some run freed them. The per-run files that would show which are not committed, so the 0.20 to 0.30 runs most likely did and the reference and the 0.15 run did not, but the record does not prove it. The images behind the SSIM scores are not published. [`docs/calibration.md`](../calibration.md#threshold-sweep-records) lists the gaps for all four sweep records.
+
+SSIM still degrades gracefully, with no cliff, and every point clears the 0.95 floor the parity gate enforces. 0.30 stays the default: it is the fastest point on the curve that holds visual equivalence. The operating point of the 0.9.x releases is one setting away at `rel_l1_thresh=0.20`, which now gives 26 skips at 0.980. The default was first set by a June 2026 sweep under the 0.9.x gate, which gave equal or higher SSIM. No record of it was committed, so its figures are not given here, and the table above replaces it.
 
 ## Benchmark
 

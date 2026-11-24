@@ -112,17 +112,75 @@ skips at this threshold and recipe, and the gate replayed over the committed
 calibration trace under consecutive-delta anchoring gives 33 skips with a
 streak of 4, which is exactly what the bench then measured. It is the variant
 the anchoring fix moves most, because its accumulator sits nearest the
-threshold. A threshold sweep on 2026-09-06 under the current gate (stock q4,
-same recipe) put the curve on record: 24 / 26 / 30 / 33 skips at 0.15 / 0.20 /
-0.25 / 0.30, SSIM 0.980 / 0.980 / 0.976 / 0.967, longest streaks 2 / 2 / 3 / 4,
-and 0.30 stays the default (see the variant page).
+threshold. A threshold sweep under the current gate (stock q4, same recipe)
+gave 24 / 26 / 30 / 33 skips at 0.15 / 0.20 / 0.25 / 0.30, SSIM 0.980 / 0.980 /
+0.976 / 0.967, longest streaks 2 / 2 / 3 / 4, and 0.30 stays the default (see
+the variant page). The record is
+`_artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json`.
+What the record leaves out is [listed below](#threshold-sweep-records).
 
 `qwen-image-2512` has no bench yet, so it is not in the table. Its threshold
-sweep (red-apple prompt, seed 42, 768×768, 50 steps, guidance 4.0, 4-bit,
-mflux 0.23.0, M1 Max 32 GB) skipped 29 of 48 active steps at the 0.25 default
-with a longest run of 4, and a weight-free replay of the gate over its
-calibration traces gives the same 29 skips and run of 4. The longest run in
-that sweep was 6, at 0.40, still under the cap.
+sweep (red-apple prompt, seed 42, 768×768, 50 steps, guidance 4.0, 4-bit)
+skipped 29 of 48 active steps at the 0.25 default with a longest run of 4, and
+a weight-free replay of the gate over its calibration traces gives the same 29
+skips and run of 4 (`tests/test_gate_replay.py` pins this). The longest run in
+that sweep was 6, at 0.40, still under the cap. The record is
+`_artifacts/sweeps/qwen-image-2512_plain-q4_2026-10-20.json`. What it leaves
+out is [listed below](#threshold-sweep-records).
+
+## Threshold-sweep records
+
+Four threshold sweeps have a committed record, a JSON file with the skip count
+and the SSIM against plain mflux for each threshold, and, in three of the four,
+the longest streak (the Z-Image record has none). The
+files are copies of what the runs wrote; no value was edited. Every similarity
+score in them was computed from images that are not published, so a reader
+cannot recompute a score from these files.
+
+| Record | Model | Recipe | Date | MLX / mflux per `uv.lock` (macOS entry) | Script |
+|---|---|---|---|---|---|
+| `_artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json` | Qwen-Image | stock 4-bit, 768×768, 50 steps, guidance 4.0, seed 42; thresholds 0.15 to 0.30 | 2026-09-06 | MLX 0.31.2, mflux 0.18.0 (`uv.lock` at 3b86c8b) | `scripts/sweep_threshold_qwen.py`, in the repository since June 2026; the version that frees the text encoders was committed during the run and reached main in 3b86c8b |
+| `_artifacts/sweeps/qwen-image-2512_plain-q4_2026-10-20.json` | Qwen-Image-2512 | stock 4-bit, 768×768, 50 steps, guidance 4.0, seed 42; thresholds 0.15 to 0.40 | 2026-10-20 | MLX 0.32.2, mflux 0.23.0 (`uv.lock` at b883378) | `scripts/sweep_threshold_qwen.py`, as on main at b883378 (see below) |
+| `_artifacts/sweeps/z-image-base_2026-05-31.json` | Z-Image base | 8-bit, 512×512, 50 steps, guidance 4.0, seed 42; thresholds 0.05 to 0.30 | 2026-05-31 | MLX 0.31.2, mflux 0.17.5 (`uv.lock` at c6a4109) | `scripts/sweep_threshold_z_image.py` at c6a4109 |
+| `_artifacts/sweeps/flux1-krea-dev_2026-09-05.json` | FLUX.1 Krea [dev] | 4-bit, 512×512, 28 steps, guidance 4.5, seed 42; thresholds 0.30 to 0.80 | 2026-09-05 | MLX 0.31.2, mflux 0.18.0 (`uv.lock` at 3b86c8b) | `scripts/calibrate_flux1.py --model krea-dev --sweep`, committed on a working branch before the run; reached main in 3b86c8b |
+
+What the records leave out, for all four: none holds a date, an MLX or mflux
+version, the hardware, a commit or a flag saying whether the working tree had
+uncommitted changes. The date in the table is the file time on the machine when the record was
+made, and the file name carries it (git keeps no file times). The versions are the ones `uv.lock` pins at the
+commit named, which may differ from what was installed. The hardware is not
+recorded.
+
+The speed columns are single timings. Each is one gated run against one plain
+run, and that plain run was slower than the median of the three-rep bench for
+the same model: 920 s against 643 s for Qwen-Image, 246 s against 227 s for
+Z-Image, 129 s against 125 s for Krea. The Qwen-Image and Z-Image rows read
+high because their speed is measured against the sweep's own slower plain run;
+against the bench median, each of those rows sits within what its skipped steps
+allow. One Z-Image row (0.30) shows a speedup below 1×. The Krea 0.60 and 0.80 rows are different: those single gated runs
+were faster than their skip counts allow (at 0.80, 10 computed steps out of 28
+at the plain 128.7 s give 45.96 s, and the gated run took 41.19 s). The record
+does not say why. Read all of these as single timings, not findings. The 2512
+page does not quote the timings in its record.
+
+mflux's release notes changed the output of three of these models after the
+runs. Version 0.22.0 loads the bias of the last normalization layer again for
+FLUX.1 and Qwen-Image (slightly different images for FLUX.1, visibly different
+ones for Qwen-Image) and runs Z-Image's transformer in bfloat16, and 0.24.0
+changed Z-Image's VAE decode. So the Qwen-Image and Krea scores hold for
+mflux 0.18.0 and the Z-Image scores for 0.17.5. The 2512 record was made on
+0.23.0, after the 0.22.0 change.
+
+For each record:
+
+- Qwen-Image: the plain-mflux reference image comes from a first attempt that was stopped when the host ran out of memory (see the 0.10.1 notes in the CHANGELOG), and the gated runs followed hours later. The script has been in the repository since June 2026. The version that frees the text encoders after the prompt is encoded was committed during the run, and reached main in 3b86c8b. The reference and the 0.15 run finished before that change. The record's `memory_saver: true` flag says only that some run freed the encoders; the per-run files that would show which are not committed, so the 0.20 to 0.30 runs most likely did, but the record does not prove it.
+- Qwen-Image-2512: the runs used a working commit that was not kept. The script on main (b883378) differs from it by three lines: how each run reads the variant name, and one line added in the step that wrote this file.
+- Z-Image base: c6a4109, made shortly before the run, holds the script as it then stood; whether the working tree matched it is unknown. The sweep predates the gate change in 0.10.0.
+- FLUX.1 Krea [dev]: the script was committed on a working branch before the run and reached main in 3b86c8b the next day. Whether the working tree matched that commit is not recorded. The Krea fit and its 0.30 default were committed about two minutes after the sweep's last run, and the sweep's 0.30 skip pattern equals the shipped bench's in all three reps, so the sweep most likely ran with that fit. The record names the model by the alias `krea-dev`.
+
+Sweep figures that earlier versions of these pages printed without a record are
+now described in words, without the number. Released CHANGELOG and ROADMAP lines
+keep their figures and carry a dated note where no record exists.
 
 ## Built-in coefficient sources
 
@@ -132,7 +190,7 @@ that sweep was 6, at 0.40, still under the cap.
 | `flux1-krea-dev` | Derived in-repo on 2026-09-05 from 10 prompts × 28 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=4.5 (the model card's recipe). Free `numpy.polyfit(degree=4)` on 270 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.68 (the origin-constrained fit gave 0.66). FLUX.1-dev's vendored tuple was scored on the same pairs and rejected at R² = −496: Krea's per-step changes reach rel-L1 0.66 where dev's stay near 0.2, and dev's 499·x⁴ term explodes there. The fit's intercept (~0.40) makes the package fallback 0.20 skip nothing; the per-variant default 0.30 comes from the sweep on the variant page. | `COEFFICIENTS` in `variants/flux1_krea_dev/config.py`; `_PROVENANCE` in its `integration.py`. Calibration and sweep script: `scripts/calibrate_flux1.py --model krea-dev`. Full report with the scored tuple: `scripts/_calibration_flux1_krea_dev.json`. |
 | `flux2-klein-4b` | Derived in-repo on 2026-05-15 from 10 prompts × 8 steps × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. `numpy.polyfit(degree=4)` on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.65. | `COEFFICIENTS` in `variants/flux2_klein_4b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-4b`. Full report: `scripts/_calibration_flux2_klein_4b.json` (summary only; unlike the klein-9b and base-4b reports it omits the raw `x_values`/`y_values` arrays, so reproducing this tuple offline means re-running the ~196 s calibration). |
 | `flux2-klein-9b` | Derived in-repo on 2026-05-16 from 10 prompts × **8 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`) on 70 consecutive-step `(mod_in, body_out)` rel-L1 pairs; R² = 0.4710. At the package default `rel_l1_thresh=0.20` these coefficients trigger **0 step-skips** on Klein 9B's 8-step schedule — empirical `y_min = 0.25` exceeds the threshold. Any wall-clock difference on Klein comes from `mx.compile`-path avoidance, and only on Macs where mflux compiles `_predict` (not base or Pro M1/M2), not from caching. | `COEFFICIENTS` in `variants/flux2_klein_9b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_9b.json`. |
-| `flux2-klein-base-4b` | Derived in-repo on 2026-05-17 from 10 prompts × **25 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`); R² = 0.106. Low R² for the polynomial form — FLUX.2-family polynomials are noisier than FLUX.1-family. To compensate, this variant ships a per-variant default `rel_l1_thresh=0.17` via `Provenance.default_thresh` (set automatically). At that threshold the gate skips only a few of the 25 steps. The committed multi-run bench for this variant is at the 50-step CFG recipe (`_artifacts/v0.12.0_bench_klein_base_4b.json`). At the package-wide default 0.20 the gate over-fires (19/25 skips, SSIM=0.76); the per-variant default is the recommended setting. Polynomial calibrated at `guidance=1.0`; v0.4.1 reuses it under CFG only because the g=4.0 / 50-step release bench passed the skip and SSIM gates. The encoder-independent `mod_in` invariant justifies one shared branch decision per step; coefficient transfer remains empirical. | `COEFFICIENTS` in `variants/flux2_klein_base_4b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_base_4b.json`. |
+| `flux2-klein-base-4b` | Derived in-repo on 2026-05-17 from 10 prompts × **25 steps** × seed=42 on M1 Max 32GB, bf16, 512×512, guidance=1.0. **Origin-constrained** least-squares fit (forces `poly(0) = 0`); R² = 0.106. Low R² for the polynomial form — FLUX.2-family polynomials are noisier than FLUX.1-family. To compensate, this variant ships a per-variant default `rel_l1_thresh=0.17` via `Provenance.default_thresh` (set automatically). At that threshold the gate skips only a few of the 25 steps. The committed multi-run bench for this variant is at the 50-step CFG recipe (`_artifacts/v0.12.0_bench_klein_base_4b.json`). At the package-wide default 0.20 the gate over-fires and visibly degrades the image (an earlier sweep showed this; no record of it was committed); the per-variant default is the recommended setting. Polynomial calibrated at `guidance=1.0`; v0.4.1 reuses it under CFG only because the g=4.0 / 50-step release bench passed the skip and SSIM gates. The encoder-independent `mod_in` invariant justifies one shared branch decision per step; coefficient transfer remains empirical. | `COEFFICIENTS` in `variants/flux2_klein_base_4b/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_flux2.py --variant klein-base-4b --fit-mode origin`. Full report: `scripts/_calibration_flux2_klein_base_4b.json`. |
 | `qwen-image-2512` | Derived in-repo on 2026-10-20 from 10 prompts (7 fit / 3 held-out) × 50 steps × seed=42 on M1 Max 32 GB, 4-bit, 768×768, guidance=4.0 (CFG), mflux 0.23.0, checkpoint `Qwen/Qwen-Image-2512`. **Origin-constrained** degree-4 fit on Signal A, the modulated block-0 image input the original Qwen-Image variant also gates on; R² = 0.818, held-out 0.785, over input changes from 0.0809 to 0.4706. The original checkpoint's tuple was scored on the same pairs and rejected: R² = −0.35 on the fit prompts and −0.20 on the held-out ones, worse than a constant. The default 0.25 comes from the sweep on the variant page. | `COEFFICIENTS` and `CALIBRATED_RANGE` in `variants/qwen_image_2512/config.py`; `_PROVENANCE` in its `integration.py`. Calibration script: `scripts/calibrate_qwen.py --model Qwen/Qwen-Image-2512`. Full report: `scripts/_calibration_qwen_2512.json`. |
 
 ## Producing new coefficients

@@ -45,7 +45,7 @@ _ZIMAGE_COSINE_GATE = 0.99
 # User-facing quality gate at the committed sweep recipe (512x512, q8, 50 steps,
 # guidance=4.0) + the shipped DEFAULT_THRESH=0.12. Locked from the v0.10.0 validation
 # run under consecutive-delta anchoring (2026-08-15): this test measured SSIM 0.9913
-# (unchanged from the pre-anchoring sweep, tests/_artifacts/sweep_z_image/results_z_image.json),
+# (unchanged from the pre-anchoring sweep, _artifacts/sweeps/z-image-base_2026-05-31.json),
 # and the same recipe in the committed bench _artifacts/v0.10.0_bench_z_image.json skipped
 # 15/48 active steps in every rep (max streak 1). The floor leaves ~0.02 of headroom for
 # cross-machine Metal variance; the band brackets the observed 15 by +-5 — a dormant

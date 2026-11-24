@@ -27,8 +27,9 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
     0.40140693642366004,
 )
 
-# From scripts/calibrate_flux1.py --model krea-dev --sweep (red-apple prompt, 28 steps,
-# g=4.5, 512x512, q4, seed 42, 2026-09-05): SSIM vs vanilla 0.990 at 0.30 with 10 of
+# From scripts/calibrate_flux1.py --model krea-dev --sweep (record:
+# _artifacts/sweeps/flux1-krea-dev_2026-09-05.json; red-apple prompt, 28 steps,
+# g=4.5, 512x512, q4, seed 42): SSIM vs vanilla 0.990 at 0.30 with 10 of
 # 26 active steps skipped and no two skips in a row; 0.890 at 0.35, 0.888 at 0.40,
 # 0.866 at 0.60, 0.863 at 0.80. The knee is sharp, so 0.30 ships. The polynomial's
 # intercept (~0.40 predicted change per step, minimum ~0.26 over the calibration

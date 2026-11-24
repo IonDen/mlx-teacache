@@ -15,16 +15,18 @@ R^2 is lower than the prior 512x512/20-step fit (0.9464) because the heavier
 768x768/50-step recipe samples a finer, noisier per-step rel-L1 distribution.
 
 DEFAULT_THRESH = 0.30 is set from scripts/sweep_threshold_qwen.py at the
-768x768/50-step recipe (red-apple, seed 42, Signal A). Re-swept 2026-09-06 on
-stock q4 under the v0.10.0 consecutive-delta gate: 0.15 -> 24 of 48 active steps
+768x768/50-step recipe (red-apple, seed 42, Signal A). Re-swept on stock q4 under
+the v0.10.0 consecutive-delta gate (record:
+_artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json; the date is the file's
+time): 0.15 -> 24 of 48 active steps
 skipped, SSIM 0.980, longest streak 2; 0.20 -> 26 / 0.980 / 2; 0.25 -> 30 / 0.976 / 3;
 0.30 -> 33 / 0.967 / 4. SSIM degrades gracefully with NO cliff and every point
 clears the 0.95 parity floor, so 0.30 stays: the fastest point that still holds
-visual equivalence (the 0.9.x quality point is back at 0.20). The first sweep
-(2026-06, mixed-precision build, 0.9.x gate: 0.9951 at 0.20, 0.9873 at 0.30,
-0.9809 at 0.40, 0.9783 at 0.50; 24 of 48 skipped at 0.30) is superseded. The
-sweep's single-rep wall-clock is thermal noise; the headline speedup comes from
-the multi-rep bench.
+visual equivalence (the 0.9.x quality point is back at 0.20). It supersedes an
+earlier sweep under the 0.9.x gate; no record of it was committed, so its figures
+are not given. The sweep's single-run speeds are measured against its own plain
+run, which was slower than the multi-rep bench's plain median; the headline
+speedup comes from the multi-rep bench.
 """
 
 from typing import Any

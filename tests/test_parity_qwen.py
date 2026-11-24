@@ -59,9 +59,11 @@ pytestmark = pytest.mark.parity
 
 _COSINE_GATE = 0.99  # threshold=0 re-walk parity (calibration self-check measured >= 0.999)
 # Default-threshold quality floor. Under the v0.10.0 gate this fixture's own saved
-# stock-q4 pair measures SSIM 0.9672 at the shipped thresh 0.30 (0.9781 under 0.9.x, whose
-# 768x768 sweep on the mixed-precision build read 0.9873). 0.95 sits 0.017 below the
-# current number — real margin, but not the ~0.04 it once was; if a re-sweep moves the
+# stock-q4 pair measures SSIM 0.9672 at the shipped thresh 0.30, the value in the stock-q4
+# sweep record _artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json. The 0.9.x gate read
+# higher at this threshold, and so did the earlier 768x768 sweep on the mixed-precision
+# build; neither of those two figures has a published record. 0.95 sits 0.017 below the
+# current number — real margin, but less than it once was; if a re-sweep moves the
 # default, re-derive this from the new pair rather than inheriting it.
 _SSIM_GATE = 0.95
 # Expected skip band at thresh 0.30 under consecutive-delta anchoring: the v0.10.0 bench

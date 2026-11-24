@@ -120,6 +120,7 @@ def test_default_threshold_engages_and_stays_close_to_vanilla(krea_dev: Any) -> 
     assert cos >= _COSINE_GATE, f"cosine {cos:.4f} < {_COSINE_GATE}"
 
 
+# Both from the threshold sweep record _artifacts/sweeps/flux1-krea-dev_2026-09-05.json.
 _SKIP_BAND = (9, 11)  # sweep 2026-09-05: 10 of the 26 active steps at the 0.30 default
 _SSIM_FLOOR = 0.95  # measured 0.990 on this recipe; 0.35 already falls to 0.890
 

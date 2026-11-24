@@ -36,7 +36,7 @@ COEFFICIENTS: tuple[float, float, float, float, float] = (
 CALIBRATED_RANGE: tuple[float, float] = (0.027887196237753466, 0.25914120883567665)
 
 # Set at the SSIM knee from scripts/sweep_threshold_z_image.py
-# (tests/_artifacts/sweep_z_image/results_z_image.json, 2026-06-01 sweep):
+# (record: _artifacts/sweeps/z-image-base_2026-05-31.json, the 2026-05-31 sweep):
 # SSIM holds >= 0.99 through 0.12 (15/48 steps skipped, SSIM 0.9913) then cliffs
 # to ~0.974 at 0.15 and plateaus. 0.12 is the quality-first default — just before
 # the cliff, near-indistinguishable from vanilla. Skip counts are deterministic;

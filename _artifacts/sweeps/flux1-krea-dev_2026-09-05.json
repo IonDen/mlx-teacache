@@ -1,0 +1,66 @@
+{
+  "model": "krea-dev",
+  "recipe": {
+    "num_inference_steps": 28,
+    "guidance": 4.5
+  },
+  "quantize": 4,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 512,
+  "width": 512,
+  "vanilla_seconds": 128.70758870898862,
+  "thresholds": [
+    {
+      "threshold": 0.3,
+      "wrapper_seconds": 84.94533312501153,
+      "speedup_vs_vanilla_single_rep": 1.5151813993074048,
+      "skipped": 10,
+      "computed": 16,
+      "ssim_vs_vanilla": 0.99014406578993,
+      "skip_pattern": "CCCSCSCSCSCSCSCSCSCSCSCCCCCC",
+      "max_consecutive_skips": 1
+    },
+    {
+      "threshold": 0.35,
+      "wrapper_seconds": 71.53643208401627,
+      "speedup_vs_vanilla_single_rep": 1.7991893774884864,
+      "skipped": 12,
+      "computed": 14,
+      "ssim_vs_vanilla": 0.8904452611070486,
+      "skip_pattern": "CCSCSCSCSCSCSCSCSCSCSCSCSCCC",
+      "max_consecutive_skips": 1
+    },
+    {
+      "threshold": 0.4,
+      "wrapper_seconds": 67.34356212499551,
+      "speedup_vs_vanilla_single_rep": 1.9112085052777001,
+      "skipped": 13,
+      "computed": 13,
+      "ssim_vs_vanilla": 0.887810335563895,
+      "skip_pattern": "CCSCSCSCSCSCSCSCSCSCSCSCSCSC",
+      "max_consecutive_skips": 1
+    },
+    {
+      "threshold": 0.6,
+      "wrapper_seconds": 52.20176162500866,
+      "speedup_vs_vanilla_single_rep": 2.465579411544759,
+      "skipped": 16,
+      "computed": 10,
+      "ssim_vs_vanilla": 0.8663006665682934,
+      "skip_pattern": "CCSSCSSCSSCSSCSSCSSCSSCSCSCC",
+      "max_consecutive_skips": 2
+    },
+    {
+      "threshold": 0.8,
+      "wrapper_seconds": 41.191162750008516,
+      "speedup_vs_vanilla_single_rep": 3.124640823812676,
+      "skipped": 18,
+      "computed": 8,
+      "ssim_vs_vanilla": 0.8629652437382086,
+      "skip_pattern": "CCSSCSSSCSSSCSSSCSSCSSCSSCSC",
+      "max_consecutive_skips": 3
+    }
+  ],
+  "note": "Single-rep wall-clock (subprocess-per-threshold, cold each; thermal noise); SSIM and skip counts are deterministic per threshold. Choose DEFAULT_THRESH at the knee where SSIM holds the FLUX.1 PR-gate bar (0.90)."
+}

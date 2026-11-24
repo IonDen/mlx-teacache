@@ -1,0 +1,57 @@
+{
+  "variant": "qwen-image",
+  "signal": "A",
+  "build": "plain-q4",
+  "memory_saver": true,
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "quantize": 4,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 768,
+  "width": 768,
+  "vanilla_seconds": 920.1612461670011,
+  "thresholds": [
+    {
+      "threshold": 0.15,
+      "wrapper_seconds": 538.565588958998,
+      "speedup_vs_vanilla_single_rep": 1.7085407330713338,
+      "skipped": 24,
+      "computed": 24,
+      "ssim_vs_vanilla": 0.9797951271248683,
+      "skip_pattern": "CCCCSCSCSCSCSCSSCSSCSSCSSCSCSCSSCSSCSCSCSCSCSCCCCC",
+      "max_consecutive_skips": 2
+    },
+    {
+      "threshold": 0.2,
+      "wrapper_seconds": 477.95875037499354,
+      "speedup_vs_vanilla_single_rep": 1.9251896642651012,
+      "skipped": 26,
+      "computed": 22,
+      "ssim_vs_vanilla": 0.9797154157074627,
+      "skip_pattern": "CCCSCSCSCSSCSSCSSCSSCSSCSSCSSCSSCSSCSCSCSCSCSCCCCC",
+      "max_consecutive_skips": 2
+    },
+    {
+      "threshold": 0.25,
+      "wrapper_seconds": 361.04683812501025,
+      "speedup_vs_vanilla_single_rep": 2.5485924511777633,
+      "skipped": 30,
+      "computed": 18,
+      "ssim_vs_vanilla": 0.9762769808276643,
+      "skip_pattern": "CCCSCSCSCSSCSSSCSSSCSSSCSSSCSSSCSSSCSSCSSCSCSCCSCC",
+      "max_consecutive_skips": 3
+    },
+    {
+      "threshold": 0.3,
+      "wrapper_seconds": 305.7652674999845,
+      "speedup_vs_vanilla_single_rep": 3.0093713837757843,
+      "skipped": 33,
+      "computed": 15,
+      "ssim_vs_vanilla": 0.9671596455958443,
+      "skip_pattern": "CCCSCSSCSSCSSSCSSSSCSSSSCSSSCSSSCSSSCSSCSSCSSCSCSC",
+      "max_consecutive_skips": 4
+    }
+  ],
+  "note": "Single-rep wall-clock (thermal noise; subprocess-per-threshold = cold each); SSIM is deterministic per threshold. Choose DEFAULT_THRESH at the knee where SSIM holds the high bar. skipped/computed are per denoising step (one shared CFG gate decision per step; each skip avoids both branches' 60-block bodies)."
+}

@@ -1,0 +1,68 @@
+{
+  "variant": "qwen-image-2512",
+  "model": "Qwen/Qwen-Image-2512",
+  "signal": "A",
+  "build": "plain-q4",
+  "memory_saver": true,
+  "num_inference_steps": 50,
+  "guidance": 4.0,
+  "quantize": 4,
+  "prompt": "a red apple on a wooden table",
+  "seed": 42,
+  "height": 768,
+  "width": 768,
+  "vanilla_seconds": 612.5354997080285,
+  "thresholds": [
+    {
+      "threshold": 0.15,
+      "wrapper_seconds": 347.6421163750347,
+      "speedup_vs_vanilla_single_rep": 1.7619714955573107,
+      "skipped": 22,
+      "computed": 26,
+      "ssim_vs_vanilla": 0.9914453353446726,
+      "skip_pattern": "CCCCCCCSCCSCSCSCSCSCSCSCSSCSCSCSCSSSCSSCSSCSCSCCCC",
+      "max_consecutive_skips": 3
+    },
+    {
+      "threshold": 0.2,
+      "wrapper_seconds": 286.6940416659927,
+      "speedup_vs_vanilla_single_rep": 2.1365477152875436,
+      "skipped": 27,
+      "computed": 21,
+      "ssim_vs_vanilla": 0.9776871271913666,
+      "skip_pattern": "CCCSCCCSCCSCSCSSCSSCSSCSSCSSCSCSSCSSSSCSSCSSCSCSCC",
+      "max_consecutive_skips": 4
+    },
+    {
+      "threshold": 0.25,
+      "wrapper_seconds": 269.11157333292067,
+      "speedup_vs_vanilla_single_rep": 2.276139565912517,
+      "skipped": 29,
+      "computed": 19,
+      "ssim_vs_vanilla": 0.969441288345335,
+      "skip_pattern": "CCCSCCCSCSCSSCSSCSSCSSCSSSCSCSSCSSSSCSSSCSSSCSCSCC",
+      "max_consecutive_skips": 4
+    },
+    {
+      "threshold": 0.3,
+      "wrapper_seconds": 241.98340429202653,
+      "speedup_vs_vanilla_single_rep": 2.5313120191036664,
+      "skipped": 32,
+      "computed": 16,
+      "ssim_vs_vanilla": 0.9469952190368289,
+      "skip_pattern": "CCCSCSCSCSCSSCSSSCSSSCSSSCSSCSSSCSSSSSCSSSSCSSCSCC",
+      "max_consecutive_skips": 5
+    },
+    {
+      "threshold": 0.4,
+      "wrapper_seconds": 198.22812933393288,
+      "speedup_vs_vanilla_single_rep": 3.090053373182764,
+      "skipped": 35,
+      "computed": 13,
+      "ssim_vs_vanilla": 0.928298900147309,
+      "skip_pattern": "CCSCSCSCSCSSSCSSSSCSSSSCSSSSCSSSSCSSSSSSCSSSSCSSCC",
+      "max_consecutive_skips": 6
+    }
+  ],
+  "note": "Single-rep wall-clock (thermal noise; subprocess-per-threshold = cold each); SSIM is deterministic per threshold. Choose DEFAULT_THRESH at the knee where SSIM holds the high bar. skipped/computed are per denoising step (one shared CFG gate decision per step; each skip avoids both branches' 60-block bodies)."
+}

@@ -40,12 +40,12 @@ Seed 42, 50 steps, guidance 4.0, q4, 672×896, text encoder freed once the promp
 
 Speedup on this run: 2.06× wall clock, 2.10× with preview decoding left out, 2.15× per step after the first. SSIM of B against A: 0.916, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q4, 672×896, seed 42, text encoder freed once the prompt is encoded. Checkpoint `Qwen/Qwen-Image`; preview decoder `qwen-image`. mlx-teacache 0.11.1 (harness at commit `8c3fff5`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_qwen_image.json).
+Recipe: 50 steps, guidance 4.0, q4, 672×896, seed 42, text encoder freed once the prompt is encoded. Checkpoint `Qwen/Qwen-Image`; preview decoder `qwen-image`. mlx-teacache 0.11.2.dev14+gbcaac6f1c.d20260925 (install-time version string; harness at commit `8c3fff5`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. The run report, `_artifacts/comparison/report.json`, records the commit of each run but not whether each working tree was clean; this run's version string marks uncommitted changes at install time. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_qwen_image.json).
 <!-- COMPARISON:qwen-image:details END -->
 
 ### Notes
 
-Footnote ¹ in the README says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. mflux doesn't compile Qwen's prediction step, so the speedup there is step-skipping, with no compile effect to separate out.
+Footnote ¹ in the README says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. The record is `_artifacts/v0.11.0_bench_qwen_image.json`: uncommitted changes (no file list), no MLX version (MLX 0.31.2 per the lock file at 1536f28), no date field and no threshold or checkpoint field. mflux doesn't compile Qwen's prediction step, and almost all of the speedup there is step-skipping.
 
 On this run the gate skips 26 of 50 steps. Unlike the other models on this page, a few of those skips come two in a row through the middle of the schedule, though never more than two consecutive. A and B keep the same player, pose, sun and court; B redraws the court lines and drops the second net post behind her. The stock 4-bit build leaves a light speckle, sweat-like texture on her shoulder, not the heavier grain the variant page describes at its default recipe.
 

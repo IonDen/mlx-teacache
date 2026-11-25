@@ -50,8 +50,10 @@ The benches show the same streaks for the first three; the 2512 sweep observed
 4 at its 0.25 default, under that bound.
 
 At the committed bench recipes this changed one decision: klein-base-4b at
-50 steps / g=4.0 now computes step 6 (8 skips instead of 9, 1.20× instead of
-1.22×). klein-base-9b, Z-Image and Qwen-Image skip the same steps as before. If
+50 steps / g=4.0 now computes step 6. That gives 8 skips instead of 9, and 1.20× (1.18× from skipped steps × 1.01× from compile avoidance) instead of 1.22×. Each factor is rounded on its own from the unrounded medians, so the rounded factors need not multiply to the rounded total.
+`_artifacts/v0.12.0_bench_klein_base_4b.json` is a clean-tree run at
+ec4d110 with no date field and no MLX version. `_artifacts/v0.10.0_bench_klein_base_4b.json`
+has no commit or dirty field, no date and no MLX version; its install-time version string names commit 90fca33. klein-base-9b, Z-Image and Qwen-Image skip the same steps as before. If
 you re-calibrate one of these variants, update `CALIBRATED_RANGE` together with
 the coefficients; `tests/test_calibration_artifacts.py` fails when they drift
 apart.
@@ -137,7 +139,7 @@ files are copies of what the runs wrote; no value was edited. Every similarity
 score in them was computed from images that are not published, so a reader
 cannot recompute a score from these files.
 
-| Record | Model | Recipe | Date | MLX / mflux per `uv.lock` (macOS entry) | Script |
+| Record | Model | Recipe | Date | MLX / mflux per `uv.lock` | Script |
 |---|---|---|---|---|---|
 | `_artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json` | Qwen-Image | stock 4-bit, 768×768, 50 steps, guidance 4.0, seed 42; thresholds 0.15 to 0.30 | 2026-09-06 | MLX 0.31.2, mflux 0.18.0 (`uv.lock` at 3b86c8b) | `scripts/sweep_threshold_qwen.py`, in the repository since June 2026; the version that frees the text encoders was committed during the run and reached main in 3b86c8b |
 | `_artifacts/sweeps/qwen-image-2512_plain-q4_2026-10-20.json` | Qwen-Image-2512 | stock 4-bit, 768×768, 50 steps, guidance 4.0, seed 42; thresholds 0.15 to 0.40 | 2026-10-20 | MLX 0.32.2, mflux 0.23.0 (`uv.lock` at b883378) | `scripts/sweep_threshold_qwen.py`, as on main at b883378 (see below) |
@@ -154,7 +156,13 @@ recorded.
 The speed columns are single timings. Each is one gated run against one plain
 run, and that plain run was slower than the median of the three-rep bench for
 the same model: 920 s against 643 s for Qwen-Image, 246 s against 227 s for
-Z-Image, 129 s against 125 s for Krea. The Qwen-Image and Z-Image rows read
+Z-Image, 129 s against 125 s for Krea. Those medians come from bench records
+with gaps of their own. `_artifacts/v0.11.0_bench_qwen_image.json` has
+uncommitted changes (the file list is not recorded), no MLX version and
+no date field; `_artifacts/v0.10.0_bench_z_image.json` has no commit or dirty field,
+no date and no MLX version (its install-time version string names commit 90fca33); `_artifacts/v0.11.0_bench_krea_dev.json` has
+uncommitted changes, no date field and no MLX version. The lock files at
+1536f28, c33e8d5 and 040056a pin MLX 0.31.2. The Qwen-Image and Z-Image rows read
 high because their speed is measured against the sweep's own slower plain run;
 against the bench median, each of those rows sits within what its skipped steps
 allow. One Z-Image row (0.30) shows a speedup below 1×. The Krea 0.60 and 0.80 rows are different: those single gated runs
@@ -204,7 +212,7 @@ uv run python scripts/calibrate_flux2.py --variant klein-4b
 # Klein 9B (origin-constrained polyfit; shipped since v0.3.0).
 # IMPORTANT: do not omit --fit-mode origin — the default (free) fit gives
 # a polynomial with poly(0) ≈ 5.36, which is physically nonsensical and
-# was rejected during the v0.3.0 calibration audit.
+# was rejected when the v0.3.0 calibration was checked.
 uv run python scripts/calibrate_flux2.py --variant klein-9b --fit-mode origin
 
 # Klein base-4B (origin-constrained polyfit; shipped since v0.4.0). Non-distilled
@@ -292,7 +300,7 @@ v0.5.0 ships `flux2-klein-base-9b` reusing the polynomial calibrated for
    origin-constrained polyfit. A different recipe — say 50 steps with
    guidance=4.0 — traces a different trajectory through the latent space
    and produces a different polynomial; do not transfer fits across
-   recipes (this is the v0.4.1 plan-audit Finding 3 lesson).
+   recipes.
 
 The reuse is converted from assumption to fact by a one-shot validation
 pass before merge: `scripts/validate_klein_base_9b.py` generates one

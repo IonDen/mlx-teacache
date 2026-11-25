@@ -27,17 +27,17 @@ At the 512×512 red-apple bench recipe on M1 Max 32 GB (subprocess-per-rep, 3 re
 | wrapper, no gate (compile path bypass only) | 228.9 s | 11.5 GiB |
 | wrapper, gated (full TeaCache) | 174.2 s | 11.5 GiB |
 
-The record (`_artifacts/v0.10.0_bench_z_image.json`) has no commit, dirty flag, timestamp or MLX version, so the date comes from the README at the v0.10.0 release. MLX 0.31.2 per the lock file at c33e8d5, the commit that added the record (macOS entry). The gate measured is the one as of the v0.10.0 work, which differs slightly from the release's. Measured on mflux 0.18.0; mflux 0.22.0 runs Z-Image's transformer in bfloat16 instead of float32 (and 0.24.0 changed the VAE decode), so the figure holds for mflux 0.18.0.
+The record (`_artifacts/v0.10.0_bench_z_image.json`) has no commit or dirty field, no timestamp and no MLX version; its install-time version string names commit 90fca33. The date comes from the README at the v0.10.0 release. MLX 0.31.2 per the lock file at c33e8d5, the commit that added the record. The gate measured is the one as of the v0.10.0 work, which differs slightly from the release's. mflux 0.22.0 moved Z-Image's transformer to bfloat16, which changes its speed and images, and mflux 0.24.0 changed the default image decode, so the memory peaks hold for mflux 0.18.0; this row was measured there and not since.
 
 - **Combined speedup: 1.31×** (gating 1.31×, compile-avoidance 0.99×)
 - The wall-clock win is entirely gating. `mx.compile`-path avoidance is not a tailwind on Z-Image — the no-gate wrapper runs at vanilla speed (228.9 s vs 227.4 s; the eager re-walk neither beats nor loses to mflux's compiled `_predict` on this model), so the whole 1.31× is step-skipping.
 - Peak memory drops from 17.2 GiB to 11.5 GiB. This is the eager wrapper bypassing mflux's compiled `_predict`, not the skip path: the no-gate wrapper shows the same ~11.5 GiB peak. Same effect documented on klein-base-9b.
 - Skip count stable across reps: 15 of 48 active steps skipped at `rel_l1_thresh=0.12`, never two in a row (max consecutive-skip streak 1). SSIM 0.991 vs vanilla on this prompt; that SSIM comes from the threshold sweep below, not from the bench.
-- v0.7.0 reported 1.17× at this recipe (245.3 s → 209.4 s, `_artifacts/_bench_z_image_v0_7_0.json`) with a thermally confounded three-way split. The skip count and pattern are identical, so the gap is host state in that session, not the gate.
+- v0.7.0 reported 1.17× at this recipe (245.3 s → 209.4 s, `_artifacts/_bench_z_image_v0_7_0.json`, which records mflux 0.17.5 but has no commit or dirty field, no date and no MLX version; its install-time version string names commit c9db998 and marks uncommitted changes at install time). The skip counts are identical (the record stores counts, not which steps were skipped); the cause of the gap is not recorded.
 
 Reproduce with `uv run python scripts/bench_speedup.py --variant z-image --three-way --reps 3 --report out.json`. Full report at `_artifacts/v0.10.0_bench_z_image.json`.
 
-A separate 640×896 q8 generation on the comparison page skips 16 of 50 steps for a 1.39× speedup on that run, at SSIM 0.93 — see [docs/comparison/z-image-base.md](https://github.com/IonDen/mlx-teacache/blob/main/docs/comparison/z-image-base.md). That's a higher skip count than the 15 of 48 active steps at the 512² bench above.
+An earlier single run at 640×896 and q8 also showed a speedup, but no committed record holds that run. The comparison page has a recorded single run, at a different size: [docs/comparison/z-image-base.md](https://github.com/IonDen/mlx-teacache/blob/main/docs/comparison/z-image-base.md).
 
 ## Threshold sweep
 
@@ -45,7 +45,7 @@ A separate 640×896 q8 generation on the comparison page skips 16 of 50 steps fo
 
 The record is `_artifacts/sweeps/z-image-base_2026-05-31.json`. Its speed column is one gated run per threshold against one plain run of 246 s, while the three-rep bench above has a plain median of 227 s. The rows read high because their speed is measured against that slower plain run, and the 0.30 row shows a speedup below 1×, one slow run and not a result.
 
-What the record leaves out: its date, 2026-05-31, is the file time on the machine when the record was made, and the file name carries it (git keeps no file times). It holds no MLX or mflux version, hardware, commit or uncommitted-changes flag; `uv.lock` at c6a4109 pins mflux 0.17.5 and MLX 0.31.2 (macOS entry). mflux 0.22.0 runs Z-Image's transformer in bfloat16 and 0.24.0 changed the VAE decode, so these scores hold for mflux 0.17.5. Commit c6a4109, made shortly before the run, holds the script as it then stood; whether the working tree matched it is unknown. The sweep predates the gate change in 0.10.0. The images behind the SSIM scores are not published. [`docs/calibration.md`](../calibration.md#threshold-sweep-records) lists the gaps for all four sweep records.
+What the record leaves out: its date, 2026-05-31, is the file time on the machine when the record was made, and the file name carries it (git keeps no file times). It names no MLX or mflux version, hardware, commit or uncommitted-changes flag; `uv.lock` at c6a4109 pins mflux 0.17.5 and MLX 0.31.2. mflux 0.22.0 moved Z-Image's transformer to bfloat16, which changes its speed and images, and mflux 0.24.0 changed the default image decode, so these scores hold for mflux 0.17.5. Commit c6a4109, made shortly before the run, has the script as it then stood; whether the working tree matched it is unknown. The sweep predates the gate change in 0.10.0. The images behind the SSIM scores are not published. [`docs/calibration.md`](../calibration.md#threshold-sweep-records) lists the gaps for all four sweep records.
 
 ## CFG (guidance > 1.0)
 

@@ -2,7 +2,7 @@
 
 Every picture on this page is the same scene: a woman mid-swing on a tennis court at sunset, one seed, one model at a time. Column A is plain mflux. Column B is the same model wrapped with mlx-teacache. Look at the finished image first, then open a model's page for the step-by-step preview sheets that show which steps got skipped.
 
-Each pair comes from one cold generation per condition, run in its own process, with the model weights and the prompt already loaded before the clock starts. A small preview decoder renders every step so you can watch the image form, and that decoding time is counted in both A's and B's numbers below (each block also shows the speedup with the preview time left out). These are single-run timings, not averages: every model links its own multi-run bench report for the steadier number.
+Each pair comes from one cold generation per condition, run in its own process, with the model weights and the prompt already loaded before the clock starts. A small preview decoder renders every step so you can watch the image form, and that decoding time is counted in both A's and B's numbers below (each block also shows the speedup with the preview time left out). These are single-run timings, not averages: every model links its own multi-run bench report for the steadier number. The single-run figures come from the run report, `_artifacts/comparison/report.json`, which records MLX 0.32.2, mflux 0.20.0 and the commit of each run but not whether each working tree was clean.
 
 ## Test machine
 
@@ -14,7 +14,7 @@ Every model draws the same scene with seed 42. The exact prompt each one ran wit
 
 FLUX.1 [dev] and FLUX.1 Krea [dev] render at 768×1024. FLUX.2 [klein] base 4B and Z-Image render at 864×1152, about one megapixel, in 8-bit weights. FLUX.2 [klein] base 9B runs 8-bit too, but at 576×768: at 864×1152 its first step ran past the limit macOS puts on a single GPU job while the screen is in use, and at 768×1024 its three-step memory probe failed the harness's 20 % host-free check, with other apps open on the Mac at the time. Qwen-Image renders at 672×896, the size its memory probe allowed.
 
-These pairs were rendered with mlx-teacache 0.11.1. In 0.12.0 the gate stopped pricing an input change smaller than anything in its calibration as almost no change. That only touches the FLUX.2 [klein] base, Z-Image and Qwen-Image B columns, and only on steps whose change falls outside that range: for the Klein base 4B run below, a replay of its gate predicts 10 skipped steps instead of 11. The Z-Image, Klein base 9B and Qwen-Image runs were not traced.
+These pairs were rendered before 0.12.0. The run report gives the version string 0.11.1 for FLUX.1 [dev] and Krea, 0.11.2.dev1+g992128837.d20260925 for Klein base 4B, Klein base 9B and Z-Image, and 0.11.2.dev14+gbcaac6f1c.d20260925 for Qwen-Image. A version string is fixed when the package is installed, and its `.d` date suffix marks uncommitted changes at install time. In 0.12.0 the gate stopped pricing an input change smaller than anything in its calibration as almost no change. That only touches the FLUX.2 [klein] base, Z-Image and Qwen-Image B columns, and only on steps whose change falls outside that range: for the Klein base 4B run below, a replay of its gate predicts 10 skipped steps instead of 11. The Z-Image, Klein base 9B and Qwen-Image runs were not traced.
 
 ## FLUX.1 [dev]
 
@@ -27,7 +27,7 @@ These pairs were rendered with mlx-teacache 0.11.1. In 0.12.0 the gate stopped p
 On this run: 1.25× faster (1.25× with preview decoding left out) · SSIM 0.84 · multi-run measurement: [bench report](_artifacts/v0.18.0_bench_flux1_dev.json) · [More details →](docs/comparison/flux1-dev.md)
 <!-- COMPARISON:flux1-dev:summary END -->
 
-The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant at 1.30× on mflux 0.24.0 and MLX 0.32.2, all from 6 of 25 skipped steps ([bench report](_artifacts/v0.18.0_bench_flux1_dev.json)). Six skipped steps can give at most about 1.32× (25/19). The wrapper alone gains nothing there: the no-gate run, which computes every step, took the same time as plain mflux (89.46 s both). FLUX.1 has no compiled prediction step, so there's no compile effect to separate out. An older 1.57× from mflux 0.18.0 is above that limit and is kept only as history in the footnote.
+The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant at 1.30× on mflux 0.24.0 and MLX 0.32.2, all from 6 of 25 skipped steps ([bench report](_artifacts/v0.18.0_bench_flux1_dev.json)). That is under its 1.32× limit (footnote ⁶ has the arithmetic). The wrapper alone gains nothing there: the no-gate run, which computes every step, took the same time as plain mflux (89.46 s both). FLUX.1 has no compiled prediction step, so there's no compile effect to separate out. An older 1.57× from mflux 0.18.0 is above that limit and is kept only as history in the footnote (record `_artifacts/v0.10.0_bench_flux1_dev.json`: no commit or dirty field, no date and no MLX version; its install-time version string names commit 90fca33).
 
 ## FLUX.1 Krea [dev]
 
@@ -40,7 +40,7 @@ The multi-run bench ([footnote ⁶](README.md#benchmarks)) measured this variant
 On this run: 1.62× faster (1.64× with preview decoding left out) · SSIM 0.87 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_krea_dev.json) · [More details →](docs/comparison/flux1-krea-dev.md)
 <!-- COMPARISON:flux1-krea-dev:summary END -->
 
-[Footnote ⁷](README.md#benchmarks) credits nearly all of this variant's 1.62× multi-run speedup, about 1.57×, to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder is within the spread between runs. Ten skipped steps out of 28 can give at most about 1.56× (28/18). Each figure is above that limit. One of the three TeaCache runs was much faster than the other two (66.5 s against 77.2 and 79.6 s); this will be measured again. The single run above skipped 11 of 28 steps, which allows at most about 1.65× (28/17); its 1.62× is under that.
+[Footnote ⁷](README.md#benchmarks) gives this variant's multi-run speedup as 1.62×. The 1.62× and the gated run's 1.57× over the no-gate run are both above its 1.56× limit (footnote ⁷), and the record does not say why. The no-gate wrapper's 1.03× over plain mflux is within the rep-to-rep range, and FLUX.1 has no compiled prediction step to avoid. The record, `_artifacts/v0.11.0_bench_krea_dev.json`, notes uncommitted changes (no file list) and has no MLX version or date field; MLX 0.31.2 per the lock file at 040056a. mflux 0.22.0 restored a bias in the model's last layer, which changes FLUX.1's images slightly, so the figure holds for mflux 0.18.0. Footnote ⁷ has the spread of the three TeaCache reps. The single run above skipped 11 of 28 steps, which allows at most about 1.65× (28/17); its 1.62× is under that.
 
 ## FLUX.2 [klein] base 4B
 
@@ -53,7 +53,7 @@ On this run: 1.62× faster (1.64× with preview decoding left out) · SSIM 0.87 
 On this run: 1.27× faster (1.27× with preview decoding left out) · SSIM 0.94 · multi-run measurement: [bench report](_artifacts/v0.12.0_bench_klein_base_4b.json) · [More details →](docs/comparison/klein-base-4b.md)
 <!-- COMPARISON:klein-base-4b:summary END -->
 
-At its matching 512² recipe, [footnote ³](README.md#benchmarks) splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead.
+At its matching 512² recipe, [footnote ³](README.md#benchmarks) splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step (each factor is rounded on its own, so they need not multiply to the 1.20×; skipped steps alone allow 1.19×). The timings hold for mflux 0.18.0, because mflux 0.24.0 changed the default image decode. Plain mflux runs FLUX.2 Klein's prediction step compiled; the wrapper runs it eagerly instead. The record is `_artifacts/v0.12.0_bench_klein_base_4b.json`: clean tree at ec4d110, no date field and no MLX version (MLX 0.31.2 per the lock file at ec4d110; the date comes from its chunk timestamps).
 
 ## Z-Image
 
@@ -66,7 +66,7 @@ At its matching 512² recipe, [footnote ³](README.md#benchmarks) splits this va
 On this run: 1.34× faster (1.34× with preview decoding left out) · SSIM 0.85 · multi-run measurement: [bench report](_artifacts/v0.10.0_bench_z_image.json) · [More details →](docs/comparison/z-image-base.md)
 <!-- COMPARISON:z-image-base:summary END -->
 
-[Footnote ⁵](README.md#benchmarks) measured this variant's 1.31× multi-run speedup as entirely step-skipping: running with the gate off timed at vanilla speed. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation starts, so A and B both peak at 14.7 GiB here.
+[Footnote ⁵](README.md#benchmarks) measured this variant's 1.31× multi-run speedup as entirely step-skipping: running with the gate off timed at vanilla speed. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation starts, so A and B both peak at 14.7 GiB here. The bench record is `_artifacts/v0.10.0_bench_z_image.json`; it has no commit or dirty field, no date and no MLX version, and its install-time version string names commit 90fca33 (MLX 0.31.2 per the lock file at c33e8d5). The multi-run figures were measured on mflux 0.18.0. mflux 0.22.0 moved Z-Image's transformer to bfloat16, which changes its speed and images, and mflux 0.24.0 changed the default image decode, so the memory peaks hold for mflux 0.18.0.
 
 ## FLUX.2 [klein] base 9B
 
@@ -79,7 +79,7 @@ On this run: 1.34× faster (1.34× with preview decoding left out) · SSIM 0.85 
 On this run: 1.33× faster (1.33× with preview decoding left out) · SSIM 0.95 · multi-run measurement: [bench report](_artifacts/v0.12.0_bench_klein_base_9b.json) · [More details →](docs/comparison/klein-base-9b.md)
 <!-- COMPARISON:klein-base-9b:summary END -->
 
-At its matching 512² recipe, [footnote ²](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.35× from skipped steps and a small 1.02× from avoiding a compiled step. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GiB to 9.8 GiB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (11.5 GiB vs 11.6 GiB).
+At its matching 512² recipe, [footnote ²](README.md#benchmarks) splits this variant's 1.37× multi-run speedup into 1.35× from skipped steps and a small 1.02× from avoiding a compiled step (each factor is rounded on its own, so they need not multiply to the 1.37×; skipped steps alone allow 1.35×). The timings hold for mflux 0.18.0, because mflux 0.24.0 changed the default image decode. Plain mflux runs this model's prediction step compiled; the wrapper runs it eagerly instead. That same footnote also reports a peak-memory drop from about 22 GiB to 9.8 GiB at that recipe; it doesn't show up on this run, where the weights are evaluated before generation and the text encoder is freed once the prompt is encoded, so A and B peak within about a gigabyte of each other here (11.5 GiB vs 11.6 GiB). The bench record is `_artifacts/v0.12.0_bench_klein_base_9b.json`: clean tree at ec4d110, no date field and no MLX version (MLX 0.31.2 per the lock file at ec4d110).
 
 ## Qwen-Image
 
@@ -92,7 +92,7 @@ At its matching 512² recipe, [footnote ²](README.md#benchmarks) splits this va
 On this run: 2.06× faster (2.10× with preview decoding left out) · SSIM 0.92 · multi-run measurement: [bench report](_artifacts/v0.11.0_bench_qwen_image.json) · [More details →](docs/comparison/qwen-image.md)
 <!-- COMPARISON:qwen-image:summary END -->
 
-[Footnote ¹](README.md#benchmarks) says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. mflux doesn't compile Qwen's prediction step, so the speedup there is step-skipping, with no compile effect to separate out.
+[Footnote ¹](README.md#benchmarks) says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. The record is `_artifacts/v0.11.0_bench_qwen_image.json`: uncommitted changes (no file list), no MLX version (MLX 0.31.2 per the lock file at 1536f28), no date field and no threshold or checkpoint field. mflux doesn't compile Qwen's prediction step, and almost all of the speedup there is step-skipping.
 
 ## Distilled Klein vs Base Klein
 

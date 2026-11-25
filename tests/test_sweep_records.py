@@ -10,20 +10,23 @@ Three checks, each named for the bug it catches:
   number is printed elsewhere in the file);
 - every doc with a ``FIGURES`` case for a record names that record's path (a figure left without its record).
 
-Streaks and single-run speedups printed beside these figures are not checked. Pure: reads the committed JSON and
-text files, imports nothing from MLX or mflux.
+Streaks printed beside these figures are not checked. The single-run speedups in the sweep tables of the Krea and
+Qwen-Image variant pages are pinned in ``tests/test_bench_figures.py``. Pure: reads the committed JSON and text files,
+imports nothing from MLX or mflux.
 """
 
-import json
 import re
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests._doc_figures import REPO_ROOT as _REPO_ROOT
+from tests._doc_figures import Near, Row, half_up, load_record
+from tests._doc_figures import doc_prints as _doc_prints
+from tests._doc_figures import figures_at as _figures_at
 
 R1 = "_artifacts/sweeps/qwen-image_plain-q4_2026-09-06.json"
 R3 = "_artifacts/sweeps/qwen-image-2512_plain-q4_2026-10-20.json"
@@ -44,21 +47,6 @@ KREA_CFG = "src/mlx_teacache/variants/flux1_krea_dev/config.py"
 
 SSIM = "ssim_vs_vanilla"
 SKIPPED = "skipped"
-
-
-@dataclass(frozen=True, slots=True)
-class Row:
-    """The cell under the one header starting with ``column``, in the one table row whose first cell is the threshold."""
-
-    column: str
-
-
-@dataclass(frozen=True, slots=True)
-class Near:
-    """A hand-typed regex for the figure's sentence: ``{f}`` marks the figure, ``{n}`` any other number. It must
-    match exactly once in the doc, read with line breaks, indents and ``#`` comment marks collapsed to one space."""
-
-    pattern: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,13 +272,6 @@ DOC_NAMES_RECORD: tuple[tuple[str, str], ...] = tuple(
 )
 
 
-def load_record(record_path: str) -> dict[str, Any]:
-    """Parse a record with every float kept as its exact decimal text (no binary rounding before half-up)."""
-    text = (_REPO_ROOT / record_path).read_text(encoding="utf-8")
-    parsed: dict[str, Any] = json.loads(text, parse_float=Decimal)
-    return parsed
-
-
 def record_value(record: dict[str, Any], threshold: str, key: str) -> Decimal:
     """The value of ``key`` in the one row whose ``threshold`` equals ``threshold``."""
     rows = [row for row in record["thresholds"] if Decimal(str(row["threshold"])) == Decimal(threshold)]
@@ -298,54 +279,14 @@ def record_value(record: dict[str, Any], threshold: str, key: str) -> Decimal:
     return Decimal(str(rows[0][key]))
 
 
-def half_up(value: Decimal, digits: int) -> str:
-    """``value`` rounded half-up to ``digits`` decimals, as the docs print it."""
-    return str(value.quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
-
-
-# ``{f}`` captures the whole number (never 0.97 out of 0.976); ``{n}`` stands for any other number.
-_FIGURE = r"(?<![\d.])(\d+(?:\.\d+)?)(?!\d)"
-_NUMBER = r"\d+(?:\.\d+)?"
-
-
-def _table_cells(text: str, threshold: str, column: str) -> list[str]:
-    """Every cell under a header starting with ``column`` in a table row whose first cell is ``threshold``."""
-    cells: list[str] = []
-    header: list[str] | None = None
-    for line in text.splitlines():
-        if not line.lstrip().startswith("|"):
-            header = None
-            continue
-        row = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if header is None:
-            header = row
-            continue
-        columns = [i for i, name in enumerate(header) if name.startswith(column)]
-        if row[0] == threshold and len(columns) == 1 and columns[0] < len(row):
-            cells.append(row[columns[0]])
-    return cells
-
-
-def _flatten(text: str) -> str:
-    """``text`` as one line: line breaks, indents and leading ``#`` comment marks become one space."""
-    lines = (re.sub(r"^\s*#*\s*", "", line) for line in text.splitlines())
-    return re.sub(r"\s+", " ", " ".join(lines))
-
-
 def figures_at(text: str, case: Case) -> list[str]:
     """Every figure ``text`` prints at the case's place: one item when the place is unambiguous."""
-    if isinstance(case.where, Row):
-        return _table_cells(text, case.threshold, case.where.column)
-    pattern = case.where.pattern.replace("{f}", _FIGURE).replace("{n}", _NUMBER)
-    assert re.compile(pattern).groups == 1, (
-        f"{case.doc}: anchor {case.where.pattern!r} needs exactly one {{f}}"
-    )
-    return re.findall(pattern, _flatten(text))
+    return _figures_at(text, case.where, case.threshold)
 
 
 def doc_prints(text: str, case: Case) -> bool:
     """True when ``text`` prints ``case.published`` at the case's place, and that place occurs exactly once."""
-    return figures_at(text, case) == [case.published]
+    return _doc_prints(text, case.where, case.published, case.threshold)
 
 
 def _case(

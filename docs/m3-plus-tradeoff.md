@@ -38,7 +38,10 @@ against vanilla mflux (`compile_avoidance_ratio` in
 `_artifacts/v0.12.0_bench_klein_base_4b.json` and
 `_artifacts/v0.12.0_bench_klein_base_9b.json`): 1.01× on Klein base 4B, which
 is noise, and a small 1.02× on Klein base 9B. The eager path was no slower, and
-nearly all of the speedup on those recipes comes from skipped steps. M3 and
+nearly all of the speedup on those recipes comes from skipped steps. Both
+records are clean-tree runs at ec4d110 with no date field and no MLX version
+(MLX 0.31.2 per the lock file at ec4d110; the date comes from their chunk
+timestamps). M3 and
 newer chips have not been measured here.
 
 For FLUX.2 Klein at the distilled 4-8 step defaults the gate does not fire at

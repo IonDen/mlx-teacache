@@ -38,16 +38,16 @@ Seed 42, 50 steps, guidance 4.0, q8, 864×1152.
 
 Speedup on this run: 1.27× wall clock, 1.27× with preview decoding left out, 1.28× per step after the first. SSIM of B against A: 0.940, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `black-forest-labs/FLUX.2-klein-base-4B`; preview decoder `taef2`. mlx-teacache 0.11.1 (harness at commit `3b6f5e0`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.12.0_bench_klein_base_4b.json).
+Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `black-forest-labs/FLUX.2-klein-base-4B`; preview decoder `taef2`. mlx-teacache 0.11.2.dev1+g992128837.d20260925 (install-time version string; harness at commit `3b6f5e0`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. The run report, `_artifacts/comparison/report.json`, records the commit of each run but not whether each working tree was clean; this run's version string marks uncommitted changes at install time. Multi-run measurement of this model: [bench report](../../_artifacts/v0.12.0_bench_klein_base_4b.json).
 <!-- COMPARISON:klein-base-4b:details END -->
 
 ### Notes
 
-At its matching 512² recipe, footnote ³ splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Plain mflux runs FLUX.2 Klein base 4B's prediction step compiled; the wrapper runs it eagerly instead. This run didn't include a no-gate condition, so the MLX peak-generation difference below (14.7 GiB vs 12.5 GiB) can't be pinned on the eager path versus the gate.
+At its matching 512² recipe, footnote ³ splits this variant's 1.20× multi-run speedup (measured with 0.12.0) into 1.18× from skipped steps and a noise-level 1.01× from avoiding a compiled step. Each factor is rounded on its own from the unrounded medians, so the rounded factors need not multiply to the rounded total; skipped steps alone allow 1.19×. The multi-run timings hold for mflux 0.18.0, because mflux 0.24.0 changed the default image decode. Plain mflux runs FLUX.2 Klein base 4B's prediction step compiled; the wrapper runs it eagerly instead. This run didn't include a no-gate condition, so the MLX peak-generation difference below (14.7 GiB vs 12.5 GiB) can't be pinned on the eager path versus the gate. The bench record is `_artifacts/v0.12.0_bench_klein_base_4b.json`: clean tree at ec4d110, no date field and no MLX version (MLX 0.31.2 per the lock file at ec4d110; the date comes from its chunk timestamps).
 
 On this run the gate skips 11 of 50 steps, most of them in the first half of the schedule. The scene holds, down to the shoes and laces, but two things change in B: she squints with her eyes nearly closed, and a second ball appears beside the racket. Both come from steps skipped at the library's default threshold (0.17), which is what this page shows.
 
-This run used mlx-teacache 0.11.1. From 0.12.0 the gate no longer skips a step whose input change is smaller than anything in its calibration. A replay of this run's gate predicts one fewer skip (10 of 50) with 0.12.0, and several of the early skips land a step later, so B would come out slightly different.
+This run's report gives the version string 0.11.2.dev1+g992128837.d20260925, which is fixed when the package is installed. From 0.12.0 the gate no longer skips a step whose input change is smaller than anything in its calibration. A replay of this run's gate predicts one fewer skip (10 of 50) with 0.12.0, and several of the early skips land a step later, so B would come out slightly different.
 
 ### Reproduce
 

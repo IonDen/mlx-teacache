@@ -17,7 +17,7 @@ flux = Flux2Klein(quantize=4, model_config=ModelConfig.flux2_klein_9b())
 - Default `rel_l1_thresh`: `None` (caller passes one, or the package fallback 0.20 is used)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-Gate engagement is the same shape as klein-4b: the distilled 8-step schedule produces adjacent-step body-output rel-L1 above the threshold, so 0 skips at the package default. Any wall-clock difference comes from `mx.compile`-path avoidance, and only on Macs where mflux compiles `_predict` (Max and Ultra chips, and M3 and newer; not base or Pro M1/M2). This repository has no committed multi-run measurement of that effect on the 8-step schedule, so no figure is quoted. The same mechanism measures 1.02× on the 50-step klein-base-9b CFG recipe.
+Gate engagement is the same shape as klein-4b: the distilled 8-step schedule produces adjacent-step body-output rel-L1 above the threshold, so 0 skips at the package default. Any wall-clock difference comes from `mx.compile`-path avoidance, and only on Macs where mflux compiles `_predict` (Max and Ultra chips, and M3 and newer; not base or Pro M1/M2). This repository has no committed multi-run measurement of that effect on the 8-step schedule, so no figure is quoted. The same mechanism measures 1.02× on the 50-step klein-base-9b CFG recipe (`_artifacts/v0.12.0_bench_klein_base_9b.json`: clean tree at ec4d110, no date field and no MLX version).
 
 ## Coefficient provenance
 

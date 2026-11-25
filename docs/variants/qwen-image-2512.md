@@ -10,7 +10,7 @@ Qwen-Image-2512 (Alibaba) is a newer checkpoint of the Qwen-Image architecture, 
 - Default `rel_l1_thresh`: **0.25**, set from the threshold sweep below. The original checkpoint's 0.30 drops below the 0.95 SSIM floor on this one.
 - Skip window: `skip_first_n_steps=1`, `skip_last_n_steps=1`.
 - Patch strategy: the Qwen-Image proxy transformer (`ProxyQwenTransformer` + `qwen_forward_with_gate`), so the README's `flux.parameters()` caveat applies here too.
-- Every number on this page except the threshold-sweep table (its record holds no hardware or versions; see below) was measured on a MacBook Pro M1 Max 32 GB, macOS 27, mflux 0.23.0, MLX 0.32.2, with the model quantized to 4 bits at load (`quantize=4`).
+- Every number on this page except the threshold-sweep table (its record names no hardware or versions; see below) was measured on a MacBook Pro M1 Max 32 GB, macOS 27, mflux 0.23.0, MLX 0.32.2, with the model quantized to 4 bits at load (`quantize=4`).
 
 ## Construct via mflux
 
@@ -52,7 +52,7 @@ You need both: with your own coefficients the default threshold becomes 0.20, an
 - The fit covers input changes from 0.0809 to 0.4706. The gate clamps a smaller change to the bottom of that range and always computes on a larger one (`CALIBRATED_RANGE`, see `docs/calibration.md`).
 - The fit and the per-step pairs are committed as `scripts/_calibration_qwen_2512.json`, and a test pins the config's tuple and range to it.
 
-Each calibration prompt peaked at 25.93 GiB. That is above the roughly 25 GiB recommended working set of a 32 GB M1 Max. The run finished with mflux's memory saver freeing the text encoders after the prompt was encoded and with other apps closed.
+Each calibration prompt peaked above the working set of a 32 GB M1 Max. The calibration record, `scripts/_calibration_qwen_2512.json`, is committed but does not hold that peak. The run finished with mflux's memory saver freeing the text encoders after the prompt was encoded and with other apps closed.
 
 ## Threshold sweep
 
@@ -66,7 +66,7 @@ Each calibration prompt peaked at 25.93 GiB. That is above the roughly 25 GiB re
 | 0.30 | 32 | 5 | 0.947 |
 | 0.40 | 35 | 6 | 0.928 |
 
-What the record leaves out: its date, 2026-10-20, is the file time on the machine when the record was made, and the file name carries it (git keeps no file times). It holds no MLX or mflux version, hardware, commit or uncommitted-changes flag; `uv.lock` at b883378 pins mflux 0.23.0 and MLX 0.32.2 (macOS entry), and the sweep's hardware is not recorded. The runs used a working commit that was not kept. The script on main at b883378 differs from it by three lines: how each run reads the variant name, and one line added in the step that wrote this file. The images behind the SSIM scores are not published. [`docs/calibration.md`](../calibration.md#threshold-sweep-records) lists the gaps for all four sweep records.
+What the record leaves out: its date, 2026-10-20, is the file time on the machine when the record was made, and the file name carries it (git keeps no file times). It names no MLX or mflux version, hardware, commit or uncommitted-changes flag; `uv.lock` at b883378 pins mflux 0.23.0 and MLX 0.32.2, and the sweep's hardware is not recorded. The runs used a working commit that was not kept. The script on main at b883378 differs from it by three lines: how each run reads the variant name, and one line added in the step that wrote this file. The images behind the SSIM scores are not published. [`docs/calibration.md`](../calibration.md#threshold-sweep-records) lists the gaps for all four sweep records.
 
 The default is the highest swept threshold that keeps SSIM at or above 0.95, keeps the longest run of skips under the cap of 8 and shows no visible artefact. At 0.25 the image looks the same as plain mflux, with slightly softer fine detail on the apple skin. The sweep runs peaked just above the recommended working set of a 32 GB Mac; no record of those peaks was committed. Replaying the shipped gate over the calibration traces, with no weights loaded, gives the same 29 skips and longest run of 4 at 0.25 (`tests/test_gate_replay.py` pins this).
 
@@ -74,7 +74,7 @@ This release has no speed benchmark for Qwen-Image-2512. The sweep ran one gener
 
 ## Memory saver
 
-When mflux's memory saver drops the transformer after the denoising loop (`--low-ram` for a single seed), TeaCache keeps no reference to it, and the decode runs without the transformer's weights in memory. We checked this once on Qwen-Image-2512 at 4 bits, 768×768 and 8 steps, with `MemorySaver(keep_transformer=False)`, which is what `--low-ram` registers for one seed. With TeaCache applied, MLX's active memory going into the decode was 0.00 GiB. A control run that kept one reference to the transformer, the way 0.13.2 did, had 12.30 GiB.
+When mflux's memory saver drops the transformer after the denoising loop (`--low-ram` for a single seed), TeaCache keeps no reference to it, and the decode runs without the transformer's weights in memory. We checked this once on Qwen-Image-2512 at 4 bits, 768×768 and 8 steps, with `MemorySaver(keep_transformer=False)`, which is what `--low-ram` registers for one seed. With TeaCache applied, MLX's active memory going into the decode showed that the transformer's memory was freed before the decode. A control run that kept one reference to the transformer, the way 0.13.2 did, still held it at that point. No record of either run was committed.
 
 ## Real-weights check
 

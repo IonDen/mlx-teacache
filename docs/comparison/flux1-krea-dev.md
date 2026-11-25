@@ -38,12 +38,12 @@ Seed 42, 28 steps, guidance 4.5, q4, 768×1024.
 
 Speedup on this run: 1.62× wall clock, 1.64× with preview decoding left out, 1.68× per step after the first. SSIM of B against A: 0.875, measured on the lossless outputs.
 
-Recipe: 28 steps, guidance 4.5, q4, 768×1024, seed 42. Checkpoint `black-forest-labs/FLUX.1-Krea-dev`; preview decoder `taef1`. mlx-teacache 0.11.1 (harness at commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_krea_dev.json).
+Recipe: 28 steps, guidance 4.5, q4, 768×1024, seed 42. Checkpoint `black-forest-labs/FLUX.1-Krea-dev`; preview decoder `taef1`. mlx-teacache 0.11.1 (harness at commit `bcaac6f`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. The run report, `_artifacts/comparison/report.json`, records the commit of each run but not whether each working tree was clean. Multi-run measurement of this model: [bench report](../../_artifacts/v0.11.0_bench_krea_dev.json).
 <!-- COMPARISON:flux1-krea-dev:details END -->
 
 ### Notes
 
-Footnote ⁷ credits about 1.57× of this variant's 1.62× multi-run speedup to skipped steps. FLUX.1 has no compiled prediction step to avoid, so the small remainder above that figure is within the spread between runs. Ten skipped steps out of 28 can give at most about 1.56× (28/18). Each multi-run figure is above that limit. One of the three TeaCache runs was much faster than the other two (66.5 s against 77.2 and 79.6 s); this will be measured again. Like FLUX.1 [dev], Krea's CLIP-L text encoder reads only the first 77 prompt tokens, while T5 reads the whole prompt.
+Footnote ⁷ gives this variant's multi-run speedup as 1.62×. The 1.62× and the gated run's 1.57× over the no-gate run are both above its 1.56× limit (footnote ⁷), and the record does not say why. The no-gate wrapper's 1.03× over plain mflux is within the rep-to-rep range, and FLUX.1 has no compiled prediction step to avoid. The record, `_artifacts/v0.11.0_bench_krea_dev.json`, notes uncommitted changes (no file list) and has no MLX version or date field; MLX 0.31.2 per the lock file at 040056a. mflux 0.22.0 restored a bias in the model's last layer, which changes FLUX.1's images slightly, so the figure holds for mflux 0.18.0. Footnote ⁷ has the spread of the three TeaCache reps. Like FLUX.1 [dev], Krea's CLIP-L text encoder reads only the first 77 prompt tokens, while T5 reads the whole prompt.
 
 On this run the gate skips 11 of 28 steps, alternating from step 4 through step 24. A and B read as close to the same photo: the ball sits a touch differently in the air and one court line shifts slightly, and little else moves. The model again drew its own sportswear logo on the visor and top in both frames, on its own.
 

@@ -106,39 +106,28 @@ def _sheets(slug: str, v: dict[str, Any]) -> str:
     )
 
 
-def _release_label(version: str) -> str:
-    """The release a rendered page should credit for a recorded mlx-teacache version string.
-
-    An editable-install dev version such as "0.11.2.dev14+gbcaac6f1c.d20260925" names the *next*,
-    unreleased patch (hatch-vcs bumps the patch the commit after a tag), so the label is the previous
-    patch release (0.11.2.devN -> 0.11.1). A dev version whose patch component is already 0 (e.g.
-    "0.12.0.dev3") has no prior patch to fall back to, so the label names the release it precedes instead
-    ("a development build before 0.12.0"). A plain release version is shown as its own public version. A
-    git-describe stamp ("v0.12.0-3-gabc1234-dirty") credits the tag it builds on (0.12.0), never the commit
-    count, sha or dirty flag. Any other string PEP 440 can't parse is shown exactly as recorded rather than
-    crashing the generator."""
-    import re
-
-    from packaging.version import InvalidVersion, Version
-
-    described = re.fullmatch(r"v?(\d+\.\d+\.\d+)(?:-\d+-g[0-9a-f]+)?(?:-dirty)?", version)
-    if described and described.group(1) != version:
-        return described.group(1)
-    try:
-        parsed = Version(version)
-    except InvalidVersion:
-        return version
-    if not parsed.is_devrelease:
-        return parsed.public
-    if parsed.micro == 0:
-        return f"a development build before {parsed.major}.{parsed.minor}.0"
-    return f"{parsed.major}.{parsed.minor}.{parsed.micro - 1}"
+# A hatch-vcs version built from a tree with uncommitted changes ends in ".d<YYYYMMDD>", the install date; a
+# `git describe --dirty` string ends in "-dirty".
+_INSTALL_DATE = re.compile(r"\.d\d{8}$|-dirty$")
+_RELEASE = re.compile(r"\d+\.\d+\.\d+")
 
 
-def library_line(provenance: dict[str, Any]) -> str:
-    label = _release_label(str(provenance.get("mlx_teacache_version", "")))
+def _uncommitted_at_install(version: str) -> bool:
+    return bool(_INSTALL_DATE.search(version))
+
+
+def version_line(provenance: dict[str, Any]) -> str:
+    """The mlx-teacache version string this run recorded, as recorded, and the harness commit.
+
+    The string is fixed when the package is installed, so any string other than a plain release (a dev build,
+    a local ``+g<sha>`` segment) is labelled as the install-time version string, kept apart from the commit
+    the harness ran at."""
+    version = str(provenance.get("mlx_teacache_version") or "")
     sha = provenance.get("git_sha_b") or provenance.get("git_sha_a")
-    return f"mlx-teacache {label} (harness at commit `{sha}`)"
+    if not version:
+        return f"mlx-teacache version not recorded (harness at commit `{sha}`)"
+    label = "" if _RELEASE.fullmatch(version) else "install-time version string; "
+    return f"mlx-teacache {version} ({label}harness at commit `{sha}`)"
 
 
 def _details(slug: str, v: dict[str, Any], seed: int) -> str:
@@ -172,14 +161,21 @@ def _details(slug: str, v: dict[str, Any], seed: int) -> str:
     table = ["|  | A: TeaCache off | B: TeaCache on |", "|---|---|---|"] + [
         f"| {r} | {x} | {y} |" for r, x, y in rows
     ]
+    install_mark = (
+        "; this run's version string marks uncommitted changes at install time"
+        if _uncommitted_at_install(str(p.get("mlx_teacache_version", "")))
+        else ""
+    )
     footer = (
         f"\n\nSpeedup on this run: {_x(v['speedup_wall'])} wall clock, {_x(v['speedup_preview_subtracted'])} with "
         f"preview decoding left out, {_x(v['speedup_steady'])} per step after the first. SSIM of B against A: "
         f"{v['ssim']:.3f}, measured on the lossless outputs.\n\nRecipe: {v['steps']} steps, guidance {v['guidance']}, "
         f"q{v['quantize']}, {v['width']}×{v['height']}, seed {seed}"
         f"{', text encoder freed once the prompt is encoded' if v['free_encoders'] else ''}. Checkpoint "
-        f"`{v['checkpoint']}`; preview decoder `{v['decoder']}`. {library_line(p)}, "
+        f"`{v['checkpoint']}`; preview decoder `{v['decoder']}`. {version_line(p)}, "
         f"mflux {p.get('version_mflux')}, MLX {p.get('version_mlx')}, mlx-taef {p.get('version_mlx_taef')}. "
+        "The run report, `_artifacts/comparison/report.json`, records the commit of each run but not whether "
+        f"each working tree was clean{install_mark}. "
         f"Multi-run measurement of this model: [bench report](../../{_bench_report(v)})."
     )
     return "\n".join(table) + footer

@@ -141,52 +141,109 @@ def test_details_footer_has_a_blank_line_before_the_speedup_paragraph() -> None:
     assert "|\n\nSpeedup on this run" in d
 
 
-def test_library_line_bases_a_dev_version_on_the_previous_patch_release() -> None:
-    """Bug: a stale editable-install dev version string (e.g. "0.11.2.dev14+g...", which names the *next*,
-    unreleased patch) is rendered onto the page verbatim instead of being normalized to the last real release."""
-    line = gen.library_line(
-        {
-            "mlx_teacache_version": "0.11.2.dev14+gbcaac6f1c.d20260925",
-            "git_sha_a": "aaa0000",
-            "git_sha_b": "bbb1111",
-        }
-    )
-    assert line == "mlx-teacache 0.11.1 (harness at commit `bbb1111`)"
-
-
-def test_library_line_keeps_a_release_version_and_falls_back_to_git_sha_a() -> None:
-    """Bug: a non-dev recorded version gets decremented too (it shouldn't), or the sha falls back to
-    git_sha_a only when git_sha_b is present rather than when it's genuinely missing."""
-    line = gen.library_line({"mlx_teacache_version": "0.11.1", "git_sha_a": "ccc2222"})
-    assert line == "mlx-teacache 0.11.1 (harness at commit `ccc2222`)"
-
-
-def test_library_line_names_the_target_release_when_a_dev_build_has_no_prior_patch() -> None:
-    """Bug: a dev version with patch 0 (e.g. "0.12.0.dev3", which has no prior 0.12.-1 to fall back to)
-    renders a nonsensical decremented patch instead of naming the release it precedes."""
-    line = gen.library_line({"mlx_teacache_version": "0.12.0.dev3+gabc1234", "git_sha_b": "ddd3333"})
-    assert line == "mlx-teacache a development build before 0.12.0 (harness at commit `ddd3333`)"
-
-
-def test_library_line_renders_an_unparsable_version_verbatim() -> None:
-    """Bug: a version string PEP 440 can't parse (a corrupted hatch-vcs tag, a hand-edited report) crashes
-    the generator instead of being shown as-is."""
-    line = gen.library_line({"mlx_teacache_version": "not-a-version", "git_sha_b": "eee4444"})
-    assert line == "mlx-teacache not-a-version (harness at commit `eee4444`)"
-
-
-def test_details_footer_never_renders_a_dev_version_string() -> None:
-    """Bug: the raw provenance mlx_teacache_version -- which can be a ".dev" editable-install string --
-    leaks straight onto the page instead of going through library_line()."""
+def _details_for(version: str, sha: str = "8c3fff5") -> str:
     report = _report()
-    report["variants"]["flux1-dev"]["provenance"]["mlx_teacache_version"] = (
-        "0.11.2.dev14+gbcaac6f1c.d20260925"
+    report["variants"]["flux1-dev"]["provenance"]["mlx_teacache_version"] = version
+    report["variants"]["flux1-dev"]["provenance"]["git_sha_b"] = sha
+    return gen.render_blocks(report)["flux1-dev:details"]
+
+
+_NOT_CLEAN = "records the commit of each run but not whether each working tree was clean"
+_UNCOMMITTED = "this run's version string marks uncommitted changes at install time"
+
+
+def test_details_footer_prints_a_release_version_as_recorded_with_no_install_mark() -> None:
+    """Bug: a plain release string is relabelled (decremented, or called install-time), or the footer claims
+    uncommitted changes for a stamp that carries no ``.d<date>`` suffix."""
+    d = _details_for("0.11.1", "bcaac6f")
+    assert "mlx-teacache 0.11.1 (harness at commit `bcaac6f`)," in d
+    assert f"{_NOT_CLEAN}. " in d
+    assert "install" not in d
+
+
+def test_details_footer_prints_a_dev_version_verbatim_as_install_time_without_a_date_mark() -> None:
+    """Bug: a dev build's own string is replaced by the previous release ("0.11.1") instead of being shown as
+    the run recorded it, or the uncommitted mark is keyed on ``.dev`` rather than on the ``.d<date>`` suffix."""
+    d = _details_for("0.11.2.dev14+gbcaac6f1c")
+    assert (
+        "mlx-teacache 0.11.2.dev14+gbcaac6f1c (install-time version string; harness at commit `8c3fff5`),"
+        in d
     )
-    report["variants"]["flux1-dev"]["provenance"]["git_sha_b"] = "8c3fff5"
-    d = gen.render_blocks(report)["flux1-dev:details"]
-    assert ".dev" not in d
-    assert "this branch" not in d
-    assert "mlx-teacache 0.11.1 (harness at commit `8c3fff5`)" in d
+    assert f"{_NOT_CLEAN}. " in d
+    assert "uncommitted" not in d
+
+
+def test_details_footer_says_a_dated_dev_stamp_marks_uncommitted_changes_at_install() -> None:
+    """Bug: the page credits a ``.d<date>`` stamp to a release, or drops the note that the suffix marks
+    uncommitted changes at install time."""
+    d = _details_for("0.11.2.dev14+gbcaac6f1c.d20260925")
+    assert (
+        "mlx-teacache 0.11.2.dev14+gbcaac6f1c.d20260925 (install-time version string; harness at commit "
+        "`8c3fff5`)," in d
+    )
+    assert f"{_NOT_CLEAN}; {_UNCOMMITTED}. " in d
+
+
+def test_details_footer_does_not_take_a_dev_number_for_a_date_suffix() -> None:
+    """Bug: the suffix rule matches ".dev" or a short ".d" run, so a stamp with no install date gets the
+    uncommitted mark (the hatch-vcs date is exactly eight digits at the end of the string)."""
+    assert "uncommitted" not in _details_for("0.11.2.dev20260925")
+    assert "uncommitted" not in _details_for("0.11.2.dev1+g992128837.d2026092")
+    assert _UNCOMMITTED in _details_for("0.11.2.dev1+g992128837.d20260925")
+
+
+def test_details_footer_says_a_dirty_describe_string_marks_uncommitted_changes_at_install() -> None:
+    """Bug: a git-describe string built from a dirty tree ("-dirty" at the end) gets no uncommitted mark, so the
+    footer reads as if nothing marked that run's tree; or a "-dirty" in the middle of the string counts."""
+    d = _details_for("v0.12.0-3-gabc1234-dirty")
+    assert (
+        "mlx-teacache v0.12.0-3-gabc1234-dirty (install-time version string; harness at commit `8c3fff5`),"
+        in d
+    )
+    assert f"{_NOT_CLEAN}; {_UNCOMMITTED}. " in d
+    assert "uncommitted" not in _details_for("v0.12.0-3-gabc1234")
+    assert "uncommitted" not in _details_for("v0.12.0-dirtyfix-3-gabc1234")
+
+
+def test_version_line_says_when_no_version_was_recorded() -> None:
+    """Bug: a run with no ``mlx_teacache_version`` (missing, empty or null) prints "mlx-teacache  (install-time
+    version string; …)": a double space, no version, and a label for a string that does not exist."""
+    expected = "mlx-teacache version not recorded (harness at commit `bbb1111`)"
+    assert gen.version_line({"git_sha_b": "bbb1111"}) == expected
+    assert gen.version_line({"mlx_teacache_version": "", "git_sha_b": "bbb1111"}) == expected
+    assert gen.version_line({"mlx_teacache_version": None, "git_sha_b": "bbb1111"}) == expected
+    assert "uncommitted" not in _details_for("")
+
+
+def test_committed_pages_print_each_runs_own_version_string() -> None:
+    """Bug: a comparison page prints one fixed release for every run instead of the version string its own
+    run recorded in the committed report."""
+    report = json.loads(gen.REPORT.read_text())
+    blocks = gen.render_blocks(report)
+    expected = {
+        "flux1-dev": ("0.11.1", False),
+        "flux1-krea-dev": ("0.11.1", False),
+        "klein-base-4b": ("0.11.2.dev1+g992128837.d20260925", True),
+        "klein-base-9b": ("0.11.2.dev1+g992128837.d20260925", True),
+        "z-image-base": ("0.11.2.dev1+g992128837.d20260925", True),
+        "qwen-image": ("0.11.2.dev14+gbcaac6f1c.d20260925", True),
+    }
+    assert set(report["variants"]) == set(expected)
+    for slug, (version, uncommitted) in expected.items():
+        d = blocks[f"{slug}:details"]
+        assert f"mlx-teacache {version} (" in d, slug
+        assert (_UNCOMMITTED in d) is uncommitted, slug
+
+
+def test_version_line_credits_the_b_run_commit_and_falls_back_to_the_a_run_commit() -> None:
+    """Bug: the line credits the A run's commit when the B run recorded its own, or shows no commit (None)
+    when only the A run recorded one."""
+    both = gen.version_line(
+        {"mlx_teacache_version": "0.11.1", "git_sha_a": "aaa0000", "git_sha_b": "bbb1111"}
+    )
+    assert both == "mlx-teacache 0.11.1 (harness at commit `bbb1111`)"
+    only_a = gen.version_line({"mlx_teacache_version": "0.11.1", "git_sha_a": "ccc2222"})
+    assert only_a == "mlx-teacache 0.11.1 (harness at commit `ccc2222`)"
 
 
 def test_details_footer_says_text_encoder_freed_singular() -> None:
@@ -376,16 +433,3 @@ def test_prompt_block_settings_line_says_when_the_text_encoder_was_freed() -> No
     kept = gen._prompt("flux1-dev", _entry_with("SHARED", free_encoders=False), report)
     assert freed.endswith("864×1152, text encoder freed once the prompt is encoded.")
     assert kept.endswith("864×1152.")
-
-
-def test_details_footer_never_renders_a_git_describe_suffix() -> None:
-    """Bug: a comparison report stamped with a git-describe string (tag, commits since, sha, dirty flag)
-    lands on the public page verbatim ("mlx-teacache v0.12.0-3-gabc1234-dirty") instead of crediting the
-    release the build sits on."""
-    report = _report()
-    report["variants"]["flux1-dev"]["provenance"]["mlx_teacache_version"] = "v0.12.0-3-gabc1234-dirty"
-    report["variants"]["flux1-dev"]["provenance"]["git_sha_b"] = "8c3fff5"
-    d = gen.render_blocks(report)["flux1-dev:details"]
-    assert "gabc1234" not in d
-    assert "-dirty" not in d
-    assert "mlx-teacache 0.12.0 (harness at commit `8c3fff5`)" in d

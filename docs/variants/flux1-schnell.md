@@ -16,7 +16,7 @@ flux = Flux1.from_name("schnell", quantize=4)
 - Default `rel_l1_thresh`: 0.20 (package fallback)
 - skip-window defaults: `skip_first_n_steps=1`, `skip_last_n_steps=1`
 
-At 4 steps with `skip_first=1 + skip_last=1`, only 2 steps are gate-eligible. The polynomial output exceeds the 0.20 threshold on every adjacent pair (the distilled schedule trains the model to make large strides per step), so the gate produces 0 skips. The wrapper adds 1-2% gating overhead with no benefit. Run schnell through vanilla mflux.
+At 4 steps with `skip_first=1 + skip_last=1`, only 2 steps are gate-eligible. The polynomial output exceeds the 0.20 threshold on every adjacent pair (the distilled schedule trains the model to make large strides per step), so the gate produces 0 skips. The wrapper adds a small gating overhead (not measured on its own) with no benefit. Run schnell through vanilla mflux.
 
 ## Coefficient provenance
 

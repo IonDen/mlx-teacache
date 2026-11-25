@@ -42,12 +42,12 @@ Seed 42, 50 steps, guidance 4.0, q8, 864×1152.
 
 Speedup on this run: 1.34× wall clock, 1.34× with preview decoding left out, 1.35× per step after the first. SSIM of B against A: 0.854, measured on the lossless outputs.
 
-Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `Tongyi-MAI/Z-Image`; preview decoder `zimage`. mlx-teacache 0.11.1 (harness at commit `964a1e1`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_z_image.json).
+Recipe: 50 steps, guidance 4.0, q8, 864×1152, seed 42. Checkpoint `Tongyi-MAI/Z-Image`; preview decoder `zimage`. mlx-teacache 0.11.2.dev1+g992128837.d20260925 (install-time version string; harness at commit `964a1e1`), mflux 0.20.0, MLX 0.32.2, mlx-taef 0.8.3. The run report, `_artifacts/comparison/report.json`, records the commit of each run but not whether each working tree was clean; this run's version string marks uncommitted changes at install time. Multi-run measurement of this model: [bench report](../../_artifacts/v0.10.0_bench_z_image.json).
 <!-- COMPARISON:z-image-base:details END -->
 
 ### Notes
 
-Footnote ⁵ measured this variant's 1.31× multi-run speedup as entirely step-skipping: the wrapper timed at vanilla speed with the gate turned off, so avoiding a compiled step buys nothing here on wall clock. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation, so A and B both peak at 14.7 GiB in the table above.
+Footnote ⁵ measured this variant's 1.31× multi-run speedup, measured on mflux 0.18.0, as entirely step-skipping: the wrapper timed at vanilla speed with the gate turned off, so avoiding a compiled step buys nothing here on wall clock. That multi-run bench, at 512² with the weights loaded lazily, also reports a peak-memory drop from running eagerly instead of compiled. It doesn't show up on this run, where the weights are evaluated before generation, so A and B both peak at 14.7 GiB in the table above. The bench record is `_artifacts/v0.10.0_bench_z_image.json`; it has no commit or dirty field, no date and no MLX version, and its install-time version string names commit 90fca33 (MLX 0.31.2 per the lock file at c33e8d5). mflux 0.22.0 moved Z-Image's transformer to bfloat16, which changes its speed and images, and mflux 0.24.0 changed the default image decode, so the memory peaks hold for mflux 0.18.0.
 
 On this run the gate skips 14 of 50 steps, alternating through the middle of the schedule. Pose, racket, ball and court stay put. B turns her head a little further toward the camera and laughs wider, and the court lines by her feet shift; those changes are most of why SSIM lands at 0.85.
 

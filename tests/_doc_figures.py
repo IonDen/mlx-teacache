@@ -8,6 +8,7 @@ every float kept as its decimal text, and ``half_up`` rounds the way the docs pr
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -196,6 +197,30 @@ def unstated_gaps(text: str, fields: frozenset[str]) -> set[str]:
         if any(re.search(form, text) for form in forms):
             stated.add(field)
     return set(fields) - stated
+
+
+def clauses(text: str) -> list[str]:
+    """``text`` split after each "." or ";" that white space follows: the dots inside "0.31.2", "1.35×" or a URL do
+    not end a clause."""
+    return [c for c in re.split(r"(?<=[.;])\s+", text) if c]
+
+
+def span_from(text: str, anchor: str, stops: Iterable[str]) -> str | None:
+    """The clauses of ``text`` from the one holding ``anchor`` up to, not including, the next clause that holds one
+    of ``stops`` (the anchor's own clause never ends the span). None when no clause holds ``anchor``; ValueError
+    when more than one does."""
+    parts = clauses(text)
+    starts = [i for i, c in enumerate(parts) if anchor in c]
+    if not starts:
+        return None
+    if len(starts) > 1:
+        raise ValueError(f"{anchor!r} is in {len(starts)} clauses")
+    stop_list = list(stops)
+    end = next(
+        (j for j in range(starts[0] + 1, len(parts)) if any(s in parts[j] for s in stop_list)),
+        len(parts),
+    )
+    return " ".join(parts[starts[0] : end])
 
 
 _SUPERSCRIPTS = "¹²³⁴⁵⁶⁷⁸⁹"

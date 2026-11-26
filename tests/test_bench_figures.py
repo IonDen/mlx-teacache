@@ -9,7 +9,12 @@ Each check is named for the bug it catches:
   record);
 - for each (doc, record) pair, one paragraph or footnote names the record and gives a negated wording for each gap
   pinned in ``GAPS`` (a deleted gap sentence, or one reversed into a completeness claim). This is per pair, not per
-  figure: a figure whose own paragraph drops the gap passes while another paragraph of the doc states it;
+  figure: a figure whose own paragraph drops the gap passes while another paragraph of the doc states it. Where one
+  paragraph names several records with gaps by their ``_artifacts/`` paths, each record's gaps count only in its own
+  span, from its ``GAP_SPAN`` anchor to the next clause about another record (one record's "no MLX version" standing
+  in for another's). Two limits remain: the pairs in ``PARAGRAPH_LEVEL_GAPS`` (six pairs, eight fields) still read
+  those fields in the whole paragraph, and a paragraph that names one record by path and describes another only in
+  words is read whole for the named record, so the described record's gap wording still counts for it;
 - ``GAPS`` itself matches each record's JSON keys (a record that gains or loses a field the docs describe);
 - each README table row's footnote marker leads to a footnote whose citation names that row's record (a wrong marker,
   or a footnote citing another record);
@@ -43,6 +48,7 @@ from tests._doc_figures import (
     Near,
     Place,
     Row,
+    clauses,
     compile_place,
     dirty_at_run_time,
     figures_at,
@@ -52,6 +58,7 @@ from tests._doc_figures import (
     install_stamp,
     load_record,
     missing_provenance,
+    span_from,
     stamp_claims,
     states_limit,
     table_cells,
@@ -1864,6 +1871,38 @@ def test_unstated_gaps_does_not_take_a_positive_claim_for_a_gap() -> None:
     assert unstated_gaps(kept, frozenset({"date", "mlx", UNCOMMITTED})) == set()
 
 
+def test_clauses_ends_a_clause_only_at_a_stop_before_white_space() -> None:
+    """Bug caught: a split at every "." or ";" (cutting "MLX 0.31.2", "1.35×" or a URL mid-clause), or no split at
+    ";" (keeping two records' clauses, as in the calibration note's list, in one)."""
+    text = "They allow 1.35× (50/42); MLX 0.31.2 per [PR #42](https://github.com/a/b.c). The v0.6.0 record has no date."
+    assert clauses(text) == [
+        "They allow 1.35× (50/42);",
+        "MLX 0.31.2 per [PR #42](https://github.com/a/b.c).",
+        "The v0.6.0 record has no date.",
+    ]
+
+
+def test_span_from_runs_from_the_anchor_to_the_next_stop() -> None:
+    """Bug caught: a span that runs past the next clause naming another record (so it borrows that record's gap
+    wording), one cut short at its own anchor clause when that clause also names the other record, or one that
+    starts before the anchor."""
+    text = "A is fast. A has no date. B has no MLX version; it is slow. C too."
+    assert span_from(text, "A has", ["B has"]) == "A has no date."
+    assert span_from(text, "A is", ["B has"]) == "A is fast. A has no date."
+    assert span_from(text, "B has", ["A is"]) == "B has no MLX version; it is slow. C too."
+    assert span_from("A and B have no date. A is fast. B is slow.", "A and B", ["B"]) == (
+        "A and B have no date. A is fast."
+    )
+    assert span_from(text, "D has", ["B has"]) is None
+
+
+def test_span_from_rejects_an_anchor_in_two_clauses() -> None:
+    """Bug caught: an anchor that matches two clauses silently picks the first, so a record's span can start at a
+    sentence about another record."""
+    with pytest.raises(ValueError, match="2 clauses"):
+        span_from("A has x. A has y.", "A has", [])
+
+
 def test_states_limit_needs_the_limit_beside_a_limit_word() -> None:
     """Bug caught: a limit counted as stated because the same "N.NN×" is printed as another quantity (a gating
     figure, another run's speedup), so deleting the limit clause stays green."""
@@ -1899,13 +1938,138 @@ GAP_PARAGRAPH: dict[tuple[str, str], str] = {
 }
 
 
-def _gap_units(doc: str, record: str) -> list[str]:
-    """The paragraphs (footnotes included) that name ``record``, plus its GAP_PARAGRAPH anchor paragraph."""
-    units = [flatten(u) for u in paragraphs(_doc(doc)) if record in u]
+# Pairs whose record is named in a paragraph or footnote that names another record with gaps too. There the record's
+# gaps count only inside its own span: from the clause holding this anchor up to the next clause that names another
+# such record by path or holds another record's anchor below. The anchor must be found in exactly one clause of the
+# paragraphs naming the record. "Neither record …" and "Both records …" are one statement about two records, so
+# both records share its anchor.
+GAP_SPAN: dict[tuple[str, str], str] = {
+    (README, B4): "The record names commit ec4d110",
+    (README, B4_10): "The v0.10.0 record has",
+    (README, B4_6): "The v0.6.0 record (mflux 0.17.5)",
+    (README, B4_41): "The v0.4.1 record names",
+    (README, B9): "The record names commit ec4d110",
+    (README, B9_10): "The v0.10.0 record has",
+    (README, B9_6): "The v0.6.0 record (mflux 0.17.5)",
+    (README, Z10): "⁵ `z-image-base` under CFG",
+    (README, Z7): "v0.7.0 reported 1.17× at this recipe",
+    (README, F10): "History, the 1.57× run.",
+    (README, F63): "The earlier 1.46× (v0.6.3",
+    (README, K11): "The record is `_artifacts/v0.11.0_bench_krea_dev.json`",
+    (README, D4): "the wrapper trims 17 percent off Base",
+    (README, D9): "the wrapper trims 17 percent off Base",
+    (CALIBRATION, B4): "`_artifacts/v0.12.0_bench_klein_base_4b.json` is a clean-tree run",
+    (CALIBRATION, B4_10): "`_artifacts/v0.10.0_bench_klein_base_4b.json` has",
+    (CALIBRATION, Q11): "`_artifacts/v0.11.0_bench_qwen_image.json` has",
+    (CALIBRATION, Z10): "`_artifacts/v0.10.0_bench_z_image.json` has",
+    (CALIBRATION, K11): "`_artifacts/v0.11.0_bench_krea_dev.json` has",
+    **{
+        (page, RJ): "The run report, `_artifacts/comparison/report.json`, records"
+        for page in (CMP_KREA, CMP_B4, CMP_B9, CMP_QWEN, CMP_Z)
+    },
+    (CMP_DISTILLED, D4): "Both records name mflux 0.18.0 and MLX 0.31.2",
+    (CMP_DISTILLED, D9): "Both records name mflux 0.18.0 and MLX 0.31.2",
+    (M3, B4): "Both records are clean-tree runs at ec4d110",
+    (M3, B9): "Both records are clean-tree runs at ec4d110",
+    (V_B4, B4_10): "The v0.10.0 record (`_artifacts/v0.10.0_bench_klein_base_4b.json`",
+    (V_B4, B4_6): "The v0.6.0 record (mflux 0.17.5)",
+    (V_B4, B4_41): "The v0.4.1 record names",
+    (V_B9, VAL): "It came from one run of each condition",
+    (V_B9, B9_6): "The 1.36× at v0.6.0",
+    (V_B9, B9_10): "The 1.36× at v0.6.0",
+}
+
+# Gaps a doc states for a GAP_SPAN pair only in a clause about another record, so they are still read at paragraph
+# level. Each entry is a gap the record's own span does not state today; once the doc states it there, the entry
+# must go (``test_paragraph_level_gaps_are_still_missing_from_their_span``).
+PARAGRAPH_LEVEL_GAPS: dict[tuple[str, str], frozenset[str]] = {
+    (README, B4): frozenset({"date"}),
+    (README, B9): frozenset({"date"}),
+    (README, B4_41): frozenset({"dirty"}),
+    (V_B4, B4_41): frozenset({"dirty"}),
+    (V_B9, B9_6): frozenset({"commit", "dirty"}),
+    (V_B9, B9_10): frozenset({"commit", "dirty"}),
+}
+
+GAPPED_RECORDS: frozenset[str] = frozenset(r for r, gaps in GAPS.items() if gaps)
+
+
+def _naming(text: str, record: str) -> tuple[list[str], list[str]]:
+    """The paragraphs (footnotes included) of ``text`` that name ``record`` by its path: those naming no other record
+    with gaps by path, and those naming one. Only paths count: a paragraph that names ``record`` and describes
+    another record in words ("The v0.10.0 record has ...") lands in the first list and is read whole, so that other
+    record's gap wording still counts for ``record``."""
+    others = GAPPED_RECORDS - {record}
+    named = [flatten(u) for u in paragraphs(text) if record in u]
+    alone = [u for u in named if not any(o in u for o in others)]
+    return alone, [u for u in named if u not in alone]
+
+
+def _anchored(text: str, doc: str, record: str) -> tuple[str, str] | None:
+    """The paragraph holding the record's GAP_SPAN anchor and the record's span in it (None for a pair without an
+    anchor). Fails when the anchor is in no clause, or in more than one, of the paragraphs naming the record."""
+    anchor = GAP_SPAN.get((doc, record))
+    if anchor is None:
+        return None
+    stops = [o for o in GAPPED_RECORDS if o != record]
+    stops += [a for (d, r), a in GAP_SPAN.items() if d == doc and r != record and a != anchor]
+    _, shared = _naming(text, record)
+    found = [(u, s) for u in shared if (s := span_from(u, anchor, stops)) is not None]
+    assert len(found) == 1, (
+        f"{doc}: {record}: anchor {anchor!r} is in {len(found)} paragraphs naming the record"
+    )
+    return found[0]
+
+
+def own_span(text: str, doc: str, record: str) -> str | None:
+    """The record's span under its GAP_SPAN anchor (None for a pair without one)."""
+    anchored = _anchored(text, doc, record)
+    return None if anchored is None else anchored[1]
+
+
+def _gap_units(text: str, doc: str, record: str) -> list[str]:
+    """Where ``record``'s gaps may be stated in ``text``: each paragraph naming it and no other record with gaps, its
+    GAP_PARAGRAPH anchor paragraph, and its GAP_SPAN span."""
+    units, _ = _naming(text, record)
     anchor = GAP_PARAGRAPH.get((doc, record))
     if anchor is not None:
-        units += [flatten(u) for u in paragraphs(_doc(doc)) if anchor in flatten(u)]
-    return units
+        units += [flatten(u) for u in paragraphs(text) if anchor in flatten(u)]
+    span = own_span(text, doc, record)
+    return units if span is None else [*units, span]
+
+
+def gaps_left_out(text: str, doc: str, record: str) -> set[str]:
+    """The pinned gaps of ``record`` that ``text`` (read as ``doc``) does not state: empty when one unit states them
+    all, else the shortfall of the unit that comes closest. A PARAGRAPH_LEVEL_GAPS field is read in the whole
+    paragraph that holds the record's span."""
+    carved = PARAGRAPH_LEVEL_GAPS.get((doc, record), frozenset())
+    required = GAPS[record] - carved
+    shortfalls = [unstated_gaps(u, required) for u in _gap_units(text, doc, record)]
+    left_out = min(shortfalls, key=len, default=set(required))
+    if not carved:
+        return left_out
+    anchored = _anchored(text, doc, record)
+    assert anchored is not None, f"{doc}: {record}: PARAGRAPH_LEVEL_GAPS entry without a GAP_SPAN anchor"
+    return left_out | unstated_gaps(anchored[0], carved)
+
+
+def test_gap_span_pairs_are_pairs_the_docs_quote() -> None:
+    """Bug caught: a GAP_SPAN or PARAGRAPH_LEVEL_GAPS entry left for a pair no doc quotes any more, so it checks
+    nothing."""
+    assert set(GAP_SPAN) <= set(DOC_RECORD_PAIRS)
+    assert set(PARAGRAPH_LEVEL_GAPS) <= set(GAP_SPAN)
+
+
+@pytest.mark.parametrize(("doc", "record"), sorted(PARAGRAPH_LEVEL_GAPS))
+def test_paragraph_level_gaps_are_still_missing_from_their_span(doc: str, record: str) -> None:
+    """Bug caught: a gap kept at paragraph level after the doc started stating it in the record's own span, so a
+    later deletion of that statement is again covered by a neighbour's wording."""
+    span = own_span(_doc(doc), doc, record)
+    assert span is not None
+    carved = PARAGRAPH_LEVEL_GAPS[(doc, record)]
+    assert unstated_gaps(span, carved) == set(carved), (
+        f"{doc}: {record}: its span now states some of {carved}"
+    )
 
 
 @pytest.mark.parametrize(("doc", "record"), _pair_params())
@@ -1914,11 +2078,121 @@ def test_doc_states_each_record_with_its_gaps(doc: str, record: str) -> None:
     ("neither record names a commit or a dirty flag" turned into "each record names its commit and its dirty flag",
     M03). One paragraph or footnote must name the record and give a negated wording for each pinned gap. A gap
     stated only in a figure's marked footnote is enough (M01, by design)."""
-    required = GAPS[record]
-    shortfalls = [sorted(unstated_gaps(u, required)) for u in _gap_units(doc, record)]
-    assert any(not s for s in shortfalls), (
-        f"{doc}: {record}: each paragraph naming it leaves out {shortfalls}"
-    )
+    left_out = gaps_left_out(_doc(doc), doc, record)
+    assert not left_out, f"{doc}: {record}: no paragraph naming it states {sorted(left_out)}"
+
+
+def _mutated(doc: str, old: str, new: str, line_start: str | None = None) -> str:
+    """``doc``'s text with ``old`` replaced by ``new``: inside the one line that starts with ``line_start`` when it is
+    given, else in the whole doc. ``old`` must occur there exactly once, so a stale mutant fails instead of
+    leaving the text unchanged."""
+    text = _doc(doc)
+    if line_start is None:
+        assert text.count(old) == 1, f"{doc}: {old!r} occurs {text.count(old)} times"
+        return text.replace(old, new)
+    lines = [line for line in text.splitlines() if line.startswith(line_start)]
+    assert len(lines) == 1, f"{doc}: {len(lines)} lines start with {line_start!r}"
+    assert lines[0].count(old) == 1, f"{doc}: {old!r} occurs {lines[0].count(old)} times in {line_start!r}"
+    return text.replace(lines[0], lines[0].replace(old, new))
+
+
+@dataclass(frozen=True)
+class GapMutant:
+    """One edit that removes or falsifies one record's gap wording where the paragraph names other records too."""
+
+    name: str
+    doc: str
+    record: str
+    field: str
+    old: str
+    new: str
+    line_start: str | None = None
+
+
+_FN2 = "² `flux2-klein-base-9b`"
+_FN3 = "³ `flux2-klein-base-4b`"
+_FN5 = "⁵ `z-image-base`"
+_FLUX1_HISTORY = "History, the 1.57× run."
+_OLD_GAPS = "no commit or dirty field, no date and no MLX version; its install-time version string names commit c9db998"
+_GENERIC = "its provenance fields; its install-time version string names commit c9db998"
+
+# Each mutant stays green under a paragraph-level check: another record named in the same footnote or paragraph
+# states the same gap. Each must turn its own record red, on the field it removes.
+GAP_MUTANTS: tuple[GapMutant, ...] = (
+    GapMutant("readme-4b-mlx-deleted", README, B4, "mlx", " and has no MLX version field;", ";", _FN3),
+    GapMutant(
+        "readme-4b-mlx-reversed",
+        README,
+        B4,
+        "mlx",
+        "and has no MLX version field;",
+        "and records MLX 0.31.2;",
+        _FN3,
+    ),
+    GapMutant("readme-9b-mlx-deleted", README, B9, "mlx", " and has no MLX version field;", ";", _FN2),
+    GapMutant("readme-z7-gaps-generic", README, Z7, "mlx", _OLD_GAPS, _GENERIC, _FN5),
+    GapMutant("readme-f63-gaps-generic", README, F63, "mlx", _OLD_GAPS, _GENERIC, _FLUX1_HISTORY),
+    GapMutant(
+        "calibration-qwen-mlx-date-deleted",
+        CALIBRATION,
+        Q11,
+        "mlx",
+        ", no MLX version and\nno date field;",
+        ";",
+    ),
+    GapMutant(
+        "calibration-krea-uncommitted-deleted",
+        CALIBRATION,
+        K11,
+        UNCOMMITTED,
+        "krea_dev.json` has\nuncommitted changes, no date field",
+        "krea_dev.json` has\nno date field",
+    ),
+    GapMutant(
+        "calibration-krea-date-deleted",
+        CALIBRATION,
+        K11,
+        "date",
+        "uncommitted changes, no date field and no MLX version.",
+        "uncommitted changes, no MLX version.",
+    ),
+)
+
+
+@pytest.mark.parametrize("mutant", GAP_MUTANTS, ids=[m.name for m in GAP_MUTANTS])
+def test_gap_check_does_not_borrow_a_neighbours_gap_wording(mutant: GapMutant) -> None:
+    """Bug caught: a gap check that reads a whole paragraph, so where it names several records one record's
+    "no MLX version" counts for another whose own wording was deleted or turned into "records MLX 0.31.2"."""
+    assert mutant.field not in gaps_left_out(_doc(mutant.doc), mutant.doc, mutant.record)
+    mutated = _mutated(mutant.doc, mutant.old, mutant.new, mutant.line_start)
+    assert mutant.field in gaps_left_out(mutated, mutant.doc, mutant.record)
+
+
+def test_a_span_ends_at_the_next_records_anchor_without_a_path() -> None:
+    """Bug caught: a span that ends only at another record's path. In footnote ³ the next path after "The v0.10.0
+    record has …" is the closing "Full report", so that span would run on into the v0.6.0 record's "no commit,
+    dirty flag, date or MLX version" and borrow it."""
+    old = "The v0.10.0 record has no commit or dirty field, no date and no MLX version;"
+    mutated = _mutated(README, old, "The v0.10.0 record has its provenance fields;", _FN3)
+    assert gaps_left_out(_doc(README), README, B4_10) == set()
+    assert gaps_left_out(mutated, README, B4_10) == {"commit", "dirty", "date", "mlx"}
+
+
+def test_a_reworded_span_anchor_fails_instead_of_falling_back() -> None:
+    """Bug caught: a GAP_SPAN anchor the doc no longer holds, after which the record is read at paragraph level
+    again (or not at all) and a rewording silently drops the per-record check."""
+    mutated = _mutated(README, "The earlier 1.46× (v0.6.3", "The older 1.46× (v0.6.3", _FLUX1_HISTORY)
+    with pytest.raises(AssertionError, match=r"anchor 'The earlier 1\.46× \(v0\.6\.3' is in 0 paragraphs"):
+        gaps_left_out(mutated, README, F63)
+
+
+def test_a_paragraph_level_gap_is_still_required() -> None:
+    """Bug caught: a PARAGRAPH_LEVEL_GAPS field that is dropped from the check instead of read at paragraph level, so
+    the 9B page could lose the only "no commit and no dirty flag" in the paragraph about the older records."""
+    old = "the record names no mflux or MLX version, no commit and no dirty flag)"
+    mutated = _mutated(V_B9, old, "the record names no mflux or MLX version)")
+    assert gaps_left_out(_doc(V_B9), V_B9, B9_6) == set()
+    assert gaps_left_out(mutated, V_B9, B9_6) == {"commit", "dirty"}
 
 
 # A footnote's own citation of its record: "The record is `…`" or "Full report: `…`".

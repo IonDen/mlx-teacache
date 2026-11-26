@@ -22,6 +22,9 @@ class GenerationContext:
     token: int = 0  # incremented in call_before_loop
     active_num_steps: int | None = None  # set in call_before_loop, cleared by wrapper
     consumed_at_token: int | None = None  # set when FLUX.2 predict closure consumes
+    # Set by the `_predict` factories (FLUX.2 Klein, Z-Image) when mflux asks them for this generation's closure;
+    # reset by the generate_image wrapper on every call; read by the predict-strategy in-loop guard.
+    predict_built: bool = False
 
 
 @dataclass(frozen=True)

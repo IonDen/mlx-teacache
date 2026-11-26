@@ -15,6 +15,24 @@ CASES = [
     E._StepCacheConflictError(
         actual_type="X", actual_model_name=None, supported=[], requested="step_cache_ratio=0.5"
     ),
+    E._UnknownPredictKeywordError(
+        actual_type="ZImage",
+        actual_model_name=None,
+        supported=[],
+        unknown=["stream"],
+        mflux_version="0.24.0",
+        teacache_version="0.18.1",
+    ),
+    E._PredictNotCalledError(
+        actual_type="ZImage",
+        actual_model_name=None,
+        supported=[],
+        mflux_version="0.24.0",
+        teacache_version=None,
+    ),
+    E._SsdStreamError(
+        actual_type="ZImage", actual_model_name="Tongyi-MAI/Z-Image", supported=["z-image-base"]
+    ),
     E.AlreadyPatchedError(variant_id="flux1-dev", rel_l1_thresh=0.2),
     E.CalibrationError(variant_id="v", reason="r"),
     E.TransformerShapeError(3, (1, 2), (1, 3)),

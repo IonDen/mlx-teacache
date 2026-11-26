@@ -171,6 +171,51 @@ class GenerationContextCallback:
         return None
 
 
+class PredictGuardCallback(GenerationContextCallback):
+    """The lifecycle callback of the predict-strategy variants (FLUX.2 Klein, Z-Image), plus an in-loop guard.
+
+    mflux runs the before-loop callbacks, then `predict = self._predict(...)`, then per step one predict call
+    followed by the in-loop callbacks. A generate_image that builds its step function some other way never reaches
+    TeaCache's closure, so the in-loop callback of the first step is the first point TeaCache sees: if the factory
+    was not called in this generate_image call, it raises there, after one ungated step and before a second. A
+    generation whose before-loop this callback did not see (apply_teacache called mid-loop) is not judged.
+
+    The proxy variants (FLUX.1, Qwen-Image) patch the transformer slot instead and register the plain callback;
+    this guard does not cover them. No `denoised` parameter: mflux passes it only to callbacks that declare it."""
+
+    def __init__(self, handle: InternalHandle, *, pipeline_type: str, model_name: str | None) -> None:
+        super().__init__(handle)
+        self._pipeline_type = pipeline_type
+        self._model_name = model_name
+
+    def call_in_loop(
+        self,
+        t: int,
+        seed: int,
+        prompt: str,
+        latents: Any,
+        config: Any,
+        time_steps: Any,
+        **_extra: Any,
+    ) -> None:
+        ctx = self._handle._gen_ctx
+        # active_num_steps is None: this callback's before-loop never ran for this generation (apply_teacache was
+        # called while it was already in its loop), so its closure predates the patch and it finishes plain.
+        if ctx.predict_built or ctx.active_num_steps is None:
+            return
+        from mlx_teacache._mflux_versions import installed_mflux_version
+        from mlx_teacache.errors import _PredictNotCalledError
+        from mlx_teacache.integrations.mflux.patch import installed_teacache_version
+
+        raise _PredictNotCalledError(
+            actual_type=self._pipeline_type,
+            actual_model_name=self._model_name,
+            supported=[],
+            mflux_version=installed_mflux_version(),
+            teacache_version=installed_teacache_version(),
+        )
+
+
 def wrap_generate_image(flux: Any, handle: InternalHandle) -> None:
     """Replace flux.generate_image with a try/finally wrapper that:
     - Verifies our lifecycle callback is still registered.
@@ -214,6 +259,8 @@ def wrap_generate_image(flux: Any, handle: InternalHandle) -> None:
 
         # Clear any leftover pending finalize from a previous run (defensive).
         handle._pending_finalize = None
+        # Per call: this generation has not asked the `_predict` factory for its closure yet.
+        handle._gen_ctx.predict_built = False
         completed = False
         try:
             result = original(*args, **kwargs)

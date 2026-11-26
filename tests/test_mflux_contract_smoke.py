@@ -26,7 +26,12 @@ from mlx_teacache.variants.flux2_klein_base_9b import detect as flux2_klein_base
 from mlx_teacache.variants.qwen_image import detect as qwen_detect
 from mlx_teacache.variants.qwen_image_2512 import detect as qwen_2512_detect
 from mlx_teacache.variants.z_image_base import detect as zimage_detect
-from tests._mflux_surface import assigned_attributes, return_tuple_arities
+from tests._mflux_surface import (
+    assigned_attributes,
+    installed_predict_factory,
+    return_tuple_arities,
+    unbound_predict_keywords,
+)
 
 
 def test_callback_registry_exposes_list_attributes() -> None:
@@ -36,6 +41,43 @@ def test_callback_registry_exposes_list_attributes() -> None:
     reg = CallbackRegistry()
     for attr in ("before_loop", "in_loop", "after_loop", "interrupt"):
         assert isinstance(getattr(reg, attr), list), f"CallbackRegistry.{attr} is not a list"
+
+
+@pytest.mark.parametrize("predict_built", [False, True], ids=["bypassed", "patched"])
+def test_the_predict_guard_runs_through_mflux_s_real_two_hop_dispatch(predict_built: bool) -> None:
+    """The guard is TeaCache's only in-loop callback; every other test drives it from a fake loop. It judges only a
+    generation whose before-loop call reached it, so it fires on real mflux in two hops: GenerationContext.before_loop
+    dispatches the guard's call_before_loop, which records the step count, then GenerationContext.in_loop dispatches
+    call_in_loop, which raises the package error for a generation that never built the patched closure and passes one
+    that did. Both hops run here on the real CallbackRegistry and GenerationContext, called as Z-Image and Klein call
+    them (`ctx.before_loop(latents)`, then `ctx.in_loop(t, latents)`).
+
+    Bug: mflux stops dispatching before-loop callbacks (or no longer registers them by `hasattr(call_before_loop)`),
+    renames or adds a required argument on either call, or stops routing callbacks to in_loop by
+    `hasattr(call_in_loop)`, so the guard fails with a bare TypeError, or goes silent, on every Z-Image and Klein
+    generation."""
+    from mflux.callbacks.callback_registry import CallbackRegistry
+
+    from mlx_teacache.errors import IncompatibleModelError
+    from mlx_teacache.integrations.mflux.lifecycle import PredictGuardCallback
+    from tests._session_fakes import make_session
+
+    session = make_session()
+    registry = CallbackRegistry()
+    registry.register(PredictGuardCallback(session, pipeline_type="ZImage", model_name=None))
+    # A txt2img config of four steps. time_steps must be truthy: in_loop evaluates
+    # `time_steps or self._config.time_steps`.
+    config = SimpleNamespace(num_inference_steps=4, init_time_step=0, time_steps=[0])
+    ctx = registry.start(seed=0, prompt="", config=config)
+    latents = mx.zeros((1, 4, 4))
+    ctx.before_loop(latents)
+    # mflux builds the step function between the two hops; the factory TeaCache installs records it here.
+    session._gen_ctx.predict_built = predict_built
+    if predict_built:
+        assert ctx.in_loop(0, latents) is None
+    else:
+        with pytest.raises(IncompatibleModelError, match="without calling self._predict"):
+            ctx.in_loop(0, latents)
 
 
 def test_modelconfig_precision_is_bfloat16() -> None:
@@ -210,18 +252,23 @@ def test_qwen_block0_modulation_surface_still_exists() -> None:
 
 
 @pytest.mark.parametrize(
-    "module, cls_name",
+    "module, cls_name, variant_id",
     [
-        ("mflux.models.flux2.variants.txt2img.flux2_klein", "Flux2Klein"),
-        ("mflux.models.z_image.variants.z_image", "ZImage"),
+        ("mflux.models.flux2.variants.txt2img.flux2_klein", "Flux2Klein", "flux2-klein-base-4b"),
+        ("mflux.models.z_image.variants.z_image", "ZImage", "z-image-base"),
     ],
 )
-def test_predict_is_a_staticmethod_the_eager_closure_can_shadow(module: str, cls_name: str) -> None:
+def test_predict_is_a_staticmethod_the_eager_closure_can_shadow(
+    module: str, cls_name: str, variant_id: str
+) -> None:
     """The FLUX.2 / Z-Image patch strategy assigns an instance attribute `_predict`
-    over a class-level staticmethod called as `self._predict(self.transformer)`."""
+    over a class-level staticmethod, and every `self._predict(...)` call in
+    generate_image must bind against the factory apply_teacache installs (mflux main
+    6aebc2d passes `compile_predict=`)."""
     cls = getattr(importlib.import_module(module), cls_name)
     assert isinstance(inspect.getattr_static(cls, "_predict"), staticmethod)
-    assert "self._predict(self.transformer)" in inspect.getsource(cls.generate_image)
+    factory = installed_predict_factory(variant_id)
+    assert unbound_predict_keywords(inspect.getsource(cls.generate_image), factory) == []
 
 
 def test_qwen_loop_calls_the_transformer_exactly_twice_per_step() -> None:

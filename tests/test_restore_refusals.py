@@ -2,17 +2,23 @@
 and when flux.generate_image or flux._predict was replaced after apply_teacache.
 
 The pipelines are the equivalence oracle's small surrogates, one per patch strategy (FLUX.1 proxy, FLUX.2 predict,
-Z-Image predict, Qwen-Image proxy). They run mflux's callback order: before-loop callbacks, the steps (an in-loop
-callback after each one), after-loop callbacks.
+Z-Image predict, Qwen-Image proxy). They run mflux's callback order: before-loop callbacks, the steps (a per-step
+`step_hook` after each one), after-loop callbacks. The surrogates never dispatch `callbacks.in_loop`, so the before-loop
+restore() that docs/stability.md documents also runs on `_GuardedLoopPipeline`, which does, with the predict
+variants' in-loop guard registered.
 """
 
 import pickle
+from types import SimpleNamespace
 from typing import Any
 
+import mlx.core as mx
 import pytest
 
 from mlx_teacache import RestoreRefusedError, apply_teacache
 from tests import _equivalence_oracle as oracle
+from tests._fakes import FaithfulCallbackRegistry
+from tests._variant_fakes import fake_for_variant
 
 pytestmark = pytest.mark.mflux
 
@@ -33,6 +39,7 @@ def _assert_pristine(flux: Any, original_transformer: Any) -> None:
     assert "_predict" not in vars(flux)
     assert "_teacache_handle" not in vars(flux)
     assert list(flux.callbacks.before_loop) == []
+    assert list(flux.callbacks.in_loop) == []  # the predict variants' guard is an in-loop callback
     assert list(flux.callbacks.after_loop) == []
 
 
@@ -227,6 +234,72 @@ def test_restore_from_a_before_loop_callback_registered_before_apply_is_allowed(
     assert latents.shape == flux.latent_shape
     assert restorer.calls == 1
     assert restorer.error is None
+    _unregister(flux, restorer)
+    _assert_pristine(flux, original_transformer)
+
+
+class _GuardedLoopPipeline:
+    """A predict-strategy pipeline whose generate_image runs mflux's loop with the in-loop callbacks: before-loop
+    callbacks, `predict = self._predict(self.transformer)`, per step one predict call followed by the in-loop
+    callbacks (the list is read again at each step, as mflux does), then the after-loop callbacks.
+
+    `_predict` and `generate_image` live on the class, as on mflux's ZImage and Flux2Klein. The class-level
+    `_predict` is the pre-apply one: it returns a working step function that counts its calls, so a run that
+    TeaCache no longer patches completes."""
+
+    def __init__(self, variant_id: str) -> None:
+        self.model_config = fake_for_variant(variant_id).model_config  # what the variant detector reads
+        self.transformer = SimpleNamespace(name="transformer")
+        self.callbacks = FaithfulCallbackRegistry()
+        self.unpatched_steps = 0
+        self.in_loop_rounds = 0
+
+    def _predict(self, transformer: Any, **_kwargs: Any) -> Any:
+        def step(**_kw: Any) -> None:
+            self.unpatched_steps += 1  # stands in for one call of mflux's own transformer
+
+        return step
+
+    def generate_image(self, seed: int = 0, prompt: str = "", num_inference_steps: int = 4) -> str:
+        config = SimpleNamespace(num_inference_steps=num_inference_steps, init_time_step=0)
+        latents = mx.zeros((1, 4, 4))
+        for cb in self.callbacks.before_loop:
+            cb.call_before_loop(seed=seed, prompt=prompt, latents=latents, config=config)
+        predict = self._predict(self.transformer)
+        for t in range(num_inference_steps):
+            predict(t=t)
+            for cb in self.callbacks.in_loop:
+                cb.call_in_loop(
+                    t=t, seed=seed, prompt=prompt, latents=latents, config=config, time_steps=None
+                )
+            self.in_loop_rounds += 1
+        del predict
+        for cb in self.callbacks.after_loop:
+            cb.call_after_loop(seed=seed, prompt=prompt, latents=latents, config=config)
+        return "image"
+
+
+@pytest.mark.parametrize("variant_id", PREDICT_REPRESENTATIVES)
+def test_documented_before_loop_restore_runs_the_generation_without_the_guard(variant_id: str) -> None:
+    """docs/stability.md: a callback registered before apply that calls restore() just before the loop is not
+    refused, raises nothing, and that generation runs without TeaCache. Bug: restore() leaves the predict guard in
+    `callbacks.in_loop`, so the run that already lost TeaCache's `_predict` is stopped at its first step with
+    IncompatibleModelError (and the guard stays registered on the restored model)."""
+    flux = _GuardedLoopPipeline(variant_id)
+    original_transformer = flux.transformer
+    restorer = _RestoreInCallback(None, before_loop=True)
+    flux.callbacks.register(restorer)
+    handle = apply_teacache(flux, rel_l1_thresh=0.25, coefficients=oracle._CONST_COEFFICIENTS)
+    restorer._handle = handle
+    assert "_predict" in vars(flux)  # TeaCache's factory is installed until the restore
+    assert len(flux.callbacks.in_loop) == 1  # and its guard is in play: the in-loop list holds it
+
+    assert flux.generate_image(seed=1) == "image"
+
+    assert restorer.calls == 1
+    assert restorer.error is None
+    assert flux.unpatched_steps == 4  # every step ran on the pre-apply _predict
+    assert flux.in_loop_rounds == 4
     _unregister(flux, restorer)
     _assert_pristine(flux, original_transformer)
 

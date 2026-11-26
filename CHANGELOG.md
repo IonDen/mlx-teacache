@@ -8,7 +8,7 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Documentation
-- The threshold-sweep records behind the published similarity figures for Qwen-Image, Qwen-Image-2512, Z-Image and FLUX.1 Krea [dev] are now in the repository under `_artifacts/sweeps/`.
+- The threshold-sweep records behind the published similarity figures for Qwen-Image, Qwen-Image-2512, Z-Image and FLUX.1 Krea [dev] are now in the repository under `_artifacts/sweeps/`. In released entries, a similarity figure with no record keeps its value with a dated note.
 - Every benchmark figure in the README, `COMPARISON.md` and the variant and comparison pages now names its record under `_artifacts/` and says what that record does not name, such as a commit, date or MLX version. Where a record has no commit field but its install-time version string names one, the page says so. A figure with no committed record is described in words. Each multi-run benchmark speedup above the limit its skipped steps allow now states that limit beside it; the single-run figures on the generated comparison pages are not part of that claim. The pages also say which mflux version each figure holds for. Seven corrections to wording that disagreed with its own record:
   - The Klein base 4B peak-memory drop is about 48%, not 45%.
   - The Klein base 4B gating range is 1.18× to 1.22×.

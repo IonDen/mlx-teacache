@@ -23,6 +23,7 @@ from mlx_teacache.errors import (
     TeaCacheNoBenefitWarning,
     TeaCacheUncalibratedCheckpointWarning,
     TeaCacheValueError,
+    _SsdStreamError,
 )
 from mlx_teacache.handle import TeaCacheHandle
 from mlx_teacache.variants import _REGISTRY, checkpoint_is_calibrated
@@ -112,6 +113,15 @@ def apply_teacache(
 
     for variant_id, entry in _REGISTRY.items():
         if entry["matches"](flux):
+            # mflux main can build a model with SSD streaming (each transformer block's weights loaded around its
+            # call); TeaCache is not verified with it. Refused for every variant before anything is patched and
+            # before any variant-level warning. getattr: releases before the option (0.24) have no such attribute.
+            if getattr(flux, "ssd_stream", False):
+                raise _SsdStreamError(
+                    actual_type=type(flux).__name__,
+                    actual_model_name=getattr(getattr(flux, "model_config", None), "model_name", None),
+                    supported=[variant_id],
+                )
             warn_if_untested_mflux()
             # The warning describes the *builtin* polynomial on a few-step
             # schedule; a caller supplying coefficients is experimenting on

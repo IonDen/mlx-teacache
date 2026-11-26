@@ -316,15 +316,17 @@ KNOWN: dict[str, dict[str, str]] = {
 
 
 # A git install of mflux main keeps reporting the last release's version, so it cannot be judged by
-# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-11-10,
-# 17b47e9. Against 0.24.0 one target moved, outside the copied path: ZImage.generate_image builds its
-# generation_parameters metadata in a new `_generation_parameters()` helper, which adds a small_text_encoder key
-# when the model was built with mflux's new small text encoder (PR 974). The signature, the denoising loop, _predict
-# and the callbacks are unchanged. Bump it, commit and digests together, after reviewing a newer main. Applies to
+# KNOWN. It is held to this row instead: the fingerprints of the upstream commit reviewed on 2026-11-26,
+# 6aebc2d. Against 0.24.0 two targets moved, both in Z-Image. ZImage.generate_image builds its
+# generation_parameters metadata in a `_generation_parameters()` helper (PR 974, reviewed at 17b47e9) and now calls
+# `self._predict(self.transformer, compile_predict=not self.ssd_stream)` (PR 1021, --ssd-stream); ZImage._predict
+# takes that keyword and builds an uncompiled closure when it is False. The patch replaces _predict with an eager
+# closure and accepts compile_predict (patch.refuse_unknown_predict_keywords); the denoising loop and the callbacks
+# are unchanged. Bump it, commit and digests together, after reviewing a newer main. Applies to
 # git+URL installs only: an editable checkout writes `dir_info`, not `vcs_info`, and is judged by its version string
 # like a wheel.
 REVIEWED_MAIN: dict[str, Any] = {
-    "commit": "17b47e9aa0fd4b65a3ec03b46db31c911e8ac18d",
+    "commit": "6aebc2d694938ddd0eeab4d0015ac395295b6396",
     "fingerprints": {
         "flux1.Transformer.__call__": "06ef78be1cd4e97c",
         "flux2.Flux2Transformer.__call__": "ba3f261b0a4bb536",
@@ -337,8 +339,8 @@ REVIEWED_MAIN: dict[str, Any] = {
         "flux1.Flux1.generate_image": "879f66c3de7a0b52",
         "flux2.Flux2Klein.generate_image": "e9e087f0c835ada7",
         "flux2.Flux2Klein._predict": "bffa1bd25b24cacd",
-        "z_image.ZImage.generate_image": "061ebd266b779369",
-        "z_image.ZImage._predict": "016c64c92ceefbdf",
+        "z_image.ZImage.generate_image": "0f58ac0d9f35cc5f",
+        "z_image.ZImage._predict": "09a1c99925ad1929",
         "qwen.QwenImage.generate_image": "9e6846e3f5ed09bb",
     },
 }

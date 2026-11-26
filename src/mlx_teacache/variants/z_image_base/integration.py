@@ -315,11 +315,17 @@ PredictFactory = Callable[[Any], PredictFn]
 
 def make_teacache_predict_factory(handle: Any) -> PredictFactory:
     """Return a callable assignable to `flux._predict`. mflux calls it as
-    `predict = self._predict(self.transformer)` at the top of generate_image.
+    `predict = self._predict(self.transformer)` at the top of generate_image
+    (mflux main adds `compile_predict=`, accepted and ignored).
     Returns an EAGER closure (no mx.compile) so the per-step gate runs every step."""
     from mlx_teacache.errors import MissingGenerationContextError
+    from mlx_teacache.integrations.mflux.patch import refuse_unknown_predict_keywords
 
-    def predict_factory(transformer: Any) -> PredictFn:
+    def predict_factory(transformer: Any, compile_predict: bool = True, **unknown: Any) -> PredictFn:
+        # compile_predict is ignored: this closure is always eager (see refuse_unknown_predict_keywords).
+        del compile_predict
+        refuse_unknown_predict_keywords("ZImage", unknown)
+        handle._gen_ctx.predict_built = True  # read by the in-loop guard (lifecycle.PredictGuardCallback)
         context_consumed = False
 
         def predict(

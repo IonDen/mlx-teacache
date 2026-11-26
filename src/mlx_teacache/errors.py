@@ -89,6 +89,136 @@ class _StepCacheConflictError(IncompatibleModelError):
         )
 
 
+def _versions(mflux_version: str | None, teacache_version: str | None) -> str:
+    """'mflux 0.24.0, mlx-teacache 0.18.1' for the predict errors; a missing one reads '(version unknown)'."""
+    return ", ".join(
+        f"{name} {found}" if found is not None else f"{name} (version unknown)"
+        for name, found in (("mflux", mflux_version), ("mlx-teacache", teacache_version))
+    )
+
+
+class _UnknownPredictKeywordError(IncompatibleModelError):
+    """The installed mflux called a patched model's `_predict` with keyword arguments TeaCache's replacement does not
+    know. Private: callers catch IncompatibleModelError. `supported` is always empty and `actual_model_name` is None:
+    the factory that raises sees only the session, not the model. `unknown` holds the keyword names, `mflux_version`
+    the installed mflux and `teacache_version` the installed mlx-teacache (each None if unknown)."""
+
+    def __init__(
+        self,
+        *,
+        actual_type: str,
+        actual_model_name: str | None,
+        supported: list[str],
+        unknown: list[str],
+        mflux_version: str | None,
+        teacache_version: str | None,
+    ) -> None:
+        super().__init__(actual_type=actual_type, actual_model_name=actual_model_name, supported=supported)
+        installed = (
+            f"mflux {mflux_version}" if mflux_version is not None else "the installed mflux (version unknown)"
+        )
+        self.args = (
+            f"{installed} called {actual_type}._predict with keyword arguments TeaCache does not know: "
+            f"{', '.join(unknown)}. TeaCache's replacement accepts compile_predict only. "
+            "Call handle.restore() to generate without TeaCache, and please report both versions "
+            f"({_versions(mflux_version, teacache_version)}) at https://github.com/IonDen/mlx-teacache/issues.",
+        )
+        self.unknown = unknown
+        self.mflux_version = mflux_version
+        self.teacache_version = teacache_version
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (
+                type(self),
+                {
+                    "actual_type": self.actual_type,
+                    "actual_model_name": self.actual_model_name,
+                    "supported": self.supported,
+                    "unknown": self.unknown,
+                    "mflux_version": self.mflux_version,
+                    "teacache_version": self.teacache_version,
+                },
+            ),
+            self.__dict__,
+        )
+
+
+class _PredictNotCalledError(IncompatibleModelError):
+    """A patched model's generate_image reached its first denoising step without asking the patched `_predict` for
+    its step function, so that step was built without TeaCache. Private: callers catch IncompatibleModelError.
+    `mflux_version` is the installed mflux and `teacache_version` the installed mlx-teacache (each None if
+    unknown)."""
+
+    def __init__(
+        self,
+        *,
+        actual_type: str,
+        actual_model_name: str | None,
+        supported: list[str],
+        mflux_version: str | None,
+        teacache_version: str | None,
+    ) -> None:
+        super().__init__(actual_type=actual_type, actual_model_name=actual_model_name, supported=supported)
+        installed = (
+            f"mflux {mflux_version}" if mflux_version is not None else "the installed mflux (version unknown)"
+        )
+        self.args = (
+            f"TeaCache is applied, but {actual_type}.generate_image built its first denoising step without "
+            f"calling self._predict, so that step has no TeaCache and the generation was stopped. {installed} most "
+            "likely no longer builds its step function through self._predict. Call handle.restore() to generate "
+            "without TeaCache, and please report both versions "
+            f"({_versions(mflux_version, teacache_version)}) at https://github.com/IonDen/mlx-teacache/issues.",
+        )
+        self.mflux_version = mflux_version
+        self.teacache_version = teacache_version
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (
+                type(self),
+                {
+                    "actual_type": self.actual_type,
+                    "actual_model_name": self.actual_model_name,
+                    "supported": self.supported,
+                    "mflux_version": self.mflux_version,
+                    "teacache_version": self.teacache_version,
+                },
+            ),
+            self.__dict__,
+        )
+
+
+class _SsdStreamError(IncompatibleModelError):
+    """apply_teacache was given a model built with mflux's SSD streaming (`ssd_stream=True`, `--ssd-stream`), which
+    TeaCache has not been verified with. Private: callers catch IncompatibleModelError. `supported` holds the variant
+    the model otherwise matched."""
+
+    def __init__(self, *, actual_type: str, actual_model_name: str | None, supported: list[str]) -> None:
+        super().__init__(actual_type=actual_type, actual_model_name=actual_model_name, supported=supported)
+        self.args = (
+            f"TeaCache does not support SSD streaming yet: this {actual_type} model "
+            f"(model_name={actual_model_name!r}) was built with ssd_stream=True (--ssd-stream). "
+            "Build the model without ssd_stream=True / --ssd-stream to use TeaCache.",
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _rebuild,
+            (
+                type(self),
+                {
+                    "actual_type": self.actual_type,
+                    "actual_model_name": self.actual_model_name,
+                    "supported": self.supported,
+                },
+            ),
+            self.__dict__,
+        )
+
+
 class AlreadyPatchedError(TeaCacheError):
     def __init__(self, *, variant_id: str, rel_l1_thresh: float) -> None:
         super().__init__(

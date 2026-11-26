@@ -144,6 +144,73 @@ def drift_failures(
     ]
 
 
+def _is_self_predict_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_predict"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+    )
+
+
+_SELF_TRANSFORMER = ast.dump(ast.parse("self.transformer", mode="eval").body)
+
+
+def unbound_predict_keywords(source: str, factory: Callable[..., Any]) -> list[str]:
+    """What `factory` cannot take from the ``self._predict(...)`` calls in the ``generate_image`` of ``source``
+    (a whole module, a class or the method alone); empty when every call binds.
+
+    Each call's first positional argument must be ``self.transformer``, the module the installed factory gates.
+    Each call is bound against ``inspect.signature(factory)`` with its own positional count and keyword names.
+    A keyword that lands in a ``**kwargs`` catch-all is reported too: the installed factory refuses those at
+    run time, so only keywords it names count as accepted. A ``generate_image`` with no such call is reported,
+    and so is a ``**mapping`` splat, whose keys the source does not show."""
+    tree = ast.parse(textwrap.dedent(source))
+    generates = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and n.name == "generate_image"
+    ]
+    if not generates:
+        return ["source has no generate_image"]
+    calls = [n for fn in generates for n in ast.walk(fn) if _is_self_predict_call(n)]
+    if not calls:
+        return ["generate_image never calls self._predict"]
+    signature = inspect.signature(factory)
+    catch_all = [p.name for p in signature.parameters.values() if p.kind is inspect.Parameter.VAR_KEYWORD]
+    problems: list[str] = []
+    for call in calls:
+        assert isinstance(call, ast.Call)
+        if call.args and ast.dump(call.args[0]) != _SELF_TRANSFORMER:
+            problems.append("the first argument is not self.transformer")
+        names = [kw.arg for kw in call.keywords if kw.arg is not None]
+        if len(names) != len(call.keywords):
+            problems.append("a **mapping splat whose keywords cannot be checked")
+        try:
+            bound = signature.bind(*[None] * len(call.args), **dict.fromkeys(names))
+        except TypeError as error:
+            unknown = [name for name in names if name not in signature.parameters or name in catch_all]
+            problems.extend(unknown or [f"{len(call.args)} positional arguments: {error}"])
+            continue
+        for name in catch_all:
+            problems.extend(bound.arguments.get(name, {}))
+    return problems
+
+
+def installed_predict_factory(variant_id: str) -> Callable[..., Any]:
+    """The object `apply_teacache` assigns to `flux._predict` for `variant_id`, taken from a duck-typed fake."""
+    # Imported here: the pure-core lane imports this module without mflux and without the test fakes' MLX models.
+    from mlx_teacache import apply_teacache
+    from tests._variant_fakes import fake_for_variant
+
+    fake = fake_for_variant(variant_id)
+    handle = apply_teacache(fake)
+    factory: Callable[..., Any] = vars(fake)["_predict"]
+    handle.restore()
+    return factory
+
+
 def installed_vcs_commit(dist_name: str = "mflux") -> str | None:
     """The git commit an installed distribution was built from, read from its PEP 610
     ``direct_url.json``; None for a wheel or PyPI install, a missing file, or a non-git source."""

@@ -7,6 +7,18 @@ Project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-11-26
+
+Upgrade before you move to the first mflux release that includes mflux pull request [#1021](https://github.com/mflux-community/mflux/pull/1021). That change was merged into mflux's main branch on 2026-11-25 and is in no release yet; the newest release is 0.24.0. With 0.18.0, every Z-Image generation with TeaCache fails with a `TypeError` on that mflux, before its first denoising step. The offline test suite passes on mflux 0.24.0, and in CI it also passes against mflux's main branch, which carries the change. A check reads mflux's source and fails if the call no longer fits the patch. The gate, the defaults, the coefficients, every skip decision and every published number are unchanged. Nothing was measured for this release and nothing was run on real weights.
+
+### Fixed
+- mflux pull request #1021 added SSD streaming for Z-Image. It also changed how mflux builds Z-Image's denoising step: mflux now passes a new `compile_predict` argument on every generation. The Z-Image patch in 0.18.0 does not accept that argument, so on the first mflux release with the change, every Z-Image generation with TeaCache fails with a `TypeError` before its first denoising step, after the weights have loaded. mflux 0.24.0 and older are not affected. Z-Image and FLUX.2 Klein now accept the argument, positionally or by keyword. FLUX.2 Klein does not receive it from mflux today.
+- If a future mflux passes any other keyword argument the patch does not know, you now get `IncompatibleModelError` that names the argument, the installed mflux version and the mlx-teacache version. Before, you got a bare `TypeError`. This is a clearer error, not a fix for that future mflux.
+
+### Changed
+- `apply_teacache` now refuses a model built with mflux's SSD streaming (mflux accepts `ssd_stream=True` for any Z-Image model from Python; `--ssd-stream` on the Z-Image Turbo command line). It raises `IncompatibleModelError` before it changes anything. TeaCache does not support streaming yet. mflux 0.24.0 has no such option, so nothing changes there.
+- On Z-Image and FLUX.2 Klein, each generation now checks that the TeaCache patch is the denoising step in use. If a future mflux builds that step some other way, the generation stops at its first step with `IncompatibleModelError`, which names the model class, the mflux version and the mlx-teacache version. Before, it would have finished an image without TeaCache. Call `handle.restore()` to get plain mflux back. FLUX.1 and Qwen-Image do not get this check.
+
 ### Documentation
 - The threshold-sweep records behind the published similarity figures for Qwen-Image, Qwen-Image-2512, Z-Image and FLUX.1 Krea [dev] are now in the repository under `_artifacts/sweeps/`. In released entries, a similarity figure with no record keeps its value with a dated note.
 - Every benchmark figure in the README, `COMPARISON.md` and the variant and comparison pages now names its record under `_artifacts/` and says what that record does not name, such as a commit, date or MLX version. Where a record has no commit field but its install-time version string names one, the page says so. A figure with no committed record is described in words. Each multi-run benchmark speedup above the limit its skipped steps allow now states that limit beside it; the single-run figures on the generated comparison pages are not part of that claim. The pages also say which mflux version each figure holds for. Seven corrections to wording that disagreed with its own record:

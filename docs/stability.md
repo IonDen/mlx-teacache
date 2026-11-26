@@ -82,7 +82,7 @@ mlx-teacache keeps an ordered registry of variants and uses the first one that m
 
 Dependencies have a floor, never a ceiling. A newer mflux installs, and `apply_teacache` emits `TeaCacheUntestedMfluxWarning` once per process until that release has been checked. TeaCache still applies.
 
-`apply_teacache` and `match_variant` take mflux's objects. On an mflux that has not been checked, a variant may stop matching, or `apply_teacache` may raise `IncompatibleModelError`. That is the documented outcome for a model mlx-teacache does not support, and it does not break this policy.
+`apply_teacache` and `match_variant` take mflux's objects. On an mflux that has not been checked, a variant may stop matching, or `apply_teacache` may raise `IncompatibleModelError`. From 0.18.1, a generation on Z-Image or FLUX.2 Klein can also stop with it. That is the documented outcome for a model mlx-teacache does not support, and it does not break this policy.
 
 Raising the mflux, MLX or Python floor is a minor release, and its CHANGELOG entry names the last mlx-teacache version that supports the old floor.
 

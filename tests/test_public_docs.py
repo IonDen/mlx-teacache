@@ -24,7 +24,41 @@ _PUBLIC_DOCS = [
     "docs/comparison/klein-base-9b.md",
     "docs/comparison/klein-distilled-vs-base.md",
     "docs/comparison/qwen-image.md",
+    "docs/benchmarks.md",
+    "docs/limitations.md",
+    "docs/how-it-works.md",
 ]
+# The pages that took the README's record-bound and figure-free detail.
+_NEW_PAGES = ("docs/benchmarks.md", "docs/limitations.md", "docs/how-it-works.md")
+# A Markdown link target, as scripts/sdist_smoke.sh reads it.
+_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)")
+_ABSOLUTE = ("https://", "http://", "mailto:", "#")
+# A README link into this repository's files on GitHub: the path, then the fragment if any.
+_REPO_URL = re.compile(
+    r"https://github\.com/IonDen/mlx-teacache/(?:blob|tree)/main/([^\s)#>\"']+)(?:#([^\s)>\"']+))?"
+)
+_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+
+
+def _heading_slugs(text: str) -> set[str]:
+    """The anchors GitHub gives the ATX headings of a Markdown text: lowercase, everything but letters, digits,
+    spaces, hyphens and underscores dropped, spaces to hyphens, and "-1", "-2" on repeats. Lines inside fenced code
+    blocks are not headings."""
+    slugs: set[str] = set()
+    seen: dict[str, int] = {}
+    in_fence = False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+            continue
+        match = None if in_fence else _HEADING.match(line)
+        if match is None:
+            continue
+        slug = re.sub(r"[^\w\- ]", "", match.group(1).lower()).replace(" ", "-")
+        repeat = seen.get(slug, 0)
+        seen[slug] = repeat + 1
+        slugs.add(f"{slug}-{repeat}" if repeat else slug)
+    return slugs
 
 
 def _pip_install_targets(text: str) -> list[str]:
@@ -98,3 +132,76 @@ def test_public_docs_cite_only_committed_report_paths():
             if not (_REPO / cited).exists():
                 offenders.append(f"{relative_path}: {cited}")
     assert not offenders, f"public docs cite report paths that do not exist: {offenders}"
+
+
+def test_readme_links_are_absolute_for_pypi():
+    """Bug: a relative link such as `docs/stability.md` in README.md, which PyPI renders as a dead link on the
+    project page. In-page `#anchors` are allowed."""
+    relative = [
+        f"README.md:{line_number}: {target}"
+        for line_number, line in enumerate((_REPO / "README.md").read_text().splitlines(), 1)
+        for target in _LINK.findall(line)
+        if not target.startswith(_ABSOLUTE)
+    ]
+    assert not relative, f"README links that are not absolute: {relative}"
+
+
+def test_new_pages_relative_links_resolve():
+    """Bug: a link moved out of the README keeps its README-relative target (`docs/variants/...` from inside
+    `docs/`) or names a page that does not exist, so it is dead on GitHub. Fragments are not checked."""
+    dead = []
+    for page in _NEW_PAGES:
+        path = _REPO / page
+        assert path.is_file(), f"{page} does not exist"
+        for line_number, line in enumerate(path.read_text().splitlines(), 1):
+            for target in _LINK.findall(line):
+                if target.startswith(_ABSOLUTE):
+                    continue
+                file_part = target.split("#", 1)[0]
+                if file_part and not (path.parent / file_part).exists():
+                    dead.append(f"{page}:{line_number}: {target}")
+    assert not dead, f"relative links whose target does not exist: {dead}"
+
+
+def test_heading_slugs_follow_github():
+    """Bug: the slug rule drifts from GitHub's (keeps the "." of "FLUX.1", or squeezes the "--" left by " + "), a
+    "# comment" inside a fenced code block counts as a heading, or a repeated heading misses GitHub's "-1" suffix.
+    Each lets a dead anchor pass, or fails a live one, in the two README link tests below."""
+    text = (
+        "# mlx-teacache\n\n## Threshold sweep for FLUX.1 dev\n\n## License + acknowledgements\n\n"
+        "```sh\n# or with uv:\n```\n\n## Notes\n\n### Notes\n"
+    )
+    assert _heading_slugs(text) == {
+        "mlx-teacache",
+        "threshold-sweep-for-flux1-dev",
+        "license--acknowledgements",
+        "notes",
+        "notes-1",
+    }
+
+
+def test_readme_repo_links_resolve():
+    """Bug: a README link into this repository names a path that does not exist (`docs/benchmark.md`), or deep-links
+    a heading that was renamed (`## Performance by chip` on docs/benchmarks.md). The README is the PyPI page, so a dead
+    link there stays dead until the next release."""
+    links = _REPO_URL.findall((_REPO / "README.md").read_text())
+    assert links, "no README link into the repository found; the URL pattern no longer matches the README"
+    dead = []
+    for path, fragment in links:
+        target = _REPO / path
+        if not target.exists():
+            dead.append(f"{path}: no such path")
+        elif fragment and path.endswith(".md") and fragment not in _heading_slugs(target.read_text()):
+            dead.append(f"{path}#{fragment}: no such heading")
+    assert not dead, f"README links into the repository that are dead: {dead}"
+
+
+def test_readme_in_page_anchors_resolve():
+    """Bug: a README heading is renamed (`## License obligations`) while an in-page link still points at its old
+    anchor (`#license-obligations`), which then goes nowhere on GitHub and PyPI."""
+    readme = (_REPO / "README.md").read_text()
+    anchors = [target for target in _LINK.findall(readme) if target.startswith("#")]
+    assert anchors, "no in-page README anchor found"
+    slugs = _heading_slugs(readme)
+    missing = [anchor for anchor in anchors if anchor[1:] not in slugs]
+    assert not missing, f"README in-page anchors with no heading: {missing}"

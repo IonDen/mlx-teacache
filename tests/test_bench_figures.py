@@ -16,8 +16,8 @@ Each check is named for the bug it catches:
   those fields in the whole paragraph, and a paragraph that names one record by path and describes another only in
   words is read whole for the named record, so the described record's gap wording still counts for it;
 - ``GAPS`` itself matches each record's JSON keys (a record that gains or loses a field the docs describe);
-- each README table row's footnote marker leads to a footnote whose citation names that row's record (a wrong marker,
-  or a footnote citing another record);
+- each benchmarks-page table row's footnote marker leads to a footnote whose citation names that row's record (a
+  wrong marker, or a footnote citing another record);
 - each install-time version stamp a doc quotes matches the stamp of a record that doc quotes;
 - every combined median speedup, and every base/base-teacache ratio on the distilled page, that is above the limit
   its skipped steps allow, N / (N - median skipped), is quoted with that limit as "N.NN×" beside "allow", "limit" or
@@ -93,6 +93,7 @@ SW_Z = "_artifacts/sweeps/z-image-base_2026-05-31.json"
 SW_K = "_artifacts/sweeps/flux1-krea-dev_2026-09-05.json"
 
 README = "README.md"
+BENCH = "docs/benchmarks.md"
 COMPARISON = "COMPARISON.md"
 CMP_DEV = "docs/comparison/flux1-dev.md"
 CMP_KREA = "docs/comparison/flux1-krea-dev.md"
@@ -211,7 +212,7 @@ def ranked(key: str, index: int) -> Value:
 
 
 def against(other: str, of: Callable[[dict[str, Any], dict[str, Any]], Decimal], name: str) -> Value:
-    """A figure comparing this record with ``other`` (the README's v0.10.0 to v0.12.0 drift sentence)."""
+    """A figure comparing this record with ``other`` (the benchmarks page's v0.10.0 to v0.12.0 drift sentence)."""
     return Value(name, lambda r: of(r, load_record(other)))
 
 
@@ -447,34 +448,34 @@ STEPS = r"^{f} of {n}$"
 STEPS_OF = r"^{n} of {f}$"
 
 FIGURES: tuple[Figure, ...] = (
-    # README headline table (:20-25): unpinned before this test.
-    _cell(README, "Qwen-Image (original checkpoint)", "Speedup", HEADLINE, Q11, SPEEDUP, 2),
-    _cell(README, "Qwen-Image (original checkpoint)", "Steps skipped", STEPS, Q11, SKIPPED, 0),
-    _cell(README, "Qwen-Image (original checkpoint)", "Steps skipped", STEPS_OF, Q11, STEPS_TOTAL, 0),
-    _cell(README, "FLUX.2 Klein base 9B", "Speedup", HEADLINE, B9, SPEEDUP, 2),
-    _cell(README, "FLUX.2 Klein base 9B", "Steps skipped", STEPS, B9, SKIPPED, 0),
-    _cell(README, "FLUX.2 Klein base 9B", "Steps skipped", STEPS_OF, B9, STEPS_TOTAL, 0),
-    _cell(README, "FLUX.2 Klein base 4B", "Speedup", HEADLINE, B4, SPEEDUP, 2, DECOMPOSED),
-    _cell(README, "FLUX.2 Klein base 4B", "Steps skipped", STEPS, B4, SKIPPED, 0),
-    _cell(README, "FLUX.2 Klein base 4B", "Steps skipped", STEPS_OF, B4, STEPS_TOTAL, 0),
-    _cell(README, "Z-Image base", "Speedup", HEADLINE, Z10, SPEEDUP, 2),
-    _cell(README, "Z-Image base", "Steps skipped", STEPS, Z10, SKIPPED, 0),
-    _cell(README, "Z-Image base", "Steps skipped", STEPS_OF, Z10, STEPS_TOTAL, 0),
-    _cell(README, "FLUX.1 Krea [dev]", "Speedup", HEADLINE, K11, SPEEDUP, 2),
-    _cell(README, "FLUX.1 Krea [dev]", "Steps skipped", STEPS, K11, SKIPPED, 0),
-    _cell(README, "FLUX.1 Krea [dev]", "Steps skipped", STEPS_OF, K11, STEPS_TOTAL, 0),
-    _cell(README, "FLUX.1 dev", "Speedup", HEADLINE, F18, SPEEDUP, 2),
-    _cell(README, "FLUX.1 dev", "Steps skipped", STEPS, F18, SKIPPED, 0),
-    _cell(README, "FLUX.1 dev", "Steps skipped", STEPS_OF, F18, STEPS_TOTAL, 0),
-    # README prose under the table.
+    # Benchmarks page, At a glance table (README :20-25 before the move): unpinned before this test.
+    _cell(BENCH, "Qwen-Image (original checkpoint)", "Speedup", HEADLINE, Q11, SPEEDUP, 2),
+    _cell(BENCH, "Qwen-Image (original checkpoint)", "Steps skipped", STEPS, Q11, SKIPPED, 0),
+    _cell(BENCH, "Qwen-Image (original checkpoint)", "Steps skipped", STEPS_OF, Q11, STEPS_TOTAL, 0),
+    _cell(BENCH, "FLUX.2 Klein base 9B", "Speedup", HEADLINE, B9, SPEEDUP, 2),
+    _cell(BENCH, "FLUX.2 Klein base 9B", "Steps skipped", STEPS, B9, SKIPPED, 0),
+    _cell(BENCH, "FLUX.2 Klein base 9B", "Steps skipped", STEPS_OF, B9, STEPS_TOTAL, 0),
+    _cell(BENCH, "FLUX.2 Klein base 4B", "Speedup", HEADLINE, B4, SPEEDUP, 2, DECOMPOSED),
+    _cell(BENCH, "FLUX.2 Klein base 4B", "Steps skipped", STEPS, B4, SKIPPED, 0),
+    _cell(BENCH, "FLUX.2 Klein base 4B", "Steps skipped", STEPS_OF, B4, STEPS_TOTAL, 0),
+    _cell(BENCH, "Z-Image base", "Speedup", HEADLINE, Z10, SPEEDUP, 2),
+    _cell(BENCH, "Z-Image base", "Steps skipped", STEPS, Z10, SKIPPED, 0),
+    _cell(BENCH, "Z-Image base", "Steps skipped", STEPS_OF, Z10, STEPS_TOTAL, 0),
+    _cell(BENCH, "FLUX.1 Krea [dev]", "Speedup", HEADLINE, K11, SPEEDUP, 2),
+    _cell(BENCH, "FLUX.1 Krea [dev]", "Steps skipped", STEPS, K11, SKIPPED, 0),
+    _cell(BENCH, "FLUX.1 Krea [dev]", "Steps skipped", STEPS_OF, K11, STEPS_TOTAL, 0),
+    _cell(BENCH, "FLUX.1 dev", "Speedup", HEADLINE, F18, SPEEDUP, 2),
+    _cell(BENCH, "FLUX.1 dev", "Steps skipped", STEPS, F18, SKIPPED, 0),
+    _cell(BENCH, "FLUX.1 dev", "Steps skipped", STEPS_OF, F18, STEPS_TOTAL, 0),
+    # Benchmarks page prose under the table.
     *_t(
-        README,
+        BENCH,
         "FLUX.1 dev's {}×⁶ comes entirely from the {} skipped steps",
         (F18, SPEEDUP, 2),
         (F18, SKIPPED, 0),
     ),
     *_t(
-        README,
+        BENCH,
         "took the same time as plain mflux ({} s both). It is under its {}× limit (footnote ⁶ has the arithmetic). "
         "An older {}× from mflux 0.18.0 was above that limit",
         (F18, VANILLA, 2),
@@ -482,22 +483,22 @@ FIGURES: tuple[Figure, ...] = (
         (F10, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "Krea's {}×⁷ is above its {}× limit (footnote ⁷)",
         (K11, SPEEDUP, 2),
         (K11, CEILING, 2),
     ),
-    *_t(README, "skips around 25% of steps ({} of 25, Benchmarks footnote ⁶)", (F18, SKIPPED, 0)),
+    *_t(BENCH, "skips around 25% of steps ({} of 25, Benchmarks footnote ⁶)", (F18, SKIPPED, 0)),
     # Supported-models entries.
     *_t(
-        README,
+        BENCH,
         "**{}× combined** ({} s → {} s, Benchmarks footnote ¹)",
         (Q11, SPEEDUP, 2),
         (Q11, VANILLA, 1),
         (Q11, WRAPPER, 1),
     ),
     *_t(
-        README,
+        BENCH,
         "it skips {}/48 active steps for **{}× combined wall-clock** ({} s → {} s median; {}× gating + {}× "
         "compile-avoidance), at SSIM 0.993 against vanilla and a peak-memory drop from ~{} GiB to ~{} GiB (footnote ²)",
         (B9, SKIPPED, 0),
@@ -510,19 +511,19 @@ FIGURES: tuple[Figure, ...] = (
         (B9, WRAPPER_PEAK, 1),
     ),
     *_t(
-        README,
+        BENCH,
         "v0.5.0 advertised {}× on this variant (Klein base-9B;",
         (VAL, VAL_SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "Plain mflux peaked at {} GiB there, above the {} GiB cap the run set",
         (VAL, plain("vanilla_peak_memory_gb"), 2),
         (VAL, plain("mlx_memory_cap_gb"), 0),
     ),
-    *_t(README, "The wrapper peaked at {} GiB. That fits", (VAL, plain("wrapper_peak_memory_gb"), 2)),
+    *_t(BENCH, "The wrapper peaked at {} GiB. That fits", (VAL, plain("wrapper_peak_memory_gb"), 2)),
     *_t(
-        README,
+        BENCH,
         "the gate skips {}/48 active steps for a **{}× combined speedup**³ on M1 Max, almost all of it "
         "step-skipping, with compile-avoidance at noise level ({}×)",
         (B4, SKIPPED, 0),
@@ -530,7 +531,7 @@ FIGURES: tuple[Figure, ...] = (
         (B4, COMPILE, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "it skips {}/48 active steps for **{}× combined wall-clock**⁵ ({} s → {} s), entirely from gating — the "
         "no-gate wrapper runs at vanilla speed ({}×)",
         (Z10, SKIPPED, 0),
@@ -540,10 +541,10 @@ FIGURES: tuple[Figure, ...] = (
         (Z10, COMPILE, 2),
     ),
     *_t(
-        README, "Peak memory drops {} GiB → {} GiB (the eager", (Z10, VANILLA_PEAK, 1), (Z10, WRAPPER_PEAK, 1)
+        BENCH, "Peak memory drops {} GiB → {} GiB (the eager", (Z10, VANILLA_PEAK, 1), (Z10, WRAPPER_PEAK, 1)
     ),
     *_t(
-        README,
+        BENCH,
         "**{}× combined**⁷ ({} s → {} s), {} of 26 active steps skipped in every rep",
         (K11, SPEEDUP, 2),
         (K11, VANILLA, 1),
@@ -551,21 +552,21 @@ FIGURES: tuple[Figure, ...] = (
         (K11, SKIPPED, 0),
     ),
     *_t(
-        README,
+        BENCH,
         "The gated run is about {}× faster than the no-gate run, and the no-gate wrapper's {}× over plain mflux is "
         "within the rep-to-rep range",
         (K11, GATING, 2),
         (K11, COMPILE, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "Both the {}× and the {}× are above its {}× limit (footnote ⁷)",
         (K11, SPEEDUP, 2),
         (K11, GATING, 2),
         (K11, CEILING, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "about {}× faster than Base at 50 steps on 4B ({} s against {} s; 768×1024, 3 reps) and about {}× on 9B "
         "({} s against {} s; 512×512, 2 reps), and the wrapper trims {} percent off Base on 4B and {} percent on 9B",
         (D4, median_ratio("base", "distilled"), 0),
@@ -577,10 +578,10 @@ FIGURES: tuple[Figure, ...] = (
         (D4, trim_pct(), 0),
         (D9, trim_pct(), 0),
     ),
-    # README Benchmarks table: the z-image row and the mechanism cells (the other cells are pinned in
+    # Benchmarks page, Benchmarks table: the z-image row and the mechanism cells (the other cells are pinned in
     # test_bench_artifacts.py).
     *_cells(
-        README,
+        BENCH,
         "`z-image-base` (CFG)⁵",
         Z10,
         ("Vanilla", r"^{f}s$", VANILLA, 1),
@@ -589,14 +590,14 @@ FIGURES: tuple[Figure, ...] = (
         ("Skipped", r"^\*\*{f} / {n}\*\*$", SKIPPED, 0),
     ),
     *_cells(
-        README,
+        BENCH,
         "`qwen-image` (CFG)¹",
         Q11,
         ("Mechanism", r"\({f}× against its own no-gate run", GATING, 2),
         ("Mechanism", r"no-gate wrapper's {f}× is inside", COMPILE, 2),
     ),
     *_cells(
-        README,
+        BENCH,
         "`flux1-krea-dev`⁷",
         K11,
         ("Mechanism", r"gate off: about {f}×", GATING, 2),
@@ -604,9 +605,9 @@ FIGURES: tuple[Figure, ...] = (
         ("Mechanism", r"about {n}×, above its {f}× limit \(footnote ⁷\)", CEILING, 2),
     ),
     # Footnote ¹.
-    *_t(README, "¹ **{}×** for `qwen-image` under CFG", (Q11, SPEEDUP, 2)),
+    *_t(BENCH, "¹ **{}×** for `qwen-image` under CFG", (Q11, SPEEDUP, 2)),
     *_t(
-        README,
+        BENCH,
         ": {} s plain mflux against {} s with TeaCache ({}× against the wrapper's own no-gate run), {} of the 48 "
         "active steps skipped in every rep. The record is",
         (Q11, VANILLA, 1),
@@ -616,7 +617,7 @@ FIGURES: tuple[Figure, ...] = (
     ),
     # Footnote ².
     *_t(
-        README,
+        BENCH,
         "**{}× combined** = {}× gating × {}× compile-avoidance (vanilla {} s, no-gate {} s, gated {} s medians)",
         (B9, SPEEDUP, 2, DECOMPOSED),
         (B9, GATING, 2),
@@ -625,9 +626,9 @@ FIGURES: tuple[Figure, ...] = (
         (B9, NOGATE, 1),
         (B9, WRAPPER, 1),
     ),
-    *_t(README, "{}/50 skips in every rep, never two consecutive", (B9, SKIPPED, 0)),
+    *_t(BENCH, "{}/50 skips in every rep, never two consecutive", (B9, SKIPPED, 0)),
     *_t(
-        README,
+        BENCH,
         "v0.10.0 measured {}× ({} s → {} s, `_artifacts/v0.10.0_bench_klein_base_9b.json`) and v0.6.0 {}× "
         "(`_artifacts/v0.6.0_bench_klein_base_9b.json`)",
         (B9_10, SPEEDUP, 2),
@@ -636,14 +637,14 @@ FIGURES: tuple[Figure, ...] = (
         (B9_6, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "Wrapper peak memory ~{} GiB vs vanilla's ~{} GiB",
         (B9, WRAPPER_PEAK, 1),
         (B9, VANILLA_PEAK, 0),
     ),
     # Footnote ³.
     *_t(
-        README,
+        BENCH,
         "**{}× combined** = {}× from step-skipping (wrapped-no-gate vs wrapped-gated) × {}× from "
         "`mx.compile`-path avoidance (vanilla vs wrapped-no-gate); vanilla {} s, no-gate {} s, gated {} s medians",
         (B4, SPEEDUP, 2, DECOMPOSED),
@@ -653,21 +654,21 @@ FIGURES: tuple[Figure, ...] = (
         (B4, NOGATE, 1),
         (B4, WRAPPER, 1),
     ),
-    *_t(README, "{} of the 48 active steps skipped in every rep, never two in a row; SSIM", (B4, SKIPPED, 0)),
+    *_t(BENCH, "{} of the 48 active steps skipped in every rep, never two in a row; SSIM", (B4, SKIPPED, 0)),
     *_t(
-        README,
+        BENCH,
         "v0.10.0 measured {}× with that extra skip ({}/50, longest run {};",
         (B4_10, SPEEDUP, 2),
         (B4_10, SKIPPED, 0),
         (B4_10, LONGEST_RUN, 0),
     ),
     *_t(
-        README,
+        BENCH,
         "and v0.6.0 {}× (`_artifacts/v0.6.0_bench_klein_base_4b.json`",
         (B4_6, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "vanilla itself slowed by {}% ({} s to {} s), so the gated time's {}% rise ({} s)",
         (
             B4,
@@ -697,29 +698,29 @@ FIGURES: tuple[Figure, ...] = (
             1,
         ),
     ),
-    *_t(README, "the v0.4.1-era {}× attribution stays withdrawn", (B4_41, COMPILE, 2)),
+    *_t(BENCH, "the v0.4.1-era {}× attribution stays withdrawn", (B4_41, COMPILE, 2)),
     *_t(
-        README,
+        BENCH,
         "has medians of {} s plain, {} s no-gate and {} s gated",
         (B4_41, VANILLA, 1),
         (B4_41, NOGATE, 1),
         (B4_41, WRAPPER, 1),
     ),
     *_t(
-        README,
+        BENCH,
         "the medians were {} s, {} s and {} s. The no-gate",
         (B4_6, VANILLA, 1),
         (B4_6, NOGATE, 1),
         (B4_6, WRAPPER, 1),
     ),
-    *_t(README, "slower in v0.4.1 ({} s against {} s)", (B4_41, WRAPPER, 1), (B4_6, WRAPPER, 1)),
+    *_t(BENCH, "slower in v0.4.1 ({} s against {} s)", (B4_41, WRAPPER, 1), (B4_6, WRAPPER, 1)),
     # Footnote ⁴.
     *_t(
-        README, "it measured {}× to {}× on the 50-step Klein base recipes", (B4, COMPILE, 2), (B9, COMPILE, 2)
+        BENCH, "it measured {}× to {}× on the 50-step Klein base recipes", (B4, COMPILE, 2), (B9, COMPILE, 2)
     ),
     # Footnote ⁵.
     *_t(
-        README,
+        BENCH,
         "Result: **{}× combined** (vanilla {} s → wrapper {} s median), entirely from step-skipping at {} of the 48 "
         "active steps",
         (Z10, SPEEDUP, 2),
@@ -728,26 +729,24 @@ FIGURES: tuple[Figure, ...] = (
         (Z10, SKIPPED, 0),
     ),
     *_t(
-        README,
+        BENCH,
         "the no-gate wrapper ran at {} s median against vanilla's {} s ({}×), so the whole {}× is gating",
         (Z10, NOGATE, 1),
         (Z10, VANILLA, 1),
         (Z10, COMPILE, 2),
         (Z10, GATING, 2),
     ),
+    *_t(BENCH, "Peak memory {} GiB → {} GiB, from the eager", (Z10, VANILLA_PEAK, 1), (Z10, WRAPPER_PEAK, 1)),
+    *_t(BENCH, "(the no-gate wrapper shows the same ~{} GiB)", (Z10, NOGATE_PEAK, 1)),
     *_t(
-        README, "Peak memory {} GiB → {} GiB, from the eager", (Z10, VANILLA_PEAK, 1), (Z10, WRAPPER_PEAK, 1)
-    ),
-    *_t(README, "(the no-gate wrapper shows the same ~{} GiB)", (Z10, NOGATE_PEAK, 1)),
-    *_t(
-        README,
+        BENCH,
         "v0.7.0 reported {}× at this recipe (`_artifacts/_bench_z_image_v0_7_0.json`, wrapper {} s;",
         (Z7, SPEEDUP, 2),
         (Z7, WRAPPER, 1),
     ),
     # Footnote ⁶.
     *_t(
-        README,
+        BENCH,
         "Plain mflux took {} s (reps {} / {} / {}). The no-gate run, which computes every step, took {} s "
         "({} / {} / {})",
         (F18, VANILLA, 2),
@@ -756,7 +755,7 @@ FIGURES: tuple[Figure, ...] = (
         *_reps(F18, NOGATE_REPS, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "The gated wrapper took {} s ({} / {} / {}), a median speedup of {}×. {} of 25 steps were skipped in every "
         "rep, never two in a row, and peak memory was {} GiB.",
         (F18, WRAPPER, 2),
@@ -766,16 +765,16 @@ FIGURES: tuple[Figure, ...] = (
         (F18, WRAPPER_PEAK, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "{} of 25 steps were computed: {} the gate decided",
         (F18, COMPUTED, 0),
         (F18, GATE_COMPUTED, 0),
     ),
     *_t(
-        README, "at most about {}× (25/19), and {}× is under that limit", (F18, CEILING, 2), (F18, SPEEDUP, 2)
+        BENCH, "at most about {}× (25/19), and {}× is under that limit", (F18, CEILING, 2), (F18, SPEEDUP, 2)
     ),
     *_t(
-        README,
+        BENCH,
         "about {} s on mflux 0.17.5 (the v0.6.3 record, steady reps), {} s on mflux 0.18.0 (the v0.10.0 record, "
         "reps spread from {} to {} s) and {} s on mflux 0.24.0",
         (F63, VANILLA, 0),
@@ -785,7 +784,7 @@ FIGURES: tuple[Figure, ...] = (
         (F18, VANILLA, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "**{}× combined** as the median of three cold reps (vanilla {} s → gated {} s). That is above the {}× limit",
         (F10, SPEEDUP, 2),
         (F10, VANILLA, 2),
@@ -793,7 +792,7 @@ FIGURES: tuple[Figure, ...] = (
         (F10, CEILING, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "varied between runs ({} / {} / {} s) while the gated wrapper held steady ({} / {} / {} s)",
         *_reps(
             F10, (ranked("vanilla_seconds", 0), ranked("vanilla_seconds", 1), ranked("vanilla_seconds", 2))
@@ -802,12 +801,12 @@ FIGURES: tuple[Figure, ...] = (
             F10, (ranked("wrapper_seconds", 0), ranked("wrapper_seconds", 1), ranked("wrapper_seconds", 2))
         ),
     ),
-    *_t(README, "Even fastest to fastest, {}× is above the limit", (F10, FASTEST_RATIO, 2)),
+    *_t(BENCH, "Even fastest to fastest, {}× is above the limit", (F10, FASTEST_RATIO, 2)),
     *_t(
-        README, "The no-gate wrapper took {} s, {}× ahead of plain mflux", (F10, NOGATE, 2), (F10, COMPILE, 2)
+        BENCH, "The no-gate wrapper took {} s, {}× ahead of plain mflux", (F10, NOGATE, 2), (F10, COMPILE, 2)
     ),
     *_t(
-        README,
+        BENCH,
         "The earlier {}× (v0.6.3, mflux 0.17.5: plain {} s → gated {} s) is also above the {}× limit",
         (F63, SPEEDUP, 2),
         (F63, VANILLA, 2),
@@ -816,7 +815,7 @@ FIGURES: tuple[Figure, ...] = (
     ),
     # Footnote ⁷.
     *_t(
-        README,
+        BENCH,
         "Result: **{}× combined** as the median of three cold reps (vanilla {} s → gated {} s). The gated run was "
         "about {}× faster than the no-gate run; the no-gate wrapper's {}× over plain mflux is within",
         (K11, SPEEDUP, 2),
@@ -825,35 +824,35 @@ FIGURES: tuple[Figure, ...] = (
         (K11, GATING, 2),
         (K11, COMPILE, 2),
     ),
-    *_t(README, "{} of the 26 active steps skipped in every rep (the table's", (K11, SKIPPED, 0)),
-    *_t(README, "so they can give at most about {}× (28/18)", (K11, CEILING, 2)),
+    *_t(BENCH, "{} of the 26 active steps skipped in every rep (the table's", (K11, SKIPPED, 0)),
+    *_t(BENCH, "so they can give at most about {}× (28/18)", (K11, CEILING, 2)),
     *_t(
-        README,
+        BENCH,
         "The three TeaCache reps were {} / {} / {} s: one was much faster than the other two, against {} / {} / {} s "
         "for plain mflux",
         *_reps(K11, WRAPPER_REPS),
         *_reps(K11, VANILLA_REPS),
     ),
     *_t(
-        README,
+        BENCH,
         "Peak memory {} GiB. Full report: `_artifacts/v0.11.0_bench_krea_dev.json`",
         (K11, WRAPPER_PEAK, 1),
     ),
     # How the speedup happens, chip table, limitations.
     *_t(
-        README,
+        BENCH,
         "On FLUX.1-dev at 25 steps, {} of 25 steps are skippable and this is where the {}× speedup",
         (F18, SKIPPED, 0),
         (F18, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "the subprocess-per-rep bench measures it at {}× to {}× (footnotes ³ and ²)",
         (B4, COMPILE, 2),
         (B9, COMPILE, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "base-4b skips {}/50 steps for a measured {}× combined speedup (subprocess-per-rep, footnote ³), and base-9b "
         "skips {}/50 steps for {}× (footnote ²)",
         (B4, SKIPPED, 0),
@@ -862,7 +861,7 @@ FIGURES: tuple[Figure, ...] = (
         (B9, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "chip-independent ({}×¹ Qwen-Image, {}×⁷ Krea (above its {}× limit), {}×⁶ FLUX.1-dev",
         (Q11, SPEEDUP, 2),
         (K11, SPEEDUP, 2),
@@ -870,7 +869,7 @@ FIGURES: tuple[Figure, ...] = (
         (F18, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "Qwen-Image {}×¹, klein-base-9b {}×², klein-base-4b {}×³, z-image-base {}×⁵, FLUX.1 Krea {}×⁷ (above its {}× "
         "limit), FLUX.1-dev {}×⁶",
         (Q11, SPEEDUP, 2),
@@ -882,7 +881,7 @@ FIGURES: tuple[Figure, ...] = (
         (F18, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "measures **{}× combined**³ on M1 Max under the subprocess-per-rep harness (v0.12.0, where {} skipped steps "
         "alone allow {}×; v0.10.0 measured {}× and v0.6.0 {}× (above its {}× limit, 50/41) before the gate's range "
         "check, v0.4.1 advertised {}× combined under same-process measurement, above its {}× limit (50/41)",
@@ -896,7 +895,7 @@ FIGURES: tuple[Figure, ...] = (
         (B4_41, CEILING, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "measures **{}× combined wall-clock** vs vanilla on M1 Max at that recipe (v0.12.0, footnote ³: {}× gating + "
         "{}× compile-avoidance; {}/{} skips, SSIM 0.985; v0.10.0 measured {}× and v0.6.0 {}×, which is above its {}× "
         "limit, 50/41). v0.4.1's same-process bench reported {}× combined (also above that {}× limit) and decomposed "
@@ -915,7 +914,7 @@ FIGURES: tuple[Figure, ...] = (
         (B4_41, COMPILE, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "measures **{}× combined wall-clock**² ({}× gating + {}× compile-avoidance; {} skipped steps alone allow {}×, "
         "and v0.10.0 and v0.6.0 measured {}× and {}×, both above that limit, 50/37), {}/{} steps skipped",
         (B9, SPEEDUP, 2),
@@ -928,21 +927,21 @@ FIGURES: tuple[Figure, ...] = (
         (B9, SKIPPED, 0),
         (B9, STEPS_TOTAL, 0),
     ),
-    *_t(README, "The {}×⁶ measurement is from M1 Max / FLUX.1-dev", (F18, SPEEDUP, 2)),
+    *_t(BENCH, "The {}×⁶ measurement is from M1 Max / FLUX.1-dev", (F18, SPEEDUP, 2)),
     *_t(
-        README,
+        BENCH,
         "The later median ratio, {}×, is below {}×.",
         (Q11, SPEEDUP, 2),
         (Q10, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "the 0.10.0 Qwen-Image figures ({}× against plain mflux, plus an unexplained {}× with the gate off)",
         (Q10, SPEEDUP, 2),
         (Q10, COMPILE, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "measured an active peak of {}–{} GiB after model load (the load phase reads about zero, so this is also the "
         "whole-run peak) and {}× combined",
         (Q11, PEAK_LOW, 2),
@@ -950,13 +949,13 @@ FIGURES: tuple[Figure, ...] = (
         (Q11, SPEEDUP, 2),
     ),
     *_t(
-        README,
+        BENCH,
         "gives an estimate of roughly {}–{} GiB, computed rather than observed",
         (Q11, PEAK_CACHE_LOW, 1),
         (Q11, PEAK_CACHE_HIGH, 1),
     ),
     *_t(
-        README,
+        BENCH,
         "The {}× is above the {}× that {} skipped steps of 50 allow (50/17). The record does not say why, and it does "
         "not explain the same report's {}× no-gate gap",
         (Q10, SPEEDUP, 2),
@@ -1863,7 +1862,7 @@ def test_unstated_gaps_does_not_take_a_positive_claim_for_a_gap() -> None:
         "date",
         "mlx",
     }
-    # The README footnote shape still states every gap it lists.
+    # The benchmarks-page footnote shape still states every gap it lists.
     kept = (
         "It has no date field (the date comes from its chunk timestamps), names commit 040056a, notes uncommitted "
         "changes in the working tree without listing files, and has no MLX version field"
@@ -1944,20 +1943,20 @@ GAP_PARAGRAPH: dict[tuple[str, str], str] = {
 # paragraphs naming the record. "Neither record …" and "Both records …" are one statement about two records, so
 # both records share its anchor.
 GAP_SPAN: dict[tuple[str, str], str] = {
-    (README, B4): "The record names commit ec4d110",
-    (README, B4_10): "The v0.10.0 record has",
-    (README, B4_6): "The v0.6.0 record (mflux 0.17.5)",
-    (README, B4_41): "The v0.4.1 record names",
-    (README, B9): "The record names commit ec4d110",
-    (README, B9_10): "The v0.10.0 record has",
-    (README, B9_6): "The v0.6.0 record (mflux 0.17.5)",
-    (README, Z10): "⁵ `z-image-base` under CFG",
-    (README, Z7): "v0.7.0 reported 1.17× at this recipe",
-    (README, F10): "History, the 1.57× run.",
-    (README, F63): "The earlier 1.46× (v0.6.3",
-    (README, K11): "The record is `_artifacts/v0.11.0_bench_krea_dev.json`",
-    (README, D4): "the wrapper trims 17 percent off Base",
-    (README, D9): "the wrapper trims 17 percent off Base",
+    (BENCH, B4): "The record names commit ec4d110",
+    (BENCH, B4_10): "The v0.10.0 record has",
+    (BENCH, B4_6): "The v0.6.0 record (mflux 0.17.5)",
+    (BENCH, B4_41): "The v0.4.1 record names",
+    (BENCH, B9): "The record names commit ec4d110",
+    (BENCH, B9_10): "The v0.10.0 record has",
+    (BENCH, B9_6): "The v0.6.0 record (mflux 0.17.5)",
+    (BENCH, Z10): "⁵ `z-image-base` under CFG",
+    (BENCH, Z7): "v0.7.0 reported 1.17× at this recipe",
+    (BENCH, F10): "History, the 1.57× run.",
+    (BENCH, F63): "The earlier 1.46× (v0.6.3",
+    (BENCH, K11): "The record is `_artifacts/v0.11.0_bench_krea_dev.json`",
+    (BENCH, D4): "the wrapper trims 17 percent off Base",
+    (BENCH, D9): "the wrapper trims 17 percent off Base",
     (CALIBRATION, B4): "`_artifacts/v0.12.0_bench_klein_base_4b.json` is a clean-tree run",
     (CALIBRATION, B4_10): "`_artifacts/v0.10.0_bench_klein_base_4b.json` has",
     (CALIBRATION, Q11): "`_artifacts/v0.11.0_bench_qwen_image.json` has",
@@ -1983,9 +1982,9 @@ GAP_SPAN: dict[tuple[str, str], str] = {
 # level. Each entry is a gap the record's own span does not state today; once the doc states it there, the entry
 # must go (``test_paragraph_level_gaps_are_still_missing_from_their_span``).
 PARAGRAPH_LEVEL_GAPS: dict[tuple[str, str], frozenset[str]] = {
-    (README, B4): frozenset({"date"}),
-    (README, B9): frozenset({"date"}),
-    (README, B4_41): frozenset({"dirty"}),
+    (BENCH, B4): frozenset({"date"}),
+    (BENCH, B9): frozenset({"date"}),
+    (BENCH, B4_41): frozenset({"dirty"}),
     (V_B4, B4_41): frozenset({"dirty"}),
     (V_B9, B9_6): frozenset({"commit", "dirty"}),
     (V_B9, B9_10): frozenset({"commit", "dirty"}),
@@ -2119,19 +2118,19 @@ _GENERIC = "its provenance fields; its install-time version string names commit 
 # Each mutant stays green under a paragraph-level check: another record named in the same footnote or paragraph
 # states the same gap. Each must turn its own record red, on the field it removes.
 GAP_MUTANTS: tuple[GapMutant, ...] = (
-    GapMutant("readme-4b-mlx-deleted", README, B4, "mlx", " and has no MLX version field;", ";", _FN3),
+    GapMutant("bench-4b-mlx-deleted", BENCH, B4, "mlx", " and has no MLX version field;", ";", _FN3),
     GapMutant(
-        "readme-4b-mlx-reversed",
-        README,
+        "bench-4b-mlx-reversed",
+        BENCH,
         B4,
         "mlx",
         "and has no MLX version field;",
         "and records MLX 0.31.2;",
         _FN3,
     ),
-    GapMutant("readme-9b-mlx-deleted", README, B9, "mlx", " and has no MLX version field;", ";", _FN2),
-    GapMutant("readme-z7-gaps-generic", README, Z7, "mlx", _OLD_GAPS, _GENERIC, _FN5),
-    GapMutant("readme-f63-gaps-generic", README, F63, "mlx", _OLD_GAPS, _GENERIC, _FLUX1_HISTORY),
+    GapMutant("bench-9b-mlx-deleted", BENCH, B9, "mlx", " and has no MLX version field;", ";", _FN2),
+    GapMutant("bench-z7-gaps-generic", BENCH, Z7, "mlx", _OLD_GAPS, _GENERIC, _FN5),
+    GapMutant("bench-f63-gaps-generic", BENCH, F63, "mlx", _OLD_GAPS, _GENERIC, _FLUX1_HISTORY),
     GapMutant(
         "calibration-qwen-mlx-date-deleted",
         CALIBRATION,
@@ -2173,17 +2172,17 @@ def test_a_span_ends_at_the_next_records_anchor_without_a_path() -> None:
     record has …" is the closing "Full report", so that span would run on into the v0.6.0 record's "no commit,
     dirty flag, date or MLX version" and borrow it."""
     old = "The v0.10.0 record has no commit or dirty field, no date and no MLX version;"
-    mutated = _mutated(README, old, "The v0.10.0 record has its provenance fields;", _FN3)
-    assert gaps_left_out(_doc(README), README, B4_10) == set()
-    assert gaps_left_out(mutated, README, B4_10) == {"commit", "dirty", "date", "mlx"}
+    mutated = _mutated(BENCH, old, "The v0.10.0 record has its provenance fields;", _FN3)
+    assert gaps_left_out(_doc(BENCH), BENCH, B4_10) == set()
+    assert gaps_left_out(mutated, BENCH, B4_10) == {"commit", "dirty", "date", "mlx"}
 
 
 def test_a_reworded_span_anchor_fails_instead_of_falling_back() -> None:
     """Bug caught: a GAP_SPAN anchor the doc no longer holds, after which the record is read at paragraph level
     again (or not at all) and a rewording silently drops the per-record check."""
-    mutated = _mutated(README, "The earlier 1.46× (v0.6.3", "The older 1.46× (v0.6.3", _FLUX1_HISTORY)
+    mutated = _mutated(BENCH, "The earlier 1.46× (v0.6.3", "The older 1.46× (v0.6.3", _FLUX1_HISTORY)
     with pytest.raises(AssertionError, match=r"anchor 'The earlier 1\.46× \(v0\.6\.3' is in 0 paragraphs"):
-        gaps_left_out(mutated, README, F63)
+        gaps_left_out(mutated, BENCH, F63)
 
 
 def test_a_paragraph_level_gap_is_still_required() -> None:
@@ -2198,29 +2197,37 @@ def test_a_paragraph_level_gap_is_still_required() -> None:
 # A footnote's own citation of its record: "The record is `…`" or "Full report: `…`".
 _CITATION = re.compile(r"(?:The record is|Full report:) \[?`(_artifacts/[\w./-]+\.json)`")
 
-README_ROWS: tuple[tuple[str, str], ...] = tuple(
-    sorted({(f.row, f.record) for f in FIGURES if f.doc == README and isinstance(f.where, Row)})
+BENCH_ROWS: tuple[tuple[str, str], ...] = tuple(
+    sorted({(f.row, f.record) for f in FIGURES if f.doc == BENCH and isinstance(f.where, Row)})
 )
 
 
-@pytest.mark.parametrize(("row", "record"), README_ROWS)
-def test_readme_row_marker_leads_to_its_own_records_footnote(row: str, record: str) -> None:
+def test_bench_rows_are_the_nine_pinned_rows() -> None:
+    """Bug caught: the BENCH_ROWS filter keys on the wrong doc, so the marker test below runs on zero rows and passes.
+    Nine: the six At a glance rows plus the z-image-base, qwen-image and flux1-krea-dev Benchmarks rows."""
+    assert len(BENCH_ROWS) == 9, BENCH_ROWS
+
+
+@pytest.mark.parametrize(("row", "record"), BENCH_ROWS)
+def test_bench_row_marker_leads_to_its_own_records_footnote(row: str, record: str) -> None:
     """Bug caught: a headline row whose marker sends the reader to another row's footnote (Z-Image ``1.31×⁵`` turned
     into ``1.31×⁶``, M06), or a footnote whose citation names another record (M04b)."""
     lines = [
         u
-        for u in paragraphs(_doc(README))
+        for u in paragraphs(_doc(BENCH))
         if u.lstrip().startswith("|") and u.strip("| ").startswith(row + " ")
     ]
-    assert len(lines) == 1, f"README row {row!r} occurs {len(lines)} times"
+    assert len(lines) == 1, f"benchmarks page row {row!r} occurs {len(lines)} times"
     markers = footnote_markers(lines[0])
-    assert markers, f"README row {row!r} has no footnote marker"
+    assert markers, f"benchmarks page row {row!r} has no footnote marker"
     for marker in markers:
-        notes = _footnote(README, marker)
-        assert notes, f"README row {row!r}: footnote {marker} is not defined"
+        notes = _footnote(BENCH, marker)
+        assert notes, f"benchmarks page row {row!r}: footnote {marker} is not defined"
         cited = _CITATION.findall(notes[0])
-        assert cited, f"README footnote {marker} has no 'The record is' or 'Full report:' citation"
-        assert set(cited) == {record}, f"README row {row!r} ({record}): footnote {marker} cites {cited}"
+        assert cited, f"benchmarks page footnote {marker} has no 'The record is' or 'Full report:' citation"
+        assert set(cited) == {record}, (
+            f"benchmarks page row {row!r} ({record}): footnote {marker} cites {cited}"
+        )
 
 
 # --- Install-time version stamps the docs quote ------------------------------------------------------------------
@@ -2260,7 +2267,7 @@ def test_stamp_claims_reads_commit_and_install_mark() -> None:
 # Docs that describe at least one install-time version string ("its install-time version string names commit …",
 # "its version string names no commit"). Typed from the docs, not derived from `stamp_claims`.
 STAMP_DOCS: tuple[str, ...] = (
-    README,
+    BENCH,
     COMPARISON,
     CALIBRATION,
     CMP_DEV,
@@ -2392,30 +2399,30 @@ RESTATED = "a restatement of the pinned "
 
 # "×" figures not pinned at their place: how many times each doc prints the value beyond its FIGURES places, and why.
 UNPINNED_TIMES: dict[tuple[str, str], tuple[int, str]] = {
-    (README, "1.3"): (
+    (BENCH, "1.3"): (
         2,
         "a prediction for untested chips (FLUX.2 likely 1.1–1.3× on M3 and M4, two chip rows)",
     ),
-    (README, "1.0"): (1, "a prediction for untested chips (FLUX.2 may approach 1.0× on M5)"),
-    (README, "2.68"): (
+    (BENCH, "1.0"): (1, "a prediction for untested chips (FLUX.2 may approach 1.0× on M5)"),
+    (BENCH, "2.68"): (
         5,
         "v0.5.0's withdrawn Klein base 9B figure, and Qwen-Image's headline (tables, the correction)",
     ),
-    (README, "1.37"): (4, RESTATED + "Klein base 9B headline (tables, the correction, footnote ²)"),
-    (README, "1.20"): (2, RESTATED + "Klein base 4B headline (tables, footnote ³)"),
-    (README, "1.62"): (2, RESTATED + "Krea headline (tables, footnote ⁷)"),
-    (README, "1.56"): (1, RESTATED + "Krea limit (headline table row)"),
-    (README, "1.30"): (
+    (BENCH, "1.37"): (4, RESTATED + "Klein base 9B headline (tables, the correction, footnote ²)"),
+    (BENCH, "1.20"): (2, RESTATED + "Klein base 4B headline (tables, footnote ³)"),
+    (BENCH, "1.62"): (2, RESTATED + "Krea headline (tables, footnote ⁷)"),
+    (BENCH, "1.56"): (1, RESTATED + "Krea limit (headline table row)"),
+    (BENCH, "1.30"): (
         6,
         RESTATED + "FLUX.1-dev headline (tables, footnote ⁶, the mechanism paragraph)",
     ),
-    (README, "1.32"): (3, RESTATED + "FLUX.1-dev limit (table cells, the mechanism paragraph)"),
-    (README, "1.57"): (4, RESTATED + "FLUX.1-dev history figure and the Krea gate-on/gate-off ratio"),
-    (README, "1.35"): (3, RESTATED + "Klein base 9B limit (footnote ²) and gating figure"),
-    (README, "1.02"): (1, RESTATED + "Klein base 9B compile-avoidance factor (the 1.01× to 1.02× range)"),
-    (README, "1.01"): (1, RESTATED + "Klein base 4B compile-avoidance factor (the 1.01× to 1.02× range)"),
-    (README, "1.19"): (1, RESTATED + "Klein base 4B limit (footnote ³)"),
-    (README, "1.22"): (1, RESTATED + "v0.6.0 Klein base 4B limit, 50/41 (the drift sentence)"),
+    (BENCH, "1.32"): (3, RESTATED + "FLUX.1-dev limit (table cells, the mechanism paragraph)"),
+    (BENCH, "1.57"): (4, RESTATED + "FLUX.1-dev history figure and the Krea gate-on/gate-off ratio"),
+    (BENCH, "1.35"): (3, RESTATED + "Klein base 9B limit (footnote ²) and gating figure"),
+    (BENCH, "1.02"): (1, RESTATED + "Klein base 9B compile-avoidance factor (the 1.01× to 1.02× range)"),
+    (BENCH, "1.01"): (1, RESTATED + "Klein base 4B compile-avoidance factor (the 1.01× to 1.02× range)"),
+    (BENCH, "1.19"): (1, RESTATED + "Klein base 4B limit (footnote ³)"),
+    (BENCH, "1.22"): (1, RESTATED + "v0.6.0 Klein base 4B limit, 50/41 (the drift sentence)"),
     (COMPARISON, "1.20"): (1, RESTATED + "Klein base 4B headline (factors need not multiply)"),
     (COMPARISON, "1.19"): (1, RESTATED + "Klein base 4B limit"),
     (COMPARISON, "1.37"): (1, RESTATED + "Klein base 9B headline (factors need not multiply)"),
@@ -2443,6 +2450,27 @@ UNPINNED_TIMES: dict[tuple[str, str], tuple[int, str]] = {
 
 def _swept_text(doc: str) -> str:
     return _GENERATED.sub("", _doc(doc))
+
+
+def test_readme_prints_no_speedup_figure() -> None:
+    """Bug caught: someone puts "about 2.7× faster" in the README with no record, gaps or limit beside it. The README
+    has no FIGURES entry, so it is not in SCOPED_DOCS and the pinned-or-listed check above never reads it."""
+    assert _TIMES.findall(_swept_text(README)) == []
+
+
+# Any "N×" or "Nx" multiplier, whole or decimal. "512x512", "0.23.x", "GHSA-5x8w" and ":.2f}×" do not match.
+_ANY_TIMES = re.compile(r"(?<![\d.×])(\d+(?:\.\d+)?)[×x](?![\dA-Za-z])")
+# The README and the two pages that took its prose print no speedup: every figure is on the benchmarks page.
+FIGURE_FREE_DOCS = (README, "docs/how-it-works.md", "docs/limitations.md")
+
+
+@pytest.mark.parametrize("doc", FIGURE_FREE_DOCS)
+def test_figure_free_doc_prints_no_times_figure(doc: str) -> None:
+    """Bug caught: "about 3× faster" in the README, "about 1.26× faster" in docs/limitations.md or "1.5x faster"
+    in docs/how-it-works.md. ``_TIMES`` needs a decimal and a "×" and reads only the README, so all three pass the
+    check above. The whole text is read, generated blocks included, as PyPI and GitHub show it."""
+    found = [m.group(0) for m in _ANY_TIMES.finditer(_doc(doc))]
+    assert found == [], f"{doc} prints multiplier figures: {found}"
 
 
 def _pinned_times(doc: str) -> Counter[str]:

@@ -34,7 +34,7 @@ R4 = "_artifacts/sweeps/z-image-base_2026-05-31.json"
 R5 = "_artifacts/sweeps/flux1-krea-dev_2026-09-05.json"
 RECORDS = (R1, R3, R4, R5)
 
-README = "README.md"
+BENCH = "docs/benchmarks.md"
 CALIBRATION = "docs/calibration.md"
 QWEN = "docs/variants/qwen-image.md"
 QWEN_2512 = "docs/variants/qwen-image-2512.md"
@@ -120,7 +120,7 @@ CALIBRATION_R1_SKIPS = r"gave {} / {} / {} / {} skips at 0\.15 / 0\.20 / 0\.25 /
 CALIBRATION_R1_SSIM = r"at 0\.15 / 0\.20 / 0\.25 / 0\.30, SSIM {} / {} / {} / {}, longest streaks"
 QWEN_CFG_R1_FIRST = r"0\.15 -> {} of 48 active steps skipped, SSIM {}, longest streak {n};"
 QWEN_CFG_R1_COMMENT = r"\({} at 0\.20, {} at 0\.25, {} at 0\.30\); {}/48 active steps skipped at 0\.30"
-README_R5 = r"\(SSIM {} at 0\.30, {} at 0\.35; record:"
+BENCH_R5 = r"\(SSIM {} at 0\.30, {} at 0\.35; record:"
 KREA_CFG_R5_REST = r"; {} at 0\.35, {} at 0\.40, {} at 0\.60, {} at 0\.80\. The knee is sharp"
 
 
@@ -133,10 +133,10 @@ FIGURES: tuple[Case, ...] = (
     _at(QWEN, R1, SSIM, 3, "0.20", "0.980", r"`rel_l1_thresh=0\.20`, which now gives {n} skips at {f}\."),
     *_listed(CALIBRATION, R1, SKIPPED, 0, CALIBRATION_R1_SKIPS, R1_SKIPS),
     *_listed(CALIBRATION, R1, SSIM, 3, CALIBRATION_R1_SSIM, R1_SSIM),
-    _at(README, R1, SSIM, 3, "0.30", "0.967", r"SSIM {f} vs vanilla — the largest gain of any variant"),
-    _at(README, R1, SKIPPED, 0, "0.30", "33", r"it skips {f} of 48 active steps for \*\*2\.68× combined\*\*"),
+    _at(BENCH, R1, SSIM, 3, "0.30", "0.967", r"SSIM {f} vs vanilla — the largest gain of any variant"),
+    _at(BENCH, R1, SKIPPED, 0, "0.30", "33", r"it skips {f} of 48 active steps for \*\*2\.68× combined\*\*"),
     _at(
-        README,
+        BENCH,
         R1,
         SKIPPED,
         0,
@@ -146,7 +146,7 @@ FIGURES: tuple[Case, ...] = (
         r"operating point \({f} skips at SSIM {n} in the same record\)",
     ),
     _at(
-        README,
+        BENCH,
         R1,
         SSIM,
         3,
@@ -167,7 +167,7 @@ FIGURES: tuple[Case, ...] = (
     *_rows(QWEN_2512, R3, SKIPPED, 0, "Skipped", R3_SKIPS),
     _at(QWEN_2512, R3, SKIPPED, 0, "0.25", "29", r"\(the sweep counted {f} at this recipe\)"),
     _at(
-        README,
+        BENCH,
         R3,
         SKIPPED,
         0,
@@ -177,7 +177,7 @@ FIGURES: tuple[Case, ...] = (
         r"prompt at that recipe: {f} of 48 active steps skipped at SSIM {n} against plain mflux",
     ),
     _at(
-        README,
+        BENCH,
         R3,
         SSIM,
         3,
@@ -186,7 +186,7 @@ FIGURES: tuple[Case, ...] = (
         r"`rel_l1_thresh=0\.25`, set from its threshold sweep on the red-apple "
         r"prompt at that recipe: {n} of 48 active steps skipped at SSIM {f} against plain mflux",
     ),
-    _at(README, R3, SSIM, 3, "0.30", "0.947", r"The original checkpoint's 0\.30 falls to SSIM {f} on 2512\."),
+    _at(BENCH, R3, SSIM, 3, "0.30", "0.947", r"The original checkpoint's 0\.30 falls to SSIM {f} on 2512\."),
     _at(CALIBRATION, R3, SKIPPED, 0, "0.25", "29", r"skipped {f} of 48 active steps at the 0\.25 default"),
     *_triples(QWEN_2512_CFG, R3, 4, R3_SKIPS, R3_SSIM_4DP),
     _at(QWEN_2512_CFG, R3, SSIM, 4, "0.30", "0.9470", r"falls below the floor on this checkpoint \({f}\)"),
@@ -222,7 +222,7 @@ FIGURES: tuple[Case, ...] = (
         r"SSIM {f} vs vanilla on this prompt; that SSIM comes from the threshold",
     ),
     _at(
-        README,
+        BENCH,
         R4,
         SSIM,
         3,
@@ -241,7 +241,7 @@ FIGURES: tuple[Case, ...] = (
         KREA, R5, SKIPPED, 0, "0.30", "10", r"0\.30 holds SSIM {n} while skipping {f} of the 26 active steps"
     ),
     _at(KREA, R5, SKIPPED, 0, "0.80", "18", r"at 0\.80, where {f} skipped steps out of 28 give at most"),
-    *_listed(README, R5, SSIM, 3, README_R5, "0.30=0.990 0.35=0.890"),
+    *_listed(BENCH, R5, SSIM, 3, BENCH_R5, "0.30=0.990 0.35=0.890"),
     _at(
         KREA_CFG,
         R5,

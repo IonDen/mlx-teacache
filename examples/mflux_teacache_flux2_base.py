@@ -5,14 +5,14 @@ faster", "non-distilled FLUX.2 Apple Silicon".
 
 Expected output: writes `flux2_base_teacache.webp` next to this
 script. Prints the TeaCache skip counts. For measured speedups and
-skip counts at this recipe, see the README benchmarks.
+skip counts at this recipe, see docs/benchmarks.md.
 
 Run with:
     uv run python examples/mflux_teacache_flux2_base.py
 
 Use the BASE (non-distilled) Flux2Klein variant — the distilled
 4-8 step Klein defaults do NOT engage the polynomial gate by
-design; see README 'Benchmarks → How the speedup happens'.
+design; see docs/benchmarks.md 'How the speedup happens'.
 """
 
 from pathlib import Path

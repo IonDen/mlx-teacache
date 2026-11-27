@@ -45,7 +45,7 @@ Recipe: 50 steps, guidance 4.0, q4, 672×896, seed 42, text encoder freed once t
 
 ### Notes
 
-Footnote ¹ in the README says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. The record is `_artifacts/v0.11.0_bench_qwen_image.json`: uncommitted changes (no file list), no MLX version (MLX 0.31.2 per the lock file at 1536f28), no date field and no threshold or checkpoint field. mflux doesn't compile Qwen's prediction step, and almost all of the speedup there is step-skipping.
+Footnote ¹ on the [benchmarks page](../benchmarks.md#benchmarks) says what the record behind this variant's 2.68× multi-run speedup shows and does not show, and which mflux version it holds for. The record is `_artifacts/v0.11.0_bench_qwen_image.json`: uncommitted changes (no file list), no MLX version (MLX 0.31.2 per the lock file at 1536f28), no date field and no threshold or checkpoint field. mflux doesn't compile Qwen's prediction step, and almost all of the speedup there is step-skipping.
 
 On this run the gate skips 26 of 50 steps. Unlike the other models on this page, a few of those skips come two in a row through the middle of the schedule, though never more than two consecutive. A and B keep the same player, pose, sun and court; B redraws the court lines and drops the second net post behind her. The stock 4-bit build leaves a light speckle, sweat-like texture on her shoulder, not the heavier grain the variant page describes at its default recipe.
 

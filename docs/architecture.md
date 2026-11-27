@@ -1,6 +1,6 @@
 # Architecture
 
-How `mlx-teacache` is put together, for anyone reading the source or adding a variant. The user-facing "How it works" summary lives in the [README](../README.md#how-it-works); this page is the contributor's map.
+How `mlx-teacache` is put together, for anyone reading the source or adding a variant. The user-facing "How it works" summary lives on the [how-it-works page](how-it-works.md); this page is the contributor's map.
 
 The whole library is one idea applied per model: run the expensive transformer body only on the steps that matter, reuse the previous step's body output on the rest, and decide which is which with a small polynomial gate. Everything below is the machinery that makes that safe to drop into mflux and easy to extend.
 

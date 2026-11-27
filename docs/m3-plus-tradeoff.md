@@ -100,7 +100,7 @@ in an issue or a PR, follow the protocol below.
 ## Benchmark protocol for community numbers
 
 This is the standard we ask for when a submitted number is going to be compared
-against the numbers already in this repo's README or `COMPARISON.md`. It applies
+against the numbers already on the [benchmarks page](benchmarks.md) or in `COMPARISON.md`. It applies
 whether you use `scripts/bench_speedup.py` or your own timing harness.
 
 - Report the environment: chip (`sysctl -n machdep.cpu.brand_string`), macOS

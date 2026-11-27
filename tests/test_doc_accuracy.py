@@ -13,6 +13,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _STALE_1_48X_TARGETS = (
     "docs/variants/flux1-dev.md",
     "README.md",
+    "docs/benchmarks.md",
     "tests/test_image_quality_flux1.py",
 )
 

@@ -1,7 +1,7 @@
 """Doc-to-artifact consistency for the committed FLUX.1-dev benchmark.
 
 CLAUDE.md requires every user-facing speedup claim to be backed by a committed
-benchmark. This module pins the README's FLUX.1-dev headline row (speedup, skip
+benchmark. This module pins the benchmarks page's FLUX.1-dev headline row (speedup, skip
 count, per-condition seconds) to the committed ``bench_speedup.py`` report so the
 number can never drift from the artifact that produced it.
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FLUX1_DEV_BENCH = _REPO_ROOT / "_artifacts" / "v0.10.0_bench_flux1_dev.json"
-_README = _REPO_ROOT / "README.md"
+_BENCH = _REPO_ROOT / "docs" / "benchmarks.md"
 
 _RUN_HINT = (
     "uv run python scripts/bench_speedup.py --variant flux1-dev "
@@ -35,7 +35,7 @@ def bench_headline(report: dict) -> dict:
     """Canonical headline figures derived from a ``bench_speedup.py`` report.
 
     Pure so the rounding/median rules are testable without the filesystem.
-    Returns the exact values the README prints:
+    Returns the exact values the benchmarks page prints:
       ``speedup_x``  median wall-clock ratio, 2 dp (the ``1.46`` in ``1.46×``)
       ``skipped``    median per-rep skipped-step count (the ``6`` in ``6 / 25``)
       ``steps``      ``num_inference_steps`` (the ``25`` denominator)
@@ -62,18 +62,18 @@ def _load_bench() -> dict:
 
 
 def _flux1_dev_benchmark_row() -> list[str]:
-    """Cells of the README Benchmarks-table row for ``flux1-dev``.
+    """Cells of the benchmarks page Benchmarks-table row for ``flux1-dev``.
 
     Disambiguated from the Supported-models table row (same leading cell) by
     requiring the 7-column shape with a numeric Steps cell.
     """
-    for line in _README.read_text().splitlines():
+    for line in _BENCH.read_text().splitlines():
         s = line.strip()
         if s.startswith("| `flux1-dev`"):
             cells = [c.strip() for c in s.strip("|").split("|")]
             if len(cells) >= 7 and cells[1].isdigit():
                 return cells
-    raise AssertionError("No `flux1-dev` row found in the README Benchmarks table")
+    raise AssertionError("No `flux1-dev` row found in the Benchmarks table of the benchmarks page")
 
 
 # --- pure-helper unit tests (RED first: bench_headline is undefined) ---------
@@ -119,7 +119,7 @@ def test_bench_headline_median_skip_picks_middle_value():
     assert bench_headline(report)["skipped"] == 5
 
 
-# --- consistency tests (RED until the artifact exists + README reconciled) ---
+# --- consistency tests (RED until the artifact exists + the benchmarks page reconciled) ---
 
 
 def test_flux1_dev_bench_artifact_is_committed_and_valid():
@@ -134,8 +134,8 @@ def test_flux1_dev_bench_artifact_is_committed_and_valid():
     assert len(report["skipped_counts"]) == reps, "per-rep skip telemetry required"
 
 
-def test_readme_benchmark_row_matches_committed_artifact():
-    """Bug: the README's FLUX.1-dev Benchmarks row drifts from the current record (v0.18.0, mflux 0.24.0) or
+def test_bench_benchmark_row_matches_committed_artifact():
+    """Bug: the benchmarks page's FLUX.1-dev Benchmarks row drifts from the current record (v0.18.0, mflux 0.24.0) or
     keeps quoting the older v0.10.0 run as the current figure."""
     h = bench_headline(_load_flux1_dev_v018_bench())
     cells = _flux1_dev_benchmark_row()
@@ -174,7 +174,7 @@ def test_flux1_dev_bench_artifact_is_meaningful():
 
 # --- qwen-image ---------------------------------------------------------------
 # Qwen joined the bench harness in v0.10.0 and was re-benched in v0.11.0 on the
-# guarded harness with the text encoders freed. Its README row carries the largest
+# guarded harness with the text encoders freed. Its benchmarks-page row carries the largest
 # speedup in the table, so it gets the same artifact pin as the flux1-dev row.
 
 _QWEN_BENCH = _REPO_ROOT / "_artifacts" / "v0.11.0_bench_qwen_image.json"
@@ -185,18 +185,18 @@ def _load_qwen_bench() -> dict:
 
 
 def _qwen_benchmark_row() -> list[str]:
-    """Cells of the README Benchmarks-table row for ``qwen-image``.
+    """Cells of the benchmarks page Benchmarks-table row for ``qwen-image``.
 
     Disambiguated from the Supported-models row (same leading cell) by the
     7-column shape with a numeric Steps cell.
     """
-    for line in _README.read_text().splitlines():
+    for line in _BENCH.read_text().splitlines():
         s = line.strip()
         if s.startswith("| `qwen-image`"):
             cells = [c.strip() for c in s.strip("|").split("|")]
             if len(cells) >= 7 and cells[1].isdigit():
                 return cells
-    raise AssertionError("No `qwen-image` row found in the README Benchmarks table")
+    raise AssertionError("No `qwen-image` row found in the Benchmarks table of the benchmarks page")
 
 
 def test_qwen_bench_artifact_is_committed_and_valid():
@@ -206,7 +206,7 @@ def test_qwen_bench_artifact_is_committed_and_valid():
     assert report["schema_version"] == 3
     assert report["variant"] == "qwen"
     assert report["chunk_order"] == "rep-outer"
-    assert report["memory_saver"] is True, "the README's 24.1 GB peak is the MemorySaver figure"
+    assert report["memory_saver"] is True, "the benchmarks page's 24.1 GB peak is the MemorySaver figure"
     assert report["num_inference_steps"] == 50
     assert report["height"] == 768 and report["width"] == 768, (
         "qwen benches at its pinned 768x768, not the shared 512x512 recipe"
@@ -218,8 +218,8 @@ def test_qwen_bench_artifact_is_committed_and_valid():
     assert len(report["skipped_counts"]) == reps
 
 
-def test_readme_qwen_row_matches_committed_artifact():
-    """RED if the README's qwen numbers drift from the committed report."""
+def test_bench_qwen_row_matches_committed_artifact():
+    """RED if the benchmarks page's qwen numbers drift from the committed report."""
     h = bench_headline(_load_qwen_bench())
     cells = _qwen_benchmark_row()
     assert int(cells[1]) == h["steps"]
@@ -244,7 +244,7 @@ def test_qwen_streak_stays_under_the_runaway_cap():
 
 def test_qwen_bench_artifact_is_meaningful():
     """Schema validity is not enough: a corrupt artifact with all-zero skips and
-    a sub-1 speedup, with the README synced to match, passes every other qwen
+    a sub-1 speedup, with the benchmarks page synced to match, passes every other qwen
     test. Pin the *meaning* — the headline is a real speedup and the cache
     actually engages. RED on a dormant-cache or slower-than-vanilla artifact."""
     report = _load_qwen_bench()
@@ -270,15 +270,15 @@ def _load_krea_bench() -> dict:
 
 
 def _krea_benchmark_row() -> list[str]:
-    """Cells of the README Benchmarks-table row for ``flux1-krea-dev`` (7 columns,
+    """Cells of the benchmarks page Benchmarks-table row for ``flux1-krea-dev`` (7 columns,
     numeric Steps cell; the Supported-models row shares the leading cell)."""
-    for line in _README.read_text().splitlines():
+    for line in _BENCH.read_text().splitlines():
         s = line.strip()
         if s.startswith("| `flux1-krea-dev`"):
             cells = [c.strip() for c in s.strip("|").split("|")]
             if len(cells) >= 7 and cells[1].isdigit():
                 return cells
-    raise AssertionError("No `flux1-krea-dev` row found in the README Benchmarks table")
+    raise AssertionError("No `flux1-krea-dev` row found in the Benchmarks table of the benchmarks page")
 
 
 def test_krea_bench_artifact_is_committed_and_valid():
@@ -298,7 +298,7 @@ def test_krea_bench_artifact_is_committed_and_valid():
     assert len(report["wrapper_loop_peak_memory_gb"]) == reps
 
 
-def test_readme_krea_row_matches_committed_artifact():
+def test_bench_krea_row_matches_committed_artifact():
     h = bench_headline(_load_krea_bench())
     cells = _krea_benchmark_row()
     assert int(cells[1]) == h["steps"]
@@ -332,17 +332,17 @@ _KLEIN_BASE_SKIPS = {"flux2-klein-base-4b": 8, "flux2-klein-base-9b": 13}
 
 
 def _klein_base_row(variant_id: str) -> list[str]:
-    for line in _README.read_text().splitlines():
+    for line in _BENCH.read_text().splitlines():
         s = line.strip()
         if s.startswith(f"| `{variant_id}` (CFG)"):
             cells = [c.strip() for c in s.strip("|").split("|")]
             if len(cells) >= 7 and cells[1].isdigit():
                 return cells
-    raise AssertionError(f"No `{variant_id}` (CFG) row found in the README Benchmarks table")
+    raise AssertionError(f"No `{variant_id}` (CFG) row found in the Benchmarks table of the benchmarks page")
 
 
 def test_klein_base_bench_artifacts_are_committed_at_the_canonical_recipe():
-    """Bug: the README cites a Klein base report that is missing, from another recipe, or run condition-outer."""
+    """Bug: the benchmarks page cites a Klein base report that is missing, from another recipe, or run condition-outer."""
     for variant_id, path in _KLEIN_BASE_BENCH.items():
         assert path.exists(), f"missing {path}"
         report = json.loads(path.read_text())
@@ -355,8 +355,8 @@ def test_klein_base_bench_artifacts_are_committed_at_the_canonical_recipe():
         assert max(report["max_consecutive_skips"]) == 1
 
 
-def test_readme_klein_base_rows_match_committed_artifacts():
-    """Bug: the README's Klein base rows keep the pre-0.12 numbers (1.22x, 9 / 50) after the re-bench."""
+def test_bench_page_klein_base_rows_match_committed_artifacts():
+    """Bug: the benchmarks page's Klein base rows keep the pre-0.12 numbers (1.22x, 9 / 50) after the re-bench."""
     for variant_id, path in _KLEIN_BASE_BENCH.items():
         h = bench_headline(json.loads(path.read_text()))
         cells = _klein_base_row(variant_id)
@@ -368,10 +368,10 @@ def test_readme_klein_base_rows_match_committed_artifacts():
 
 
 def test_klein_base_ssim_claims_match_the_committed_record():
-    """Bug: the README footnotes or variant pages quote an SSIM that no committed file backs, or that drifts from
-    the record computed on the v0.12.0 bench images."""
+    """Bug: the benchmarks-page footnotes or variant pages quote an SSIM that no committed file backs, or that
+    drifts from the record computed on the v0.12.0 bench images."""
     record = json.loads((_REPO_ROOT / "_artifacts" / "v0.12.0_klein_base_ssim.json").read_text())
-    readme = _README.read_text()
+    bench = _BENCH.read_text()
     for slug, page in (
         ("klein-base-4b", "flux2-klein-base-4b.md"),
         ("klein-base-9b", "flux2-klein-base-9b.md"),
@@ -379,15 +379,16 @@ def test_klein_base_ssim_claims_match_the_committed_record():
         entry = record["variants"][slug]
         assert (_REPO_ROOT / entry["bench_report"]).exists()
         quoted = f"SSIM {entry['ssim_gated_vs_vanilla']:.3f}"
-        assert quoted in readme, f"{quoted} ({slug}) not in README"
+        assert quoted in bench, f"{quoted} ({slug}) not on the benchmarks page"
         page_text = (_REPO_ROOT / "docs" / "variants" / page).read_text()
         assert f"{quoted} vs vanilla at this recipe" in page_text, f"{quoted} not on {page}"
 
 
 # --- FLUX.1-dev, v0.18.0 three-way re-bench (schema 4) -------------------------------------------------------------
-# Measured 2026-11-16 on the shared 512x512 recipe. This is the current record: the README Benchmarks row is pinned
-# to it (test_readme_benchmark_row_matches_committed_artifact above), and the tests below pin the record itself, so no
-# doc can quote a figure it does not hold. The v0.10.0 record stays as history (see the history test at the end).
+# Measured 2026-11-16 on the shared 512x512 recipe. This is the current record: the Benchmarks row on the benchmarks
+# page is pinned to it (test_bench_benchmark_row_matches_committed_artifact above), and the tests below pin the record
+# itself, so no doc can quote a figure it does not hold. The v0.10.0 record stays as history (see the history test
+# at the end).
 
 _FLUX1_DEV_V018_BENCH = _REPO_ROOT / "_artifacts" / "v0.18.0_bench_flux1_dev.json"
 
@@ -436,7 +437,7 @@ def test_flux1_dev_v018_speedup_is_within_the_skipped_step_limit():
     )
 
 
-def test_readme_flux1_dev_mechanism_cell_states_the_limit_from_the_record():
+def test_bench_page_flux1_dev_mechanism_cell_states_the_limit_from_the_record():
     """Bug: the Benchmarks row's mechanism cell states a step-skipping limit or skip count that is not the current
     record's (6 of 25 skipped, so at most about 1.32x, 25/19), e.g. after a re-bench changed the skip count."""
     report = _load_flux1_dev_v018_bench()
@@ -450,8 +451,8 @@ def test_readme_flux1_dev_mechanism_cell_states_the_limit_from_the_record():
 
 
 def test_flux1_dev_v018_skip_patterns_match_the_v0_10_record():
-    """Pins the README's "same skipped steps" claim between the two committed FLUX.1-dev records (v0.10.0 and
-    v0.18.0). Bug: one record is replaced by a run whose per-step skip pattern differs, and the README still says
+    """Pins the benchmarks page's "same skipped steps" claim between the two committed FLUX.1-dev records (v0.10.0 and
+    v0.18.0). Bug: one record is replaced by a run whose per-step skip pattern differs, and the benchmarks page still says
     both runs skipped the same steps."""
     old = json.loads(_FLUX1_DEV_BENCH.read_text())["skip_patterns"]
     assert _load_flux1_dev_v018_bench()["skip_patterns"] == old
@@ -487,18 +488,18 @@ def test_flux1_dev_v018_bench_artifact_names_its_provenance():
 
 # --- FLUX.1-dev history: the 1.57x run on mflux 0.18.0 (v0.10.0 record) --------------------------------------------
 
-_FLUX1_DEV_HISTORY_SPEEDUP = "1.57"  # the history figure the README keeps, as the docs state it
+_FLUX1_DEV_HISTORY_SPEEDUP = "1.57"  # the history figure the benchmarks page keeps, as the docs state it
 _FLUX1_DEV_HISTORY_PATH = "_artifacts/v0.10.0_bench_flux1_dev.json"
 _FLUX1_DEV_HISTORY_THRESHOLD_ROW = "0.20 (default), mflux 0.18.0"
 
 
-def test_readme_keeps_the_flux1_dev_history_figure_with_its_record():
-    """Bug: the README's FLUX.1-dev history (1.57x on mflux 0.18.0) silently drifts from its record, or is dropped
+def test_bench_page_keeps_the_flux1_dev_history_figure_with_its_record():
+    """Bug: the benchmarks page's FLUX.1-dev history (1.57x on mflux 0.18.0) silently drifts from its record, or is dropped
     from the Benchmarks footnote or the threshold table once the current row moved to the v0.18.0 record."""
     record = json.loads(_FLUX1_DEV_BENCH.read_text())
     assert f"{round(float(record['speedup_median']), 2):.2f}" == _FLUX1_DEV_HISTORY_SPEEDUP
     figure = f"{_FLUX1_DEV_HISTORY_SPEEDUP}×"
-    lines = [line.strip() for line in _README.read_text().splitlines()]
+    lines = [line.strip() for line in _BENCH.read_text().splitlines()]
 
     history = [line for line in lines if line.startswith(f"History, the {figure} run.")]
     assert len(history) == 1, (
@@ -518,12 +519,12 @@ def test_readme_keeps_the_flux1_dev_history_figure_with_its_record():
     assert rows[0][2].startswith(f"{figure} (`{_FLUX1_DEV_HISTORY_PATH}`)"), rows[0][2]
 
 
-_FLUX1_DEV_CURRENT_SPEEDUP = "1.30"  # the current figure the README states for mflux 0.24.0
+_FLUX1_DEV_CURRENT_SPEEDUP = "1.30"  # the current figure the benchmarks page states for mflux 0.24.0
 _FLUX1_DEV_CURRENT_PATH = "_artifacts/v0.18.0_bench_flux1_dev.json"
 _FLUX1_DEV_CURRENT_THRESHOLD_ROW = "**0.20 (default)**, mflux 0.24.0"
 
 
-def test_readme_current_threshold_row_matches_the_v0_18_record():
+def test_bench_page_current_threshold_row_matches_the_v0_18_record():
     """Bug: the threshold table's current FLUX.1-dev row (mflux 0.24.0) drifts from the v0.18.0 record (speedup or
     skipped steps), or still quotes the older 1.57x run and its v0.10.0 record, while the Benchmarks row has moved
     on."""
@@ -533,7 +534,7 @@ def test_readme_current_threshold_row_matches_the_v0_18_record():
     assert speedup == _FLUX1_DEV_CURRENT_SPEEDUP
     rows = [
         [c.strip() for c in line.strip().strip("|").split("|")]
-        for line in _README.read_text().splitlines()
+        for line in _BENCH.read_text().splitlines()
         if line.strip().startswith(f"| {_FLUX1_DEV_CURRENT_THRESHOLD_ROW} |")
     ]
     assert len(rows) == 1, (
